@@ -5,27 +5,53 @@ const corsHeaders = {
   'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
+// 2点間の距離(メートル)を計算する関数（ハヴァサインの公式）
+function getDistanceFromLatLonInM(lat1: number, lon1: number, lat2: number, lon2: number) {
+  const R = 6371e3; // 地球の半径 (メートル)
+  const dLat = (lat2 - lat1) * Math.PI / 180;
+  const dLon = (lon2 - lon1) * Math.PI / 180;
+  const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+            Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+            Math.sin(dLon/2) * Math.sin(dLon/2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+  return R * c;
+}
+
 serve(async (req) => {
   if (req.method === 'OPTIONS') {
     return new Response('ok', { headers: corsHeaders })
   }
 
   try {
-    // activeCampaigns（現在開催中のキャンペーンリスト）を受け取れるように拡張
-    const { base64Image, mimeType, isPremium, customName, activeCampaigns } = await req.json()
+    // ★ ユーザーの現在地 (userLat, userLng) を新しく受け取る
+    const { base64Image, mimeType, isPremium, customName, activeCampaigns, userLat, userLng } = await req.json()
     const apiKey = Deno.env.get('GEMINI_API_KEY')
 
     if (!apiKey) throw new Error('API Key is missing')
 
+    // ★ 位置情報によるキャンペーンの絞り込み
+    let validCampaigns = [];
+    if (activeCampaigns && activeCampaigns.length > 0) {
+      validCampaigns = activeCampaigns.filter((c: any) => {
+        // キャンペーンに位置指定がない（全国対象のコラボなど）場合は無条件で対象
+        if (!c.target_lat || !c.target_lng) return true;
+
+        // 位置指定があるが、ユーザーのGPSが取得できていない場合は対象外（弾く）
+        if (!userLat || !userLng) return false;
+
+        // 距離を計算し、指定半径(radius_meters)以内にいれば対象とする
+        const distance = getDistanceFromLatLonInM(userLat, userLng, c.target_lat, c.target_lng);
+        return distance <= (c.radius_meters || 100);
+      });
+    }
+
     let rarityInstructions = "画像のポテンシャルを分析し、以下のいずれかのレアリティ(rarity)を割り当ててください。\n・★★★★(シークレット)\n・☆☆☆☆(アルティメットレア)\n・☆☆☆(スーパーレア)\n・☆☆(レア)\n・☆(コモン)\n・D(ダスト)"
     let nameInstruction = "- name: 画像から連想される中二病っぽい、またはシュールでふざけた名前(15文字以内)"
-    let systemRoleContext = "あなたは「クソゲーカードゲーム」のパラメータ生成AIです。"
 
-    // ─── 【重要】スポンサー・地域キャンペーンの判定ロジック ───
     let campaignPrompt = ""
-    if (activeCampaigns && activeCampaigns.length > 0) {
+    if (validCampaigns.length > 0) {
       campaignPrompt = `現在、以下の特別キャンペーンが開催されています。
-${activeCampaigns.map((c: any) => `[ID: ${c.id}] キーワード: "${c.keyword}" -> 報酬カード名: "${c.reward_card_name}", 種類: "${c.campaign_type}"`).join('\n')}
+${validCampaigns.map((c: any) => `[ID: ${c.id}] キーワード: "${c.keyword}" -> 報酬カード名: "${c.reward_card_name}", 種類: "${c.campaign_type}"`).join('\n')}
 
 添付された画像が、上記いずれかのキャンペーンの「キーワード」に明確に合致している（その商品や場所が写っている）と判断できる場合、以下のルールを強制適用してください：
 1. JSONに "campaign_id" というキーを追加し、合致したキャンペーンのIDを値に設定してください（合致しない場合は null ）。
@@ -39,7 +65,7 @@ ${activeCampaigns.map((c: any) => `[ID: ${c.id}] キーワード: "${c.keyword}"
         rarityInstructions = "※レアリティ(rarity)は必ず「★★★★(シークレット)」または「☆☆☆☆(アルティメットレア)」にしてください。"
     }
 
-    const prompt = `${systemRoleContext}
+    const prompt = `あなたは「クソゲーカードゲーム」のパラメータ生成AIです。
 添付された画像を分析し、面白いカードとして以下のJSONフォーマットで出力してください。
 
 ${campaignPrompt}
@@ -55,40 +81,23 @@ ${nameInstruction}
 - spd: 10〜300の整数
 
 必ず正しいJSONのみを返し、マークダウン記号(\`\`\`json)は一切含めないでください。
-※キャンペーンに合致した場合は、必ず "campaign_id": "合致したID" をJSONに含めてください。含めない場合は "campaign_id": null としてください。`
+※キャンペーンに合致した場合は必ず "campaign_id": "合致したID" を含め、そうでない場合は "campaign_id": null としてください。`
 
     const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent?key=${apiKey}`
-
     const payload = {
-      contents: [{
-        parts: [
-          { text: prompt },
-          { inlineData: { mimeType: mimeType || 'image/jpeg', data: base64Image } }
-        ]
-      }],
+      contents: [{ parts: [ { text: prompt }, { inlineData: { mimeType: mimeType || 'image/jpeg', data: base64Image } } ] }],
       generationConfig: { temperature: 0.7, responseMimeType: "application/json" }
     }
 
-    const response = await fetch(geminiUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
-    })
-
+    const response = await fetch(geminiUrl, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) })
     const result = await response.json()
     const textOutput = result.candidates[0].content.parts[0].text
     const cleanJsonString = textOutput.replace(/```json/g, '').replace(/```/g, '').trim()
     const cardData = JSON.parse(cleanJsonString)
 
-    return new Response(JSON.stringify(cardData), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 200,
-    })
+    return new Response(JSON.stringify(cardData), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 })
 
   } catch (error: any) {
-    return new Response(JSON.stringify({ error: error.message }), {
-      headers: { ...corsHeaders, 'Content-Type': 'application/json' },
-      status: 400,
-    })
+    return new Response(JSON.stringify({ error: error.message }), { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 400 })
   }
 })
