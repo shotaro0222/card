@@ -1,7 +1,8 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator, Modal, SafeAreaView, ScrollView } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
+import { Send, RefreshCcw, X } from 'lucide-react-native';
 
 export default function ChatTradeScreen() {
   const [messages, setMessages] = useState<any[]>([]);
@@ -9,8 +10,6 @@ export default function ChatTradeScreen() {
   const [myCards, setMyCards] = useState<any[]>([]);
   const [myId, setMyId] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-
-  // トレードモーダル用
   const [isModalVisible, setModalVisible] = useState(false);
   const [selectedOfferCard, setSelectedOfferCard] = useState<any>(null);
   const [requestedCardId, setRequestedCardId] = useState<string>('');
@@ -18,7 +17,6 @@ export default function ChatTradeScreen() {
   useFocusEffect(
     useCallback(() => {
       initChat();
-      // リアルタイムリスナーの開始（簡易的なポーリング、またはSupabase Realtime）
       const interval = setInterval(fetchMessages, 3000);
       return () => clearInterval(interval);
     }, [])
@@ -28,7 +26,6 @@ export default function ChatTradeScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       setMyId(user.id);
-      // 自分のカードリストを取得（オファー用）
       const { data } = await supabase.from('cards').select('*').eq('player_id', user.id);
       if (data) setMyCards(data);
     }
@@ -36,100 +33,60 @@ export default function ChatTradeScreen() {
   };
 
   const fetchMessages = async () => {
-    const { data } = await supabase
-      .from('messages')
-      .select('*, profiles(player_name), cards(*)') // 送信者プロフィールと添付カードを結合
-      .order('created_at', { ascending: true })
-      .limit(50);
+    const { data } = await supabase.from('messages').select('*, profiles(player_name), cards(*)').order('created_at', { ascending: true }).limit(50);
     if (data) setMessages(data);
   };
 
-  // 📝 通常メッセージ送信
   const sendMessage = async () => {
     if (!inputText.trim()) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
-    await supabase.from('messages').insert([{
-      sender_id: user.id,
-      text: inputText,
-    }]);
-
+    await supabase.from('messages').insert([{ sender_id: user.id, text: inputText }]);
     setInputText('');
     fetchMessages();
   };
 
-  // 🤝 トレードオファー（カード添付）メッセージ送信
   const sendTradeOffer = async () => {
     if (!selectedOfferCard || !requestedCardId) {
-      Alert.alert('エラー', 'オファーするカードと、要求するカードを選択してください。');
+      Alert.alert('エラー', '提案するカードと、欲しいカードを選択してください。');
       return;
     }
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
-    // 要求カードの情報を取得
     const { data: reqCard } = await supabase.from('cards').select('card_name').eq('id', requestedCardId).single();
-
-    const offerText = `【トレードオファー】\n「${selectedOfferCard.card_name}」を出します。\n「${reqCard?.card_name || '指定カード'}」をください。`;
-
-    await supabase.from('messages').insert([{
-      sender_id: user.id,
-      text: offerText,
-      card_offer_id: selectedOfferCard.id, // オファーカードIDを添付
-    }]);
-
+    const offerText = `【トレード提案】\n「${selectedOfferCard.card_name}」を出します。\n「${reqCard?.card_name || '指定カード'}」と交換しませんか？`;
+    
+    await supabase.from('messages').insert([{ sender_id: user.id, text: offerText, card_offer_id: selectedOfferCard.id }]);
     setModalVisible(false);
     setSelectedOfferCard(null);
     setRequestedCardId('');
     fetchMessages();
   };
 
-  // ✅ トレードの承認（相手のオファーを受け入れる）
   const acceptTrade = async (message: any) => {
     if (!myId) return;
-    
-    // 相手が要求しているカードを自分が持っているか確認するための簡易ダイアログ
-    Alert.alert(
-      "トレードの承認",
-      "このトレード条件を受け入れ、カードを交換しますか？",
-      [
-        { text: "キャンセル", style: "cancel" },
-        { text: "交換する", onPress: async () => {
-            setLoading(true);
-            
-            // RPCを呼び出して安全に一括処理
-            const { data: success, error } = await supabase.rpc('execute_card_trade', {
-              target_message_id: message.id,
-              buyer_user_id: myId,
-              offered_card_id: message.card_offer_id,
-              requested_card_id: myCards[0]?.id // 簡略化のため、今回は手札の1枚目を自動照合（本来は対象のカードIDをセレクトさせる）
-            });
-
-            if (error || !success) {
-              Alert.alert('トレード失敗', 'カードの所有権条件が一致しないか、すでに取引が終了しています。');
-            } else {
-              Alert.alert('トレード成立！', 'カードの交換が完了しました。DECKを確認してください。');
-              initChat();
-            }
-            setLoading(false);
-        }}
-      ]
-    );
+    Alert.alert("交換の確認", "この条件でカードを交換しますか？", [
+      { text: "キャンセル", style: "cancel" },
+      { text: "交換する", onPress: async () => {
+          setLoading(true);
+          const { data: success, error } = await supabase.rpc('execute_card_trade', { target_message_id: message.id, buyer_user_id: myId, offered_card_id: message.card_offer_id, requested_card_id: myCards[0]?.id });
+          if (error || !success) Alert.alert('失敗', '条件が一致しないか、すでに取引済みです。');
+          else { Alert.alert('成立！', 'カードを交換しました。図鑑を確認してください。'); initChat(); }
+          setLoading(false);
+      }}
+    ]);
   };
 
   const renderMessage = ({ item }: { item: any }) => {
     const isMe = item.sender_id === myId;
     return (
       <View style={[styles.msgLine, isMe ? styles.myMsgLine : styles.oppMsgLine]}>
-        <Text style={styles.senderName}>{item.profiles?.player_name || '名無し司令官'}</Text>
-        <View style={[styles.msgBox, item.card_offer_id && styles.offerBox]}>
-          <Text style={styles.msgText}>{item.text}</Text>
-          
-          {/* トレードオファーボタンの表示（他人のオファーかつカードが添付されている場合） */}
+        {!isMe && <Text style={styles.senderName}>{item.profiles?.player_name || 'ゲスト'}</Text>}
+        <View style={[styles.msgBox, isMe ? styles.myMsgBox : styles.oppMsgBox, item.card_offer_id && styles.offerBox]}>
+          <Text style={[styles.msgText, isMe && styles.myMsgText]}>{item.text}</Text>
           {item.card_offer_id && !isMe && (
             <TouchableOpacity style={styles.acceptBtn} onPress={() => acceptTrade(item)}>
-              <Text style={styles.acceptBtnText}>🤝 オファーを受け入れる</Text>
+              <Text style={styles.acceptBtnText}>交換を受け入れる</Text>
             </TouchableOpacity>
           )}
         </View>
@@ -138,107 +95,119 @@ export default function ChatTradeScreen() {
   };
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>TRADE MARKET</Text>
+        <Text style={styles.headerSub}>ユーザー同士の交換広場</Text>
+      </View>
+
       <FlatList
         data={messages}
         keyExtractor={(item) => item.id}
         renderItem={renderMessage}
-        contentContainerStyle={{ padding: 15 }}
+        contentContainerStyle={{ padding: 16 }}
       />
+      {loading && <ActivityIndicator size="large" color="#3B82F6" style={styles.loader} />}
 
-      {loading && <ActivityIndicator size="large" color="#f43f5e" style={styles.loader} />}
-
-      {/* フッター入力エリア */}
+      {/* 入力エリア */}
       <View style={styles.inputArea}>
         <TouchableOpacity style={styles.offerBtn} onPress={() => setModalVisible(true)}>
-          <Text style={styles.offerBtnText}>🔄 トレード提案</Text>
+          <RefreshCcw color="#3B82F6" size={20} />
         </TouchableOpacity>
         <TextInput
           style={styles.input}
-          placeholder="作戦通信を入力..."
-          placeholderTextColor="#64748b"
+          placeholder="メッセージを入力..."
+          placeholderTextColor="#94A3B8"
           value={inputText}
           onChangeText={setInputText}
         />
         <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
-          <Text style={styles.sendBtnText}>送信</Text>
+          <Send color={inputText.trim() ? "#3B82F6" : "#CBD5E1"} size={24} />
         </TouchableOpacity>
       </View>
 
-      {/* トレードオファー作成モーダル */}
+      {/* トレード提案モーダル */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
-            <Text style={styles.modalHeader}>🤝 トレードオファーの作成</Text>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalHeader}>トレードの提案</Text>
+              <TouchableOpacity onPress={() => setModalVisible(false)}><X color="#64748B" size={24} /></TouchableOpacity>
+            </View>
 
-            <Text style={styles.label}>1. 自分が差し出すカードを選択</Text>
-            <ScrollView horizontal style={styles.cardSelector}>
+            <Text style={styles.label}>1. あなたが手放すカードを選択</Text>
+            <ScrollView horizontal style={styles.cardSelector} showsHorizontalScrollIndicator={false}>
               {myCards.map(c => (
                 <TouchableOpacity 
                   key={c.id} 
                   style={[styles.miniCard, selectedOfferCard?.id === c.id && styles.selectedMiniCard]}
                   onPress={() => setSelectedOfferCard(c)}
                 >
-                  <Text style={styles.white} numberOfLines={1}>{c.card_name}</Text>
+                  <Text style={[styles.miniCardText, selectedOfferCard?.id === c.id && styles.selectedMiniCardText]} numberOfLines={1}>{c.card_name}</Text>
                 </TouchableOpacity>
               ))}
             </ScrollView>
 
-            <Text style={styles.label}>2. 相手に要求するカードのIDを入力</Text>
+            <Text style={styles.label}>2. 欲しい相手のカードIDを入力</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="欲しいカードのUUIDを入力"
-              placeholderTextColor="#475569"
+              placeholder="UUIDを入力"
+              placeholderTextColor="#94A3B8"
               value={requestedCardId}
               onChangeText={setRequestedCardId}
             />
 
-            <View style={styles.modalActions}>
-              <TouchableOpacity style={styles.cancelBtn} onPress={() => setModalVisible(false)}>
-                <Text style={styles.white}>閉じる</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={styles.confirmBtn} onPress={sendTradeOffer}>
-                <Text style={styles.confirmBtnText}>オファーを送信</Text>
-              </TouchableOpacity>
-            </View>
+            <TouchableOpacity style={styles.confirmBtn} onPress={sendTradeOffer}>
+              <Text style={styles.confirmBtnText}>提案を送信する</Text>
+            </TouchableOpacity>
           </View>
         </View>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  msgLine: { marginBottom: 15, maxWidth: '80%' },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: { padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: '#FFFFFF' },
+  headerTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
+  headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '600' },
+  
+  msgLine: { marginBottom: 16, maxWidth: '80%' },
   myMsgLine: { alignSelf: 'flex-end', alignItems: 'flex-end' },
   oppMsgLine: { alignSelf: 'flex-start', alignItems: 'flex-start' },
-  senderName: { color: '#64748b', fontSize: 11, marginBottom: 4, fontWeight: 'bold' },
-  msgBox: { backgroundColor: '#1e293b', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#334155' },
-  offerBox: { borderColor: '#c084fc', backgroundColor: 'rgba(192, 132, 252, 0.05)' },
-  msgText: { color: '#f1f5f9', fontSize: 14, lineHeight: 20 },
-  inputArea: { flexDirection: 'row', padding: 10, borderTopWidth: 1, borderTopColor: '#1e293b', backgroundColor: '#0f172a', alignItems: 'center' },
-  input: { flex: 1, backgroundColor: '#020617', color: 'white', padding: 12, borderRadius: 8, marginHorizontal: 8, borderWidth: 1, borderColor: '#334155' },
-  sendBtn: { backgroundColor: '#b91c1c', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 8 },
-  sendBtnText: { color: 'white', fontWeight: 'bold' },
-  offerBtn: { backgroundColor: '#c084fc', paddingVertical: 12, paddingHorizontal: 10, borderRadius: 8 },
-  offerBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 12 },
-  acceptBtn: { backgroundColor: '#c084fc', padding: 8, borderRadius: 6, marginTop: 10, alignItems: 'center' },
-  acceptBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 12 },
+  senderName: { color: '#64748B', fontSize: 11, marginBottom: 6, fontWeight: '700', marginLeft: 4 },
+  
+  msgBox: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 20, maxWidth: '100%' },
+  myMsgBox: { backgroundColor: '#3B82F6', borderBottomRightRadius: 4 },
+  oppMsgBox: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.03, shadowRadius: 5 },
+  offerBox: { borderColor: '#F59E0B', borderWidth: 2, backgroundColor: '#FFFBEB' },
+  
+  msgText: { fontSize: 15, lineHeight: 22, color: '#0F172A' },
+  myMsgText: { color: '#FFFFFF' },
+  
+  inputArea: { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF', alignItems: 'center' },
+  input: { flex: 1, backgroundColor: '#F1F5F9', color: '#0F172A', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 24, fontSize: 15, marginHorizontal: 10 },
+  offerBtn: { padding: 10, backgroundColor: '#EFF6FF', borderRadius: 20 },
+  sendBtn: { padding: 10 },
+  
+  acceptBtn: { backgroundColor: '#F59E0B', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12, marginTop: 12, alignItems: 'center' },
+  acceptBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
   loader: { position: 'absolute', top: '50%', left: '50%', transform: [{translateX: -25}, {translateY: -25}] },
   
-  // モーダル関連
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.7)', justifyContent: 'center', padding: 20 },
-  modalContent: { backgroundColor: '#0f172a', padding: 20, borderRadius: 16, borderWidth: 1, borderColor: '#334155' },
-  modalHeader: { color: '#c084fc', fontSize: 18, fontWeight: 'bold', marginBottom: 20, textAlign: 'center' },
-  label: { color: '#94a3b8', fontSize: 13, fontWeight: 'bold', marginBottom: 10, marginTop: 10 },
-  cardSelector: { flexDirection: 'row', marginBottom: 15 },
-  miniCard: { backgroundColor: '#1e293b', padding: 10, borderRadius: 8, marginRight: 8, borderWidth: 1, borderColor: '#334155', minWidth: 100, alignItems: 'center' },
-  selectedMiniCard: { borderColor: '#c084fc', backgroundColor: 'rgba(192, 132, 252, 0.2)' },
-  modalInput: { backgroundColor: '#020617', color: 'white', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#334155' },
-  modalActions: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 25 },
-  cancelBtn: { backgroundColor: '#334155', padding: 12, borderRadius: 8, width: '45%', alignItems: 'center' },
-  confirmBtn: { backgroundColor: '#c084fc', padding: 12, borderRadius: 8, width: '45%', alignItems: 'center' },
-  confirmBtnText: { color: '#0f172a', fontWeight: 'bold' },
-  white: { color: 'white', fontWeight: 'bold' }
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.6)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFFFFF', padding: 24, borderTopLeftRadius: 24, borderTopRightRadius: 24, paddingBottom: 40 },
+  modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
+  modalHeader: { color: '#0F172A', fontSize: 18, fontWeight: '900' },
+  label: { color: '#475569', fontSize: 14, fontWeight: '800', marginBottom: 12 },
+  
+  cardSelector: { flexDirection: 'row', marginBottom: 24 },
+  miniCard: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, marginRight: 10, borderWidth: 1, borderColor: '#E2E8F0', minWidth: 110, alignItems: 'center' },
+  selectedMiniCard: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF', borderWidth: 2 },
+  miniCardText: { color: '#475569', fontWeight: '700', fontSize: 13 },
+  selectedMiniCardText: { color: '#2563EB', fontWeight: '800' },
+  
+  modalInput: { backgroundColor: '#F8FAFC', color: '#0F172A', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', fontSize: 15, marginBottom: 24 },
+  confirmBtn: { backgroundColor: '#0F172A', padding: 18, borderRadius: 16, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.1, shadowRadius: 8 },
+  confirmBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 }
 });
