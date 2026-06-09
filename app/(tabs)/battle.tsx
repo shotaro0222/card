@@ -4,19 +4,38 @@ import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { WebView } from 'react-native-webview';
-import { ShieldAlert, Users, Swords } from 'lucide-react-native';
+import { ShieldAlert, Users, Swords, Trophy, Activity } from 'lucide-react-native';
 
 export default function BattleScreen() {
-  const [battleLog, setBattleLog] = useState<any[]>([]); // 演出用のスタイル付きログを入れるためany型に拡張
+  const [battleLog, setBattleLog] = useState<any[]>([]);
   const [isBattling, setIsBattling] = useState(false);
   const [loadingBoss, setLoadingBoss] = useState(false);
   const [detectedBoss, setDetectedBoss] = useState<any>(null);
   const [isArModalVisible, setArModalVisible] = useState(false);
   const [arUrl, setArUrl] = useState<string | null>(null);
 
+  // 📊 【新規】ユーザーの累計戦績保持用ステート
+  const [playerStats, setPlayerStats] = useState({ totalWins: 0, bossDefeats: 0 });
+
   useFocusEffect(
-    useCallback(() => { checkNearbyBoss(); }, [])
+    useCallback(() => { 
+      checkNearbyBoss(); 
+      fetchPlayerStats(); // 戦績ロード
+    }, [])
   );
+
+  // 📊 プレイヤーの累計戦績をデータベースからロード
+  const fetchPlayerStats = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('profiles').select('total_wins, boss_defeats').eq('id', user.id).single();
+    if (data) {
+      setPlayerStats({
+        totalWins: data.total_wins,
+        bossDefeats: data.boss_defeats
+      });
+    }
+  };
 
   const checkNearbyBoss = async () => {
     setLoadingBoss(true);
@@ -52,7 +71,6 @@ export default function BattleScreen() {
     return R * c;
   };
 
-  // ⚔️ 【改善】同格プレイヤーマッチング＆PVP
   const startPvpBattle = async () => {
     setIsBattling(true);
     setBattleLog([]);
@@ -60,7 +78,6 @@ export default function BattleScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 自分の出撃カード取得
     const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true).single();
     if (!myCard) {
       Alert.alert('準備不足', '出撃中のカードがありません。「図鑑」タブからカードを出撃させてください。');
@@ -68,7 +85,6 @@ export default function BattleScreen() {
       return;
     }
 
-    // ★ 同格マッチング：自分の総合ステータス（status_total）の±25%以内の相手だけを抽出
     const minStatus = Math.floor(myCard.status_total * 0.75);
     const maxStatus = Math.floor(myCard.status_total * 1.25);
 
@@ -82,7 +98,7 @@ export default function BattleScreen() {
       .limit(20);
 
     if (!oppCards || oppCards.length === 0) {
-      Alert.alert('索敵中', '現在、あなたと同格のライバル司令官が見つかりませんでした。時間をおいて再度お試しください。');
+      Alert.alert('索敵中', '同格のライバルが見つかりませんでした。時間をおいて再度お試しください。');
       setIsBattling(false);
       return;
     }
@@ -91,7 +107,6 @@ export default function BattleScreen() {
     simulateBattle(myCard, oppCard, false);
   };
 
-  // 👹 エリアボス戦起動
   const startBossBattle = async () => {
     if (!detectedBoss) return;
     setIsBattling(true);
@@ -122,13 +137,11 @@ export default function BattleScreen() {
     simulateBattle(myCard, bossMonster, true);
   };
 
-  // 💥 【目玉機能】カードの格（レベル・レアリティ・攻撃力）によって演出を派手にするエフェクト生成装置
   const generateVisualLog = (attacker: any, defender: any, damage: number, skillUsed: string, turn: number) => {
     let prefix = '';
     let suffix = '';
     let isSpecialStyle = false;
 
-    // 1. 攻撃力やレベルによる派手さ判定
     if (attacker.status_atk >= 200 || attacker.level >= 15) {
       prefix = '🔥【限界突破】💥 ';
       suffix = ' 💥!!!';
@@ -138,10 +151,9 @@ export default function BattleScreen() {
       suffix = ' !';
     }
 
-    // 2. レアリティ（企業コラボカードやシークレットなど）による装飾追加
     if (attacker.rarity === 'CP' || attacker.rarity === 'P' || attacker.rarity === '★★★★') {
       prefix = `✨🌟 ${prefix}`;
-      suffix = `${suffix} 🌟✨\n(企業協賛の演出がフィールドを包む！)`;
+      suffix = `${suffix} 🌟✨\n(タイアップ特別演出が発動！)`;
       isSpecialStyle = true;
     }
 
@@ -151,7 +163,6 @@ export default function BattleScreen() {
     };
   };
 
-  // 🥊 バトルシミュレーション
   const simulateBattle = (p1: any, p2: any, isBossMode: boolean) => {
     let log: any[] = [];
     log.push({ text: `🏁 【対戦開始】\n${p1.card_name} (Lv.${p1.level}) \n   VS \n${p2.card_name} (Lv.${p2.level})`, isSpecial: true });
@@ -164,7 +175,6 @@ export default function BattleScreen() {
     let p2Hp = p2.status_hp;
 
     for (let turn = 1; turn <= 5; turn++) {
-      // 先攻攻撃
       let dmg1 = Math.max(1, first.status_atk - Math.floor(second.status_def / 2) + Math.floor(Math.random() * 10));
       if (first === p1) p2Hp -= dmg1; else p1Hp -= dmg1;
       log.push(generateVisualLog(first, second, dmg1, first.skill_name, turn));
@@ -172,7 +182,6 @@ export default function BattleScreen() {
       if (p1Hp <= 0) { winner = p2; break; }
       if (p2Hp <= 0) { winner = p1; break; }
 
-      // 後攻反撃
       let dmg2 = Math.max(1, second.status_atk - Math.floor(first.status_def / 2) + Math.floor(Math.random() * 10));
       if (second === p1) p2Hp -= dmg2; else p1Hp -= dmg2;
       log.push(generateVisualLog(second, first, dmg2, second.skill_name, turn));
@@ -187,7 +196,6 @@ export default function BattleScreen() {
       log.push({ text: `🏆 【試合終了】\n勝者：${winner.card_name}！`, isSpecial: true });
     }
 
-    // ログを時間差で流す演出
     let currentLogIndex = 0;
     const interval = setInterval(async () => {
       if (currentLogIndex < log.length) {
@@ -197,7 +205,6 @@ export default function BattleScreen() {
         clearInterval(interval);
         setIsBattling(false);
 
-        // バトル終了後の経験値・報酬処理
         if (winner === p1) {
           if (isBossMode) {
             await handleBossVictory();
@@ -205,41 +212,57 @@ export default function BattleScreen() {
             await handlePvpVictory(p1.id);
           }
         } else {
-          // 負けても救済として少しだけ経験値が入る
           await handlePvpLoss(p1.id);
         }
       }
     }, 800);
   };
 
-  // 🎉 PVP勝利時の経験値獲得処理
+  // 🎉 PVP勝利時 ＆ 【戦績カウントインクリメント】
   const handlePvpVictory = async (cardId: string) => {
-    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 120 }); // 勝利時120exp
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    // 1. データベース上のプレイヤーの累計勝利数を+1に更新
+    const newWins = playerStats.totalWins + 1;
+    await supabase.from('profiles').update({ total_wins: newWins }).eq('id', user.id);
+    setPlayerStats(prev => ({ ...prev, totalWins: newWins }));
+
+    // 2. 経験値の加算RPCの呼び出し
+    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 120 });
     if (!error && data[0]) {
       if (data[0].leveled_up) {
-        Alert.alert('🎉 レベルアップ!!!', `出撃カードが レベル ${data[0].new_level} に到達しました！全能力値が5%強化されました。`);
+        Alert.alert('🎉 レベルアップ!!!', `出撃カードが レベル ${data[0].new_level} に到達しました！能力値が強化されました。`);
       } else {
-        Alert.alert('作戦成功', 'バトルに勝利し、出撃カードが 120 の経験値を獲得しました。');
+        Alert.alert('作戦成功', 'バトルに勝利！120 EXPを獲得し、累計勝利数がカウントされました。');
       }
     }
   };
 
-  // 📈 PVP敗北時の救済経験値
   const handlePvpLoss = async (cardId: string) => {
-    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 30 }); // 敗北でも30exp
+    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 30 });
     if (!error && data[0] && data[0].leveled_up) {
-      Alert.alert('🎉 レベルアップ(粘りの成果)!', `カードが レベル ${data[0].new_level} に上がりました！`);
+      Alert.alert('🎉 レベルアップ!', `カードが レベル ${data[0].new_level} に成長しました！`);
     } else {
-      Alert.alert('敗北', 'バトルに敗れましたが、カードは経験値を 30 獲得して成長しました。');
+      Alert.alert('敗北', 'バトルに敗れましたが、カードは 30 EXP 獲得して成長しました。');
     }
   };
 
+  // 👑 ボス討伐成功時 ＆ 【ボス討伐カウントインクリメント】
   const handleBossVictory = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !detectedBoss) return;
+
+    // 1. データベース上のボス討伐数を+1に更新
+    const newBossDefeats = playerStats.bossDefeats + 1;
+    await supabase.from('profiles').update({ boss_defeats: newBossDefeats }).eq('id', user.id);
+    setPlayerStats(prev => ({ ...prev, bossDefeats: newBossDefeats }));
+
     const reward = detectedBoss.fixed_cards;
     if (!reward) return;
 
     await supabase.from('cards').insert([{
-      player_id: (await supabase.auth.getUser()).data.user?.id,
+      player_id: user.id,
       card_name: reward.card_name,
       image_url: reward.image_url,
       feature: reward.stats.feature || "エリアボス討伐の証",
@@ -255,7 +278,7 @@ export default function BattleScreen() {
       ar_model_url: reward.ar_model_url
     }]);
 
-    Alert.alert("👹 ボス討伐完了！", `限定カード「${reward.card_name}」を獲得しました！`, [
+    Alert.alert("👹 ボス討伐完了！", `限定カード「${reward.card_name}」を獲得！\n累計ボス討伐数が更新されました。`, [
       { text: "閉じる" },
       { text: "👁️ AR報酬を見る", onPress: () => { if (reward.ar_model_url) { setArUrl(reward.ar_model_url); setArModalVisible(true); } }, style: "destructive" }
     ]);
@@ -263,8 +286,23 @@ export default function BattleScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
+      
+      {/* 📊 【新規】最上部に配置された、老若男女に抜群に見やすいクリーンな戦績表示パネル */}
+      <View style={styles.statsDashboard}>
+        <View style={styles.statItem}>
+          <Trophy color="#F59E0B" size={24} />
+          <Text style={styles.statValue}>{playerStats.totalWins} 人</Text>
+          <Text style={styles.statLabel}>倒したライバル数</Text>
+        </View>
+        <View style={styles.divider} />
+        <View style={styles.statItem}>
+          <Activity color="#EF4444" size={24} />
+          <Text style={styles.statValue}>{playerStats.bossDefeats} 体</Text>
+          <Text style={styles.statLabel}>討伐したボス数</Text>
+        </View>
+      </View>
+
       <ScrollView style={styles.scrollArea}>
-        
         {/* 1. エリアボス */}
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📍 周辺のスポット限定ボス</Text>
@@ -290,9 +328,8 @@ export default function BattleScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>⚔️ 全国オンライン対戦（同格マッチング）</Text>
           <View style={styles.pvpPanel}>
-            <View style={styles.iconRow}><Users color="#3B82F6" size={28} style={{marginRight: 10}} /><Swords color="#3B82F6" size={28} /></View>
             <TouchableOpacity style={[styles.primaryButton, { backgroundColor: '#0F172A' }, isBattling && styles.disabledButton]} onPress={startPvpBattle} disabled={isBattling}>
-              <Text style={styles.btnText}>{isBattling ? '戦闘計算中...' : '同格の対戦相手を探す'}</Text>
+              <Text style={styles.btnText}>{isBattling ? '戦闘計算中...' : '対戦相手を自動検索'}</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -300,7 +337,7 @@ export default function BattleScreen() {
         {/* 3. バトルログ出力 */}
         {battleLog.length > 0 && (
           <View style={styles.logSection}>
-            <Text style={styles.logSectionTitle}>⚡ バルト実況・ログシミュレーター</Text>
+            <Text style={styles.logSectionTitle}>⚡ バトル実況・ログシミュレーター</Text>
             {battleLog.map((log, index) => (
               <View key={index} style={[styles.logBox, log.isSpecial && styles.specialLogBox]}>
                 <Text style={[styles.logText, log.isSpecial && styles.specialLogText]}>{log.text}</Text>
@@ -324,11 +361,19 @@ export default function BattleScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
+  
+  // 📊 ユニバーサルデザインに基づく超美麗な戦績ダッシュボード
+  statsDashboard: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#FFFFFF', paddingVertical: 18, marginHorizontal: 20, marginTop: 20, borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2 },
+  statItem: { alignItems: 'center', flex: 1 },
+  divider: { width: 1, height: 40, backgroundColor: '#E2E8F0' },
+  statValue: { color: '#0F172A', fontSize: 20, fontWeight: '900', marginTop: 6, fontFamily: 'monospace' },
+  statLabel: { color: '#64748B', fontSize: 11, fontWeight: '700', marginTop: 2 },
+
   scrollArea: { flex: 1 },
   section: { padding: 20 },
   sectionTitle: { color: '#64748B', fontSize: 13, fontWeight: '700', marginBottom: 12, letterSpacing: 1 },
   
-  bossPanel: { backgroundColor: '#FFF5F5', borderWidth: 1, borderColor: '#FEE2E2', padding: 20, borderRadius: 20, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 5 },
+  bossPanel: { backgroundColor: '#FFF5F5', borderWidth: 1, borderColor: '#FEE2E2', padding: 20, borderRadius: 20, alignItems: 'center' },
   sponsorTag: { color: '#EF4444', fontSize: 12, fontWeight: '800', backgroundColor: '#FFEEEE', paddingVertical: 4, paddingHorizontal: 12, borderRadius: 12 },
   bossName: { color: '#1E293B', fontSize: 20, fontWeight: '900', marginVertical: 15 },
   
@@ -336,7 +381,6 @@ const styles = StyleSheet.create({
   emptyText: { color: '#94A3B8', fontSize: 13, textAlign: 'center', marginTop: 10, fontWeight: '600', lineHeight: 20 },
   
   pvpPanel: { backgroundColor: '#FFFFFF', padding: 24, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
-  iconRow: { flexDirection: 'row', marginBottom: 20 },
   
   primaryButton: { backgroundColor: '#3B82F6', width: '100%', height: 55, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 3 },
   disabledButton: { backgroundColor: '#CBD5E1', shadowOpacity: 0 },
