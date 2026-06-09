@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Layers, Swords, Bell, ShoppingCart } from 'lucide-react-native'; // ShoppingCartを追加
+import { Home, Layers, Swords, Bell, ShoppingCart, MessageSquare } from 'lucide-react-native'; // MessageSquareを追加
 
 export default function TabLayout() {
   return (
@@ -14,8 +14,9 @@ export default function TabLayout() {
       <Tabs.Screen name="deck" options={{ title: 'DECK', tabBarIcon: ({ color }) => <Layers color={color} /> }} />
       <Tabs.Screen name="battle" options={{ title: 'ARENA', tabBarIcon: ({ color }) => <Swords color={color} /> }} />
       <Tabs.Screen name="events" options={{ title: 'EVENTS', tabBarIcon: ({ color }) => <Bell color={color} /> }} />
-      {/* SHOPタブを追加 */}
       <Tabs.Screen name="shop" options={{ title: 'SHOP', tabBarIcon: ({ color }) => <ShoppingCart color={color} /> }} />
+      {/* チャット・トレードタブを追加 */}
+      <Tabs.Screen name="chat" options={{ title: 'TRADE', tabBarIcon: ({ color }) => <MessageSquare color={color} /> }} />
     </Tabs>
   );
 }
