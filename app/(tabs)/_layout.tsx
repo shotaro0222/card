@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Layers, Swords } from 'lucide-react-native';
+import { Home, Layers, Swords, Bell } from 'lucide-react-native'; // Bellを追加
 
 export default function TabLayout() {
   return (
@@ -21,6 +21,11 @@ export default function TabLayout() {
       <Tabs.Screen 
         name="battle" 
         options={{ title: 'ARENA', tabBarIcon: ({ color }) => <Swords color={color} /> }} 
+      />
+      {/* イベントタブを追加 */}
+      <Tabs.Screen 
+        name="events" 
+        options={{ title: 'EVENTS', tabBarIcon: ({ color }) => <Bell color={color} /> }} 
       />
     </Tabs>
   );
