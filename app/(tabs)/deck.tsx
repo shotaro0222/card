@@ -18,7 +18,13 @@ export default function DeckScreen() {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { data, error } = await supabase.from('cards').select('*').eq('player_id', user.id).order('is_active', { ascending: false }).order('created_at', { ascending: false });
+    const { data, error } = await supabase
+      .from('cards')
+      .select('*')
+      .eq('player_id', user.id)
+      .order('is_active', { ascending: false })
+      .order('created_at', { ascending: false });
+      
     if (!error && data) setCards(data);
     setLoading(false);
   };
@@ -36,43 +42,61 @@ export default function DeckScreen() {
     setArModalVisible(true);
   };
 
-  const renderCard = ({ item }: { item: any }) => (
-    <View style={[styles.card, item.is_active && styles.activeCard, item.is_fixed && styles.sponsorCard]}>
-      <View style={styles.cardHeader}>
-        <Text style={styles.cardName} numberOfLines={1}>
-          {item.is_fixed ? '🌟 ' : ''}{item.card_name}
-        </Text>
-        <View style={styles.rarityBadge}>
-          <Text style={styles.rarityText}>{item.rarity}</Text>
+  const renderCard = ({ item }: { item: any }) => {
+    // 1レベルごとに必要な経験値（レベル × 100）
+    const nextLevelExp = item.level * 100;
+    // 進行バーの割合計算（安全に0〜100%に収める）
+    const progressPercent = Math.min(100, Math.max(0, (item.exp / nextLevelExp) * 100));
+
+    return (
+      <View style={[styles.card, item.is_active && styles.activeCard, item.is_fixed && styles.sponsorCard]}>
+        <View style={styles.cardHeader}>
+          <Text style={styles.cardName} numberOfLines={1}>
+            {item.is_fixed ? '🌟 ' : ''}{item.card_name}
+          </Text>
+          <div style={styles.rarityBadge}>
+            <Text style={styles.rarityText}>{item.rarity}</Text>
+          </div>
         </View>
-      </View>
-      
-      <Image source={{ uri: item.image_url }} style={styles.cardImage} />
-      
-      <Text style={styles.skillText}>必殺技: {item.skill_name}</Text>
-      
-      <View style={styles.statsRow}>
-        <View style={styles.statBox}><Text style={styles.statLabel}>HP</Text><Text style={styles.statValue}>{item.status_hp}</Text></View>
-        <View style={styles.statBox}><Text style={styles.statLabel}>ATK</Text><Text style={styles.statValue}>{item.status_atk}</Text></View>
-        <View style={styles.statBox}><Text style={styles.statLabel}>DEF</Text><Text style={styles.statValue}>{item.status_def}</Text></View>
-        <View style={styles.statBox}><Text style={styles.statLabel}>SPD</Text><Text style={styles.statValue}>{item.status_spd}</Text></View>
-      </View>
+        
+        <Image source={{ uri: item.image_url }} style={styles.cardImage} />
 
-      {item.ar_model_url && (
-        <TouchableOpacity style={styles.arBtn} onPress={() => launchAR(item.ar_model_url)}>
-          <Text style={styles.arBtnText}>🌐 ARで現実に出現させる</Text>
-        </TouchableOpacity>
-      )}
+        {/* 📈 【新規】老若男女対応・ビジュアルレベルメーター */}
+        <View style={styles.levelContainer}>
+          <View style={styles.levelHeader}>
+            <Text style={styles.levelText}>レベル {item.level}</Text>
+            <Text style={styles.expText}>あと {nextLevelExp - item.exp} EXP で成長（{item.exp} / {nextLevelExp}）</Text>
+          </View>
+          <View style={styles.progressBarBg}>
+            <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
+          </View>
+        </View>
+        
+        <Text style={styles.skillText}>必殺技: {item.skill_name}</Text>
+        
+        <View style={styles.statsRow}>
+          <View style={styles.statBox}><Text style={styles.statLabel}>HP</Text><Text style={styles.statValue}>{item.status_hp}</Text></View>
+          <View style={styles.statBox}><Text style={styles.statLabel}>ATK</Text><Text style={styles.statValue}>{item.status_atk}</Text></View>
+          <View style={styles.statBox}><Text style={styles.statLabel}>DEF</Text><Text style={styles.statValue}>{item.status_def}</Text></View>
+          <View style={styles.statBox}><Text style={styles.statLabel}>SPD</Text><Text style={styles.statValue}>{item.status_spd}</Text></View>
+        </View>
 
-      {!item.is_active ? (
-        <TouchableOpacity style={styles.equipBtn} onPress={() => setActiveCard(item.id)}>
-          <Text style={styles.equipBtnText}>冒険に出撃させる</Text>
-        </TouchableOpacity>
-      ) : (
-        <View style={styles.activeLabel}><Text style={styles.activeLabelText}>出撃中</Text></View>
-      )}
-    </View>
-  );
+        {item.ar_model_url && (
+          <TouchableOpacity style={styles.arBtn} onPress={() => launchAR(item.ar_model_url)}>
+            <Text style={styles.arBtnText}>🌐 ARで現実に出現させる</Text>
+          </TouchableOpacity>
+        )}
+
+        {!item.is_active ? (
+          <TouchableOpacity style={styles.equipBtn} onPress={() => setActiveCard(item.id)}>
+            <Text style={styles.equipBtnText}>冒険に出撃させる</Text>
+          </TouchableOpacity>
+        ) : (
+          <View style={styles.activeLabel}><Text style={styles.activeLabelText}>出撃中</Text></View>
+        )}
+      </View>
+    );
+  };
 
   return (
     <SafeAreaView style={styles.container}>
@@ -126,8 +150,17 @@ const styles = StyleSheet.create({
   rarityBadge: { backgroundColor: '#FFFBEB', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#FDE68A' },
   rarityText: { color: '#D97706', fontWeight: '800', fontSize: 12 },
   
-  cardImage: { width: '100%', height: 220, borderRadius: 12, marginBottom: 12, backgroundColor: '#F1F5F9' },
-  skillText: { color: '#64748B', fontSize: 14, marginBottom: 16, fontWeight: '700' },
+  cardImage: { width: '100%', height: 220, borderRadius: 12, marginBottom: 15, backgroundColor: '#F1F5F9' },
+  
+  // 📈 レベル・経験値メーターのユニバーサルスタイル
+  levelContainer: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9', marginBottom: 12 },
+  levelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
+  levelText: { color: '#2563EB', fontWeight: '900', fontSize: 14 },
+  expText: { color: '#64748B', fontSize: 11, fontWeight: '700' },
+  progressBarBg: { height: 8, backgroundColor: '#E2E8F0', borderRadius: 4, overflow: 'hidden' },
+  progressBarFill: { height: 8, backgroundColor: '#3B82F6', borderRadius: 4 },
+
+  skillText: { color: '#475569', fontSize: 14, marginBottom: 16, fontWeight: '700', marginLeft: 4 },
   
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   statBox: { alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9' },
