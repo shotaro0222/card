@@ -113,6 +113,7 @@ export default function ForgeScreen() {
 
       const totalStats = aiData.hp + aiData.atk + aiData.def + aiData.spd;
       
+      // app/(tabs)/index.tsx の dbError を投げる直前の insert 処理を書き換え
       const { error: dbError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: aiData.name,
@@ -127,8 +128,10 @@ export default function ForgeScreen() {
         rarity: aiData.rarity,
         card_type: aiData.campaign_id ? 'sponsor' : 'normal',
         sponsor_id: aiData.campaign_id || null,
-        location_lat: lat, // どこで錬成したかDBにも残しておく
+        location_lat: lat,
         location_lng: lng,
+        is_fixed: aiData.is_fixed || false,         // 追加: 固定カードフラグ
+        ar_model_url: aiData.ar_model_url || null,  // 追加: ARモデルのURL
         is_active: true 
       }]);
       if (dbError) throw dbError;
