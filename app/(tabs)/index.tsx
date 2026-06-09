@@ -9,29 +9,36 @@ export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
   const [tickets, setTickets] = useState<number>(0);
   const [isPremium, setIsPremium] = useState<boolean>(false);
-  const [customName, setCustomName] = useState<string>(''); // カスタムネーム用状態
+  const [customName, setCustomName] = useState<string>('');
+  const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]); // 開催中キャンペーン保持
 
   useFocusEffect(
     useCallback(() => {
-      fetchUserData();
+      fetchUserDataAndCampaigns();
     }, [])
   );
 
-  const fetchUserData = async () => {
+  const fetchUserDataAndCampaigns = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    const { data } = await supabase.from('profiles').select('forge_tickets, last_ticket_reset, is_premium').eq('id', user.id).single();
-    if (data) {
-      setIsPremium(data.is_premium);
-      const lastReset = new Date(data.last_ticket_reset).toDateString();
+    // 1. ユーザー情報の取得
+    const { data: profile } = await supabase.from('profiles').select('forge_tickets, last_ticket_reset, is_premium').eq('id', user.id).single();
+    if (profile) {
+      setIsPremium(profile.is_premium);
+      const lastReset = new Date(profile.last_ticket_reset).toDateString();
       const today = new Date().toDateString();
-      setTickets(lastReset !== today ? 3 : data.forge_tickets);
+      setTickets(lastReset !== today ? 3 : profile.forge_tickets);
+    }
+
+    // 2. 現在アクティブな企業・自治体キャンペーンの取得
+    const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true);
+    if (campaigns) {
+      setActiveCampaigns(campaigns);
     }
   };
 
   const takePhoto = async () => {
-    // プレミアム会員は無制限、無料会員はチケット必須
     if (!isPremium && tickets <= 0) {
       Alert.alert('チケット不足', '今日の無料分を使い切りました。SHOPで追加購入するか、プレミアムパスをご検討ください。');
       return;
@@ -52,20 +59,19 @@ export default function ForgeScreen() {
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      forgeCard(result.assets[0].base64, result.assets[0].uri);
+      forgeCard(result.assets[0].base64);
     }
   };
 
-  const forgeCard = async (base64Img: string, uri: string) => {
+  const forgeCard = async (base64Img: string) => {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('ユーザーエラー');
 
-      // 無料会員のみチケット消費
       if (!isPremium) {
         const { data: canForge, error: rpcError } = await supabase.rpc('use_forge_ticket', { target_user_id: user.id });
-        if (rpcError || !canForge) throw new Error('チケットの消費に失敗しました');
+        if (rpcError || !canForge) throw new Error('チケット消費失敗');
         setTickets(prev => prev - 1);
       }
 
@@ -75,18 +81,21 @@ export default function ForgeScreen() {
 
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
-      // AI呼び出し時に、プレミアム情報とカスタムネームを渡す
+      // ★ Edge Functionに「開催中のキャンペーン」を一緒に叩き込む
       const { data: aiData, error: aiError } = await supabase.functions.invoke('forge-card', {
         body: { 
           base64Image: base64Img, 
           mimeType: 'image/jpeg', 
           isPremium: isPremium, 
-          customName: isPremium ? customName : null 
+          customName: isPremium ? customName : null,
+          activeCampaigns: activeCampaigns // キャンペーン情報をパス
         }
       });
-      if (aiError || !aiData) throw new Error('AIの召喚に失敗しました');
+      if (aiError || !aiData) throw new Error('AI生成失敗');
 
       const totalStats = aiData.hp + aiData.atk + aiData.def + aiData.spd;
+      
+      // DBへINSERT（Sponsor IDやタイプを振り分けるための布石も回収）
       const { error: dbError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: aiData.name,
@@ -99,12 +108,18 @@ export default function ForgeScreen() {
         status_spd: aiData.spd,
         status_total: totalStats,
         rarity: aiData.rarity,
+        card_type: aiData.campaign_id ? 'sponsor' : 'normal', // キャンペーン合致ならタイプを変更
+        sponsor_id: aiData.campaign_id || null,
         is_active: true 
       }]);
       if (dbError) throw dbError;
 
-      Alert.alert('錬成成功！', `「${aiData.name}」が誕生しました！`);
-      setCustomName(''); // 錬成成功後に名前をリセット
+      if (aiData.campaign_id) {
+        Alert.alert('🎉 コラボカード錬成！', `企業キャンペーンを検知！限定カード「${aiData.name}」を獲得しました！`);
+      } else {
+        Alert.alert('錬成成功！', `「${aiData.name}」が誕生しました！`);
+      }
+      setCustomName('');
 
     } catch (error: any) {
       Alert.alert('錬成エラー', error.message);
@@ -128,7 +143,7 @@ export default function ForgeScreen() {
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#10b981" />
-            <Text style={styles.loadingText}>異界より錬成中...</Text>
+            <Text style={styles.loadingText}>異界の画像解析中...</Text>
           </View>
         ) : (
           <>
@@ -157,13 +172,18 @@ export default function ForgeScreen() {
           </>
         )}
       </View>
+      
+      {/* 開催中のキャンペーン数をさりげなくアピールするUI */}
+      <Text style={styles.campaignInfo}>
+        🔥 現在 {activeCampaigns.length} 個の企業・自治体コラボイベントが開催中！
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617', padding: 20 },
-  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 40, marginBottom: 20 },
+  headerRow: { flexDirection: 'row', justifyStyle: 'space-between', alignItems: 'center', marginTop: 40, marginBottom: 20 },
   header: { fontSize: 24, fontWeight: '900', color: '#cbd5e1', letterSpacing: 2 },
   ticketBadge: { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderWidth: 1, borderColor: '#f59e0b', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   ticketText: { color: '#fbbf24', fontWeight: 'bold', fontSize: 12 },
@@ -177,5 +197,6 @@ const styles = StyleSheet.create({
   cameraButtonDisabled: { backgroundColor: '#475569', shadowOpacity: 0 },
   cameraButtonText: { color: 'white', fontWeight: '900', fontSize: 16 },
   loadingContainer: { alignItems: 'center' },
-  loadingText: { color: '#10b981', marginTop: 15, fontWeight: 'bold' }
+  loadingText: { color: '#10b981', marginTop: 15, fontWeight: 'bold' },
+  campaignInfo: { color: '#64748b', fontSize: 12, textAlign: 'center', marginTop: 20, fontWeight: 'bold' }
 });
