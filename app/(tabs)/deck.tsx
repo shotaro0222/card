@@ -1,35 +1,24 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Modal } from 'react-native';
+import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, SafeAreaView } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
-import { WebView } from 'react-native-webview'; // WebViewを追加
+import { WebView } from 'react-native-webview';
 
 export default function DeckScreen() {
   const [cards, setCards] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
-  
-  // AR表示用のステート
   const [isArModalVisible, setArModalVisible] = useState(false);
   const [currentArUrl, setCurrentArUrl] = useState<string | null>(null);
 
   useFocusEffect(
-    useCallback(() => {
-      fetchCards();
-    }, [])
+    useCallback(() => { fetchCards(); }, [])
   );
 
   const fetchCards = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
-    const { data, error } = await supabase
-      .from('cards')
-      .select('*')
-      .eq('player_id', user.id)
-      .order('is_active', { ascending: false })
-      .order('created_at', { ascending: false });
-
+    const { data, error } = await supabase.from('cards').select('*').eq('player_id', user.id).order('is_active', { ascending: false }).order('created_at', { ascending: false });
     if (!error && data) setCards(data);
     setLoading(false);
   };
@@ -37,14 +26,11 @@ export default function DeckScreen() {
   const setActiveCard = async (cardId: string) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-
     await supabase.from('cards').update({ is_active: false }).eq('player_id', user.id);
     await supabase.from('cards').update({ is_active: true }).eq('id', cardId);
-    
     fetchCards();
   };
 
-  // AR起動ハンドラー
   const launchAR = (url: string) => {
     setCurrentArUrl(url);
     setArModalVisible(true);
@@ -56,28 +42,31 @@ export default function DeckScreen() {
         <Text style={styles.cardName} numberOfLines={1}>
           {item.is_fixed ? '🌟 ' : ''}{item.card_name}
         </Text>
-        <Text style={styles.rarity}>{item.rarity}</Text>
+        <View style={styles.rarityBadge}>
+          <Text style={styles.rarityText}>{item.rarity}</Text>
+        </View>
       </View>
+      
       <Image source={{ uri: item.image_url }} style={styles.cardImage} />
-      <Text style={styles.skillText}>技: {item.skill_name}</Text>
+      
+      <Text style={styles.skillText}>必殺技: {item.skill_name}</Text>
       
       <View style={styles.statsRow}>
-        <Text style={styles.stat}>HP: {item.status_hp}</Text>
-        <Text style={styles.stat}>ATK: {item.status_atk}</Text>
-        <Text style={styles.stat}>DEF: {item.status_def}</Text>
-        <Text style={styles.stat}>SPD: {item.status_spd}</Text>
+        <View style={styles.statBox}><Text style={styles.statLabel}>HP</Text><Text style={styles.statValue}>{item.status_hp}</Text></View>
+        <View style={styles.statBox}><Text style={styles.statLabel}>ATK</Text><Text style={styles.statValue}>{item.status_atk}</Text></View>
+        <View style={styles.statBox}><Text style={styles.statLabel}>DEF</Text><Text style={styles.statValue}>{item.status_def}</Text></View>
+        <View style={styles.statBox}><Text style={styles.statLabel}>SPD</Text><Text style={styles.statValue}>{item.status_spd}</Text></View>
       </View>
 
-      {/* ARモデルURLが存在する場合のみ「現実に召喚」ボタンを表示 */}
       {item.ar_model_url && (
         <TouchableOpacity style={styles.arBtn} onPress={() => launchAR(item.ar_model_url)}>
-          <Text style={styles.arBtnText}>🌐 現実に召喚する (AR)</Text>
+          <Text style={styles.arBtnText}>🌐 ARで現実に出現させる</Text>
         </TouchableOpacity>
       )}
 
       {!item.is_active ? (
         <TouchableOpacity style={styles.equipBtn} onPress={() => setActiveCard(item.id)}>
-          <Text style={styles.equipBtnText}>出撃させる</Text>
+          <Text style={styles.equipBtnText}>冒険に出撃させる</Text>
         </TouchableOpacity>
       ) : (
         <View style={styles.activeLabel}><Text style={styles.activeLabelText}>出撃中</Text></View>
@@ -86,63 +75,78 @@ export default function DeckScreen() {
   );
 
   return (
-    <View style={styles.container}>
+    <SafeAreaView style={styles.container}>
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>CARD COLLECTION</Text>
+        <Text style={styles.headerSub}>あなたのコレクション図鑑</Text>
+      </View>
+
       {loading ? (
-        <ActivityIndicator size="large" color="#f87171" style={{ marginTop: 50 }} />
+        <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 50 }} />
       ) : (
         <FlatList
           data={cards}
           keyExtractor={(item) => item.id}
           renderItem={renderCard}
-          contentContainerStyle={{ padding: 10 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>カードがありません。FORGEで錬成してください。</Text>}
+          contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
+          ListEmptyComponent={<Text style={styles.emptyText}>カードがありません。「カード化」からカメラを起動しましょう。</Text>}
         />
       )}
 
-      {/* WebAR起動用のフルスクリーンモーダル */}
+      {/* ARモーダル */}
       <Modal visible={isArModalVisible} animationType="slide" onRequestClose={() => setArModalVisible(false)}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>WebAR Viewer</Text>
-          <TouchableOpacity onPress={() => setArModalVisible(false)} style={styles.closeBtn}>
-            <Text style={styles.closeBtnText}>閉じる</Text>
-          </TouchableOpacity>
-        </View>
-        {currentArUrl && (
-          <WebView 
-            source={{ uri: currentArUrl }} 
-            style={{ flex: 1, backgroundColor: 'black' }}
-            allowsInlineMediaPlayback={true} // カメラアクセス許可に必要
-            mediaPlaybackRequiresUserAction={false}
-          />
-        )}
+        <SafeAreaView style={styles.modalContainer}>
+          <View style={styles.modalHeader}>
+            <Text style={styles.modalTitle}>AR Viewer</Text>
+            <TouchableOpacity onPress={() => setArModalVisible(false)} style={styles.closeBtn}>
+              <Text style={styles.closeBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
+          {currentArUrl && (
+            <WebView source={{ uri: currentArUrl }} style={{ flex: 1 }} allowsInlineMediaPlayback={true} mediaPlaybackRequiresUserAction={false} />
+          )}
+        </SafeAreaView>
       </Modal>
-    </View>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  card: { backgroundColor: '#0f172a', padding: 15, borderRadius: 12, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
-  activeCard: { borderColor: '#10b981', borderWidth: 2, shadowColor: '#10b981', shadowOpacity: 0.3, shadowRadius: 10 },
-  sponsorCard: { borderColor: '#c084fc', shadowColor: '#c084fc', shadowOpacity: 0.2, shadowRadius: 8 }, // 企業カード用装飾
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 10 },
-  cardName: { color: 'white', fontWeight: 'bold', fontSize: 16, flex: 1 },
-  rarity: { color: '#fbbf24', fontWeight: 'bold' },
-  cardImage: { width: '100%', height: 200, borderRadius: 8, marginBottom: 10, backgroundColor: '#000' },
-  skillText: { color: '#c084fc', fontSize: 12, marginBottom: 10, fontWeight: 'bold' },
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 15 },
-  stat: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', fontFamily: 'monospace' },
-  equipBtn: { backgroundColor: '#1e293b', padding: 10, borderRadius: 8, alignItems: 'center' },
-  equipBtnText: { color: 'white', fontWeight: 'bold' },
-  activeLabel: { backgroundColor: 'rgba(16, 185, 129, 0.2)', padding: 10, borderRadius: 8, alignItems: 'center' },
-  activeLabelText: { color: '#10b981', fontWeight: 'bold' },
-  emptyText: { color: '#64748b', textAlign: 'center', marginTop: 50 },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: { padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: '#FFFFFF' },
+  headerTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
+  headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '600' },
   
-  /* ARボタンとモーダル用スタイル */
-  arBtn: { backgroundColor: '#c084fc', padding: 12, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
-  arBtnText: { color: '#0f172a', fontWeight: 'bold', fontSize: 14 },
-  modalHeader: { height: 60, backgroundColor: '#0f172a', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, paddingTop: 10 },
-  modalTitle: { color: '#38bdf8', fontSize: 18, fontWeight: 'bold' },
-  closeBtn: { backgroundColor: '#334155', paddingHorizontal: 15, paddingVertical: 8, borderRadius: 20 },
-  closeBtnText: { color: 'white', fontWeight: 'bold' }
+  card: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
+  activeCard: { borderColor: '#3B82F6', borderWidth: 2, shadowColor: '#3B82F6', shadowOpacity: 0.15 },
+  sponsorCard: { borderColor: '#F59E0B', borderWidth: 2 },
+  
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  cardName: { color: '#0F172A', fontWeight: '800', fontSize: 18, flex: 1 },
+  rarityBadge: { backgroundColor: '#FFFBEB', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#FDE68A' },
+  rarityText: { color: '#D97706', fontWeight: '800', fontSize: 12 },
+  
+  cardImage: { width: '100%', height: 220, borderRadius: 12, marginBottom: 12, backgroundColor: '#F1F5F9' },
+  skillText: { color: '#64748B', fontSize: 14, marginBottom: 16, fontWeight: '700' },
+  
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  statBox: { alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9' },
+  statLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '800', marginBottom: 4 },
+  statValue: { color: '#0F172A', fontSize: 16, fontWeight: '900', fontFamily: 'monospace' },
+  
+  equipBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center' },
+  equipBtnText: { color: '#475569', fontWeight: '800', fontSize: 14 },
+  activeLabel: { backgroundColor: '#EFF6FF', padding: 16, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
+  activeLabelText: { color: '#2563EB', fontWeight: '800', fontSize: 14 },
+  
+  arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5 },
+  arBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+  
+  emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 50, fontWeight: '600', fontSize: 14 },
+  
+  modalContainer: { flex: 1, backgroundColor: '#FFFFFF' },
+  modalHeader: { height: 60, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  modalTitle: { color: '#0F172A', fontSize: 16, fontWeight: '800' },
+  closeBtn: { backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  closeBtnText: { color: '#475569', fontWeight: '700', fontSize: 13 }
 });
