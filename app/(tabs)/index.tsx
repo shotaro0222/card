@@ -1,6 +1,7 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
+import * as Location from 'expo-location'; // ★ GPSライブラリを追加
 import { supabase } from '../../lib/supabase';
 import { decode } from 'base64-arraybuffer';
 import { useFocusEffect } from 'expo-router';
@@ -10,7 +11,7 @@ export default function ForgeScreen() {
   const [tickets, setTickets] = useState<number>(0);
   const [isPremium, setIsPremium] = useState<boolean>(false);
   const [customName, setCustomName] = useState<string>('');
-  const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]); // 開催中キャンペーン保持
+  const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
 
   useFocusEffect(
     useCallback(() => {
@@ -22,7 +23,6 @@ export default function ForgeScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 1. ユーザー情報の取得
     const { data: profile } = await supabase.from('profiles').select('forge_tickets, last_ticket_reset, is_premium').eq('id', user.id).single();
     if (profile) {
       setIsPremium(profile.is_premium);
@@ -31,11 +31,8 @@ export default function ForgeScreen() {
       setTickets(lastReset !== today ? 3 : profile.forge_tickets);
     }
 
-    // 2. 現在アクティブな企業・自治体キャンペーンの取得
     const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true);
-    if (campaigns) {
-      setActiveCampaigns(campaigns);
-    }
+    if (campaigns) setActiveCampaigns(campaigns);
   };
 
   const takePhoto = async () => {
@@ -44,12 +41,29 @@ export default function ForgeScreen() {
       return;
     }
 
-    const permissionResult = await ImagePicker.requestCameraPermissionsAsync();
-    if (!permissionResult.granted) {
+    // 1. カメラの権限チェック
+    const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
+    if (!cameraPerm.granted) {
       Alert.alert('エラー', 'カメラへのアクセス許可が必要です');
       return;
     }
 
+    // 2. 位置情報の権限チェック（拒否されても錬成自体はできるようにする）
+    let userLat = null;
+    let userLng = null;
+    const locationPerm = await Location.requestForegroundPermissionsAsync();
+    if (locationPerm.granted) {
+      try {
+        // ★ 精度は少し低めにして高速に取得する
+        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        userLat = location.coords.latitude;
+        userLng = location.coords.longitude;
+      } catch (e) {
+        console.log("GPSの取得に失敗しました", e);
+      }
+    }
+
+    // 3. カメラ起動
     const result = await ImagePicker.launchCameraAsync({
       mediaTypes: ImagePicker.MediaTypeOptions.Images,
       allowsEditing: true,
@@ -59,11 +73,12 @@ export default function ForgeScreen() {
     });
 
     if (!result.canceled && result.assets[0].base64) {
-      forgeCard(result.assets[0].base64);
+      // 画像と位置情報の両方を送る
+      forgeCard(result.assets[0].base64, userLat, userLng);
     }
   };
 
-  const forgeCard = async (base64Img: string) => {
+  const forgeCard = async (base64Img: string, lat: number | null, lng: number | null) => {
     setLoading(true);
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -81,21 +96,23 @@ export default function ForgeScreen() {
 
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
-      // ★ Edge Functionに「開催中のキャンペーン」を一緒に叩き込む
+      // ★ Edge Functionに現在地情報を渡す
       const { data: aiData, error: aiError } = await supabase.functions.invoke('forge-card', {
         body: { 
           base64Image: base64Img, 
           mimeType: 'image/jpeg', 
           isPremium: isPremium, 
           customName: isPremium ? customName : null,
-          activeCampaigns: activeCampaigns // キャンペーン情報をパス
+          activeCampaigns: activeCampaigns,
+          userLat: lat,   // 緯度
+          userLng: lng    // 経度
         }
       });
+      
       if (aiError || !aiData) throw new Error('AI生成失敗');
 
       const totalStats = aiData.hp + aiData.atk + aiData.def + aiData.spd;
       
-      // DBへINSERT（Sponsor IDやタイプを振り分けるための布石も回収）
       const { error: dbError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: aiData.name,
@@ -108,14 +125,16 @@ export default function ForgeScreen() {
         status_spd: aiData.spd,
         status_total: totalStats,
         rarity: aiData.rarity,
-        card_type: aiData.campaign_id ? 'sponsor' : 'normal', // キャンペーン合致ならタイプを変更
+        card_type: aiData.campaign_id ? 'sponsor' : 'normal',
         sponsor_id: aiData.campaign_id || null,
+        location_lat: lat, // どこで錬成したかDBにも残しておく
+        location_lng: lng,
         is_active: true 
       }]);
       if (dbError) throw dbError;
 
       if (aiData.campaign_id) {
-        Alert.alert('🎉 コラボカード錬成！', `企業キャンペーンを検知！限定カード「${aiData.name}」を獲得しました！`);
+        Alert.alert('🎉 ご当地カード錬成！', `特定のエリアを検知！限定カード「${aiData.name}」を獲得しました！`);
       } else {
         Alert.alert('錬成成功！', `「${aiData.name}」が誕生しました！`);
       }
@@ -143,7 +162,7 @@ export default function ForgeScreen() {
         {loading ? (
           <View style={styles.loadingContainer}>
             <ActivityIndicator size="large" color="#10b981" />
-            <Text style={styles.loadingText}>異界の画像解析中...</Text>
+            <Text style={styles.loadingText}>GPS＆画像解析中...</Text>
           </View>
         ) : (
           <>
@@ -173,9 +192,8 @@ export default function ForgeScreen() {
         )}
       </View>
       
-      {/* 開催中のキャンペーン数をさりげなくアピールするUI */}
       <Text style={styles.campaignInfo}>
-        🔥 現在 {activeCampaigns.length} 個の企業・自治体コラボイベントが開催中！
+        📍 GPS連動: 現在 {activeCampaigns.length} 個のコラボイベントが開催中！
       </Text>
     </View>
   );
@@ -183,7 +201,7 @@ export default function ForgeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617', padding: 20 },
-  headerRow: { flexDirection: 'row', justifyStyle: 'space-between', alignItems: 'center', marginTop: 40, marginBottom: 20 },
+  headerRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 40, marginBottom: 20 },
   header: { fontSize: 24, fontWeight: '900', color: '#cbd5e1', letterSpacing: 2 },
   ticketBadge: { backgroundColor: 'rgba(245, 158, 11, 0.2)', borderWidth: 1, borderColor: '#f59e0b', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
   ticketText: { color: '#fbbf24', fontWeight: 'bold', fontSize: 12 },
