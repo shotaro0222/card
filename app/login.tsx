@@ -211,22 +211,27 @@ export default function LoginScreen() {
 }
 
 const styles = StyleSheet.create({
-  scrollContainer: { flex: 1, backgroundColor: '#020617' },
-  container: { padding: 20, justifyContent: 'center', paddingTop: 60, paddingBottom: 40 },
-  title: { fontSize: 38, fontWeight: '900', color: '#f43f5e', textAlign: 'center', letterSpacing: 4, textShadowColor: 'rgba(244, 63, 94, 0.3)', textShadowOffset: { width: 0, height: 4 }, textShadowRadius: 10 },
-  subtitle: { fontSize: 10, color: '#64748b', textAlign: 'center', marginBottom: 30, letterSpacing: 1, fontWeight: 'bold' },
-  formTitle: { color: '#cbd5e1', fontSize: 14, fontWeight: 'bold', textAlign: 'center', marginBottom: 20, letterSpacing: 2 },
-  input: { backgroundColor: 'rgba(15, 23, 42, 0.8)', borderWidth: 1, borderColor: '#1e293b', borderRadius: 12, color: 'white', padding: 15, marginBottom: 15, fontSize: 15 },
-  demoSection: { backgroundColor: '#0f172a', padding: 15, borderRadius: 16, borderWidth: 1, borderColor: '#334155', marginBottom: 20 },
-  sectionTitle: { color: '#38bdf8', fontSize: 13, fontWeight: 'bold', marginBottom: 15, textAlign: 'center' },
-  label: { color: '#94a3b8', fontSize: 12, fontWeight: 'bold', marginBottom: 8, marginTop: 5 },
-  selectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 15 },
-  chip: { backgroundColor: '#1e293b', paddingVertical: 8, paddingHorizontal: 14, borderRadius: 20, borderWidth: 1, borderColor: '#334155' },
-  activeChip: { backgroundColor: 'rgba(244, 63, 94, 0.2)', borderColor: '#f43f5e' },
-  chipText: { color: '#94a3b8', fontSize: 13, fontWeight: '600' },
-  activeChipText: { color: '#f43f5e', fontWeight: 'bold' },
-  button: { backgroundColor: '#b91c1c', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 10, shadowColor: '#f43f5e', shadowOpacity: 0.2, shadowRadius: 10 },
-  buttonText: { color: 'white', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
-  toggleLink: { marginTop: 25, alignItems: 'center' },
-  toggleLinkText: { color: '#64748b', fontSize: 13, fontWeight: 'bold', textDecorationLine: 'underline' },
+  scrollContainer: { flex: 1, backgroundColor: '#F8FAFC' },
+  container: { padding: 24, justifyContent: 'center', paddingTop: 80, paddingBottom: 40 },
+  title: { fontSize: 40, fontWeight: '900', color: '#0F172A', textAlign: 'center', letterSpacing: 2, marginBottom: 5 },
+  subtitle: { fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 40, fontWeight: '700' },
+  formTitle: { color: '#475569', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 24 },
+  
+  input: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 16, color: '#0F172A', padding: 18, marginBottom: 16, fontSize: 16, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.02, shadowRadius: 5 },
+  
+  demoSection: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 24, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 10 },
+  sectionTitle: { color: '#0F172A', fontSize: 15, fontWeight: '800', marginBottom: 15, textAlign: 'center' },
+  label: { color: '#475569', fontSize: 13, fontWeight: '700', marginBottom: 10, marginTop: 10 },
+  selectRow: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 15 },
+  
+  chip: { backgroundColor: '#F1F5F9', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0' },
+  activeChip: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6' },
+  chipText: { color: '#64748B', fontSize: 14, fontWeight: '700' },
+  activeChipText: { color: '#2563EB', fontWeight: '800' },
+  
+  button: { backgroundColor: '#0F172A', padding: 18, borderRadius: 16, alignItems: 'center', marginTop: 10, shadowColor: '#0F172A', shadowOffset: { width: 0, height: 6 }, shadowOpacity: 0.2, shadowRadius: 10 },
+  buttonText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
+  
+  toggleLink: { marginTop: 30, alignItems: 'center' },
+  toggleLinkText: { color: '#3B82F6', fontSize: 14, fontWeight: '700' },
 });
