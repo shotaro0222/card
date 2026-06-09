@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Home, Layers, Swords, Bell } from 'lucide-react-native'; // Bellを追加
+import { Home, Layers, Swords, Bell, ShoppingCart } from 'lucide-react-native'; // ShoppingCartを追加
 
 export default function TabLayout() {
   return (
@@ -10,23 +10,12 @@ export default function TabLayout() {
       headerStyle: { backgroundColor: '#020617' },
       headerTintColor: '#f87171',
     }}>
-      <Tabs.Screen 
-        name="index" 
-        options={{ title: 'FORGE', tabBarIcon: ({ color }) => <Home color={color} /> }} 
-      />
-      <Tabs.Screen 
-        name="deck" 
-        options={{ title: 'DECK', tabBarIcon: ({ color }) => <Layers color={color} /> }} 
-      />
-      <Tabs.Screen 
-        name="battle" 
-        options={{ title: 'ARENA', tabBarIcon: ({ color }) => <Swords color={color} /> }} 
-      />
-      {/* イベントタブを追加 */}
-      <Tabs.Screen 
-        name="events" 
-        options={{ title: 'EVENTS', tabBarIcon: ({ color }) => <Bell color={color} /> }} 
-      />
+      <Tabs.Screen name="index" options={{ title: 'FORGE', tabBarIcon: ({ color }) => <Home color={color} /> }} />
+      <Tabs.Screen name="deck" options={{ title: 'DECK', tabBarIcon: ({ color }) => <Layers color={color} /> }} />
+      <Tabs.Screen name="battle" options={{ title: 'ARENA', tabBarIcon: ({ color }) => <Swords color={color} /> }} />
+      <Tabs.Screen name="events" options={{ title: 'EVENTS', tabBarIcon: ({ color }) => <Bell color={color} /> }} />
+      {/* SHOPタブを追加 */}
+      <Tabs.Screen name="shop" options={{ title: 'SHOP', tabBarIcon: ({ color }) => <ShoppingCart color={color} /> }} />
     </Tabs>
   );
 }
