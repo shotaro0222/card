@@ -1,8 +1,11 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, SafeAreaView } from 'react-native';
+import React, { useCallback, useState } from 'react';
+import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, SafeAreaView, Alert } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { WebView } from 'react-native-webview';
+
+// デッキの最大枚数
+const MAX_DECK_SIZE = 5;
 
 export default function DeckScreen() {
   const [cards, setCards] = useState<any[]>([]);
@@ -36,11 +39,28 @@ export default function DeckScreen() {
     setLoading(false);
   };
 
-  const setActiveCard = async (cardId: string) => {
+  // 複数枚デッキの編成ロジック
+  const toggleDeckCard = async (card: any) => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from('cards').update({ is_active: false }).eq('player_id', user.id);
-    await supabase.from('cards').update({ is_active: true }).eq('id', cardId);
+
+    // 現在デッキに入っている枚数をカウント
+    const currentDeckCount = cards.filter(c => c.is_active).length;
+
+    if (!card.is_active) {
+      // 追加しようとした時、すでに5枚なら弾く
+      if (currentDeckCount >= MAX_DECK_SIZE) {
+        Alert.alert('デッキ上限', `出撃できるカードは最大${MAX_DECK_SIZE}枚までです。別のカードを外してください。`);
+        return;
+      }
+      // 出撃状態にする
+      await supabase.from('cards').update({ is_active: true }).eq('id', card.id);
+    } else {
+      // 既に出撃中なら外す
+      await supabase.from('cards').update({ is_active: false }).eq('id', card.id);
+    }
+    
+    // リロードして画面に反映
     fetchCards();
   };
 
@@ -50,11 +70,12 @@ export default function DeckScreen() {
   };
 
   const renderCard = ({ item }: { item: any }) => {
-    // ⚠️ データベースから null が来ても絶対にクラッシュさせない安全設計
     const safeLevel = item.level || 1;
     const safeExp = item.exp || 0;
     const nextLevelExp = safeLevel * 100;
     const progressPercent = Math.min(100, Math.max(0, (safeExp / nextLevelExp) * 100));
+    
+    const isSupport = item.card_role === 'support';
 
     return (
       <View style={[styles.card, item.is_active && styles.activeCard, item.is_fixed && styles.sponsorCard]}>
@@ -62,7 +83,6 @@ export default function DeckScreen() {
           <Text style={styles.cardName} numberOfLines={1}>
             {item.is_fixed ? '🌟 ' : ''}{item.card_name || '名称不明'}
           </Text>
-          {/* ⚠️ div を View に修正！ */}
           <View style={styles.rarityBadge}>
             <Text style={styles.rarityText}>{item.rarity || 'N'}</Text>
           </View>
@@ -76,14 +96,19 @@ export default function DeckScreen() {
         <View style={styles.levelContainer}>
           <View style={styles.levelHeader}>
             <Text style={styles.levelText}>レベル {safeLevel}</Text>
-            <Text style={styles.expText}>あと {nextLevelExp - safeExp} EXP で成長（{safeExp} / {nextLevelExp}）</Text>
+            <Text style={styles.expText}>あと {nextLevelExp - safeExp} EXP（{safeExp}/{nextLevelExp}）</Text>
           </View>
           <View style={styles.progressBarBg}>
             <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
           </View>
         </View>
         
-        <Text style={styles.skillText}>必殺技: {item.skill_name || '通常攻撃'}</Text>
+        <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 16 }}>
+          <View style={[styles.roleBadge, isSupport ? styles.roleSupport : styles.roleAttacker]}>
+            <Text style={styles.roleText}>{isSupport ? '🛡️ サポート' : '⚔️ アタッカー'}</Text>
+          </View>
+          <Text style={styles.skillText}> 技: {item.skill_name || '通常攻撃'}</Text>
+        </View>
         
         <View style={styles.statsRow}>
           <View style={styles.statBox}><Text style={styles.statLabel}>HP</Text><Text style={styles.statValue}>{item.status_hp || 100}</Text></View>
@@ -98,22 +123,26 @@ export default function DeckScreen() {
           </TouchableOpacity>
         )}
 
-        {!item.is_active ? (
-          <TouchableOpacity style={styles.equipBtn} onPress={() => setActiveCard(item.id)}>
-            <Text style={styles.equipBtnText}>冒険に出撃させる</Text>
-          </TouchableOpacity>
-        ) : (
-          <View style={styles.activeLabel}><Text style={styles.activeLabelText}>出撃中</Text></View>
-        )}
+        <TouchableOpacity 
+          style={[styles.equipBtn, item.is_active && styles.equippedBtn]} 
+          onPress={() => toggleDeckCard(item)}
+        >
+          <Text style={[styles.equipBtnText, item.is_active && styles.equippedBtnText]}>
+            {item.is_active ? '✅ デッキ編成中（外す）' : '➕ デッキに編成する'}
+          </Text>
+        </TouchableOpacity>
       </View>
     );
   };
 
+  // デッキ枚数の計算
+  const deckCount = cards.filter(c => c.is_active).length;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>CARD COLLECTION</Text>
-        <Text style={styles.headerSub}>あなたのコレクション図鑑</Text>
+        <Text style={styles.headerTitle}>CARD DECK</Text>
+        <Text style={styles.headerSub}>バトルデッキ編成 ({deckCount} / {MAX_DECK_SIZE}枚)</Text>
       </View>
 
       {loading ? (
@@ -150,7 +179,7 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   header: { padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: '#FFFFFF' },
   headerTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
-  headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '600' },
+  headerSub: { fontSize: 13, color: '#2563EB', marginTop: 4, fontWeight: '800' },
   
   card: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
   activeCard: { borderColor: '#3B82F6', borderWidth: 2, shadowColor: '#3B82F6', shadowOpacity: 0.15 },
@@ -170,7 +199,12 @@ const styles = StyleSheet.create({
   progressBarBg: { height: 8, backgroundColor: '#E2E8F0', borderRadius: 4, overflow: 'hidden' },
   progressBarFill: { height: 8, backgroundColor: '#3B82F6', borderRadius: 4 },
 
-  skillText: { color: '#475569', fontSize: 14, marginBottom: 16, fontWeight: '700', marginLeft: 4 },
+  roleBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 8 },
+  roleAttacker: { backgroundColor: '#FEE2E2' },
+  roleSupport: { backgroundColor: '#DCFCE7' },
+  roleText: { fontSize: 11, fontWeight: '800', color: '#0F172A' },
+  
+  skillText: { color: '#475569', fontSize: 13, fontWeight: '700', marginLeft: 8 },
   
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
   statBox: { alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9' },
@@ -179,10 +213,10 @@ const styles = StyleSheet.create({
   
   equipBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center' },
   equipBtnText: { color: '#475569', fontWeight: '800', fontSize: 14 },
-  activeLabel: { backgroundColor: '#EFF6FF', padding: 16, borderRadius: 12, alignItems: 'center', borderWidth: 1, borderColor: '#BFDBFE' },
-  activeLabelText: { color: '#2563EB', fontWeight: '800', fontSize: 14 },
+  equippedBtn: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1 },
+  equippedBtnText: { color: '#2563EB' },
   
-  arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 5 },
+  arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12 },
   arBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   
   emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 50, fontWeight: '600', fontSize: 14 },
