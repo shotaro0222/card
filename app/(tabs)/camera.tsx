@@ -58,8 +58,8 @@ export default function CameraScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('認証情報がありません');
 
-      // 1. 先ほどデプロイしたEdge Functionを呼び出す
-      const { data: aiResult, error: invokeError } = await supabase.functions.invoke('generate-card', {
+// 1. あなたのSupabase環境にある関数名（super-task）に合わせる
+      const { data: aiResult, error: invokeError } = await supabase.functions.invoke('super-task', {
         body: { base64Image: base64Image, mimeType: 'image/jpeg' },
       });
 
