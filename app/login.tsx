@@ -100,7 +100,7 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>VOID CARD</Text>
+      <Text style={styles.title}>SNAP CARD</Text>
       <Text style={styles.subtitle}>REAL-PHOTO TCG</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
