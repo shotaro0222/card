@@ -1,149 +1,208 @@
-import React, { useEffect, useState } from 'react';
-import { View, Text, ScrollView, TextInput, TouchableOpacity, StyleSheet, Alert } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, ScrollView, SafeAreaView, Alert, TextInput } from 'react-native';
 import { supabase } from '../../lib/supabase';
+import { useFocusEffect, useRouter } from 'expo-router';
 
 export default function AdminDashboard() {
-  const [stats, setStats] = useState<any>({ total: 0, gender: {}, region: {} });
-  const [prompt, setPrompt] = useState('');
-  const [rates, setRates] = useState<any>({});
+  const router = useRouter();
+  const [activeTab, setActiveTab] = useState('bosses'); // bosses, shop, events
+  
+  // データ状態
+  const [bosses, setBosses] = useState<any[]>([]);
+  const [shopItems, setShopItems] = useState<any[]>([]);
+  const [events, setEvents] = useState<any[]>([]);
+  
+  // 新規追加用フォーム状態（ボス）
+  const [newBossName, setNewBossName] = useState('');
+  const [newBossHp, setNewBossHp] = useState('');
+  const [newBossAtk, setNewBossAtk] = useState('');
 
-  // 企業コラボ・固定カード登録用のステート
-  const [triggerKeyword, setTriggerKeyword] = useState('');
-  const [cardName, setCardName] = useState('');
-  const [imageUrl, setImageUrl] = useState('');
-  const [arModelUrl, setArModelUrl] = useState('');
-
-  useEffect(() => {
-    fetchAdminData();
-  }, []);
+  useFocusEffect(
+    useCallback(() => {
+      fetchAdminData();
+    }, [activeTab])
+  );
 
   const fetchAdminData = async () => {
-    // デモグラ集計
-    const { data: profiles } = await supabase.from('profiles').select('gender, region');
-    const aggregate = profiles?.reduce((acc: any, curr: any) => {
-      acc.total++;
-      if (curr.gender) acc.gender[curr.gender] = (acc.gender[curr.gender] || 0) + 1;
-      if (curr.region) acc.region[curr.region] = (acc.region[curr.region] || 0) + 1;
-      return acc;
-    }, { total: 0, gender: {}, region: {} });
-    setStats(aggregate);
-
-    // プロンプト・ドロップ率取得
-    const { data: config } = await supabase.from('system_config').select('*');
-    config?.forEach(item => {
-      if (item.id === 'main_prompt') setPrompt(item.config_data.base);
-      if (item.id === 'rarity_config') setRates(item.config_data);
-    });
+    if (activeTab === 'bosses') {
+      const { data } = await supabase.from('bosses').select('*').order('created_at', { ascending: false });
+      if (data) setBosses(data);
+    } else if (activeTab === 'shop') {
+      const { data } = await supabase.from('shop_items').select('*').order('created_at', { ascending: false });
+      if (data) setShopItems(data);
+    } else if (activeTab === 'events') {
+      const { data } = await supabase.from('events').select('*').order('created_at', { ascending: false });
+      if (data) setEvents(data);
+    }
   };
 
-  const saveConfig = async () => {
-    await supabase.from('system_config').upsert({
-      id: 'main_prompt',
-      config_data: { base: prompt, marketing_injection: "メーカーの商品を神として扱え" }
-    });
-    Alert.alert('保存完了', 'AIの挙動ルールをアップデートしました。');
-  };
-
-  // 🎁 企業コラボカードの登録処理
-  const registerFixedCard = async () => {
-    if (!triggerKeyword || !cardName || !imageUrl) {
-      Alert.alert('入力エラー', '検知キーワード、カード名、画像URLは必須です。');
+  // ボスの追加
+  const handleAddBoss = async () => {
+    if (!newBossName || !newBossHp || !newBossAtk) {
+      Alert.alert('エラー', 'すべての項目を入力してください');
       return;
     }
-
-    const { error } = await supabase.from('fixed_cards').insert([{
-      trigger_type: 'logo_detection',
-      trigger_value: triggerKeyword,
-      card_name: cardName,
-      image_url: imageUrl,
-      ar_model_url: arModelUrl || null,
-      stats: {
-        hp: 999,
-        atk: 500,
-        def: 500,
-        spd: 300,
-        feature: "企業協賛の限定デザインカード！",
-        skill: "スポンサー・バースト"
-      }
-    }]);
-
+    const { error } = await supabase.from('bosses').insert([
+      { name: newBossName, hp: parseInt(newBossHp), atk: parseInt(newBossAtk), def: 10, is_active: true }
+    ]);
     if (error) {
-      Alert.alert('エラー', error.message);
+      Alert.alert('追加失敗', error.message);
     } else {
-      Alert.alert('登録完了', `「${triggerKeyword}」を検知した際、特殊カード「${cardName}」が排出されるようになりました！`);
-      setTriggerKeyword('');
-      setCardName('');
-      setImageUrl('');
-      setArModelUrl('');
+      Alert.alert('成功', '新しいボスを追加しました');
+      setNewBossName(''); setNewBossHp(''); setNewBossAtk('');
+      fetchAdminData();
     }
+  };
+
+  // 状態の切り替え（有効/無効）
+  const toggleActiveStatus = async (table: string, id: string, currentStatus: boolean) => {
+    const { error } = await supabase.from(table).update({ is_active: !currentStatus }).eq('id', id);
+    if (!error) fetchAdminData();
+  };
+
+  const handleLogout = async () => {
+    await supabase.auth.signOut();
+    router.replace('/login');
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 50 }}>
-      <Text style={styles.h1}>運営管理プラットフォーム</Text>
-
-      {/* ユーザー分析パネル */}
-      <View style={styles.section}>
-        <Text style={styles.h2}>📊 ユーザーデモグラフィック分析</Text>
-        <Text style={styles.label}>総ユーザー数: {stats.total}名</Text>
-        <View style={styles.chartMock}>
-          <Text style={styles.white}>性別比: 男性 {Math.round((stats.gender['male']||0)/stats.total*100 || 0)}% / 女性 {Math.round((stats.gender['female']||0)/stats.total*100 || 0)}%</Text>
-          <Text style={styles.white}>主要地域: 関東 {Math.round((stats.region['関東']||0)/stats.total*100 || 0)}%</Text>
-        </View>
-      </View>
-
-      {/* 🎁 企業コラボ・特殊カード登録パネル (今回追加) */}
-      <View style={[styles.section, { borderColor: '#F59E0B' }]}>
-        <Text style={[styles.h2, { color: '#F59E0B' }]}>🎁 企業コラボ・特殊カード追加</Text>
-        <Text style={styles.label}>AIが特定のロゴや商品を検知した際、ここで設定したオリジナルデザインのカードを強制排出します。</Text>
-
-        <TextInput style={styles.inputFull} placeholder="検知キーワード (例: コカ・コーラのロゴ)" placeholderTextColor="#64748B" value={triggerKeyword} onChangeText={setTriggerKeyword} />
-        <TextInput style={styles.inputFull} placeholder="排出するカード名 (例: 限定コーラドラゴン)" placeholderTextColor="#64748B" value={cardName} onChangeText={setCardName} />
-        <TextInput style={styles.inputFull} placeholder="カード画像URL (企業から貰ったデザイン等)" placeholderTextColor="#64748B" value={imageUrl} onChangeText={setImageUrl} />
-        <TextInput style={styles.inputFull} placeholder="WebAR用URL (任意: タップで3D起動)" placeholderTextColor="#64748B" value={arModelUrl} onChangeText={setArModelUrl} />
-
-        <TouchableOpacity style={[styles.btn, { backgroundColor: '#F59E0B' }]} onPress={registerFixedCard}>
-          <Text style={styles.btnText}>コラボカードをシステムに登録</Text>
+    <SafeAreaView style={styles.container}>
+      {/* ヘッダー */}
+      <View style={styles.header}>
+        <Text style={styles.headerTitle}>ADMIN DASHBOARD</Text>
+        <TouchableOpacity style={styles.logoutBtn} onPress={handleLogout}>
+          <Text style={styles.logoutText}>ログアウト</Text>
         </TouchableOpacity>
       </View>
 
-      {/* プロンプト・エンジニアリング・パネル */}
-      <View style={styles.section}>
-        <Text style={styles.h2}>🧠 AI錬成ロジック調整 (Gemini Prompt)</Text>
-        <TextInput style={styles.textArea} multiline value={prompt} onChangeText={setPrompt} placeholder="AIへの基本命令を入力..." />
-        <TouchableOpacity style={styles.btn} onPress={saveConfig}>
-          <Text style={styles.btnText}>プロンプトをデプロイ</Text>
+      {/* タブナビゲーション */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity style={[styles.tab, activeTab === 'bosses' && styles.activeTab]} onPress={() => setActiveTab('bosses')}>
+          <Text style={[styles.tabText, activeTab === 'bosses' && styles.activeTabText]}>ボス管理</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.tab, activeTab === 'shop' && styles.activeTab]} onPress={() => setActiveTab('shop')}>
+          <Text style={[styles.tabText, activeTab === 'shop' && styles.activeTabText]}>ショップ管理</Text>
+        </TouchableOpacity>
+        <TouchableOpacity style={[styles.tab, activeTab === 'events' && styles.activeTab]} onPress={() => setActiveTab('events')}>
+          <Text style={[styles.tabText, activeTab === 'events' && styles.activeTabText]}>イベント管理</Text>
         </TouchableOpacity>
       </View>
 
-      {/* ドロップ率調整 */}
-      <View style={styles.section}>
-        <Text style={styles.h2}>💎 レアリティ出現率調整 (%)</Text>
-        {Object.keys(rates).map(key => (
-          <View key={key} style={styles.row}>
-            <Text style={styles.white}>{key}: </Text>
-            <TextInput style={styles.inputSmall} value={String(rates[key])} onChangeText={(v) => setRates({...rates, [key]: Number(v)})} keyboardType="numeric" />
+      <ScrollView style={styles.content}>
+        {/* ボス管理タブ */}
+        {activeTab === 'bosses' && (
+          <View>
+            <View style={styles.formContainer}>
+              <Text style={styles.sectionTitle}>新規ボス追加</Text>
+              <TextInput style={styles.input} placeholder="ボス名" value={newBossName} onChangeText={setNewBossName} />
+              <TextInput style={styles.input} placeholder="HP" keyboardType="numeric" value={newBossHp} onChangeText={setNewBossHp} />
+              <TextInput style={styles.input} placeholder="攻撃力" keyboardType="numeric" value={newBossAtk} onChangeText={setNewBossAtk} />
+              <TouchableOpacity style={styles.addBtn} onPress={handleAddBoss}>
+                <Text style={styles.addBtnText}>追加する</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.sectionTitle}>登録済みボス一覧</Text>
+            {bosses.map((boss) => (
+              <View key={boss.id} style={styles.listItem}>
+                <View style={{ flex: 1 }}>
+                  <Text style={styles.itemName}>{boss.name}</Text>
+                  <Text style={styles.itemSub}>HP: {boss.hp} | ATK: {boss.atk}</Text>
+                </View>
+                <TouchableOpacity 
+                  style={[styles.statusBtn, boss.is_active ? styles.statusActive : styles.statusInactive]}
+                  onPress={() => toggleActiveStatus('bosses', boss.id, boss.is_active)}
+                >
+                  <Text style={styles.statusBtnText}>{boss.is_active ? '稼働中' : '停止中'}</Text>
+                </TouchableOpacity>
+              </View>
+            ))}
           </View>
-        ))}
-      </View>
-    </ScrollView>
+        )}
+
+        {/* ショップ管理タブ */}
+        {activeTab === 'shop' && (
+          <View>
+            <Text style={styles.sectionTitle}>ショップアイテム一覧</Text>
+            {shopItems.length === 0 ? (
+              <Text style={styles.emptyText}>アイテムが登録されていません</Text>
+            ) : (
+              shopItems.map((item) => (
+                <View key={item.id} style={styles.listItem}>
+                   <View style={{ flex: 1 }}>
+                    <Text style={styles.itemName}>{item.name}</Text>
+                    <Text style={styles.itemSub}>価格: {item.price} {item.currency_type}</Text>
+                  </View>
+                  <TouchableOpacity 
+                    style={[styles.statusBtn, item.is_active ? styles.statusActive : styles.statusInactive]}
+                    onPress={() => toggleActiveStatus('shop_items', item.id, item.is_active)}
+                  >
+                    <Text style={styles.statusBtnText}>{item.is_active ? '販売中' : '停止中'}</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+         {/* イベント管理タブ */}
+         {activeTab === 'events' && (
+          <View>
+            <Text style={styles.sectionTitle}>イベント一覧</Text>
+            {events.length === 0 ? (
+              <Text style={styles.emptyText}>イベントが登録されていません</Text>
+            ) : (
+              events.map((evt) => (
+                <View key={evt.id} style={styles.listItem}>
+                   <View style={{ flex: 1 }}>
+                    <Text style={styles.itemName}>{evt.title}</Text>
+                    <Text style={styles.itemSub}>{evt.description}</Text>
+                  </View>
+                  <TouchableOpacity 
+                    style={[styles.statusBtn, evt.is_active ? styles.statusActive : styles.statusInactive]}
+                    onPress={() => toggleActiveStatus('events', evt.id, evt.is_active)}
+                  >
+                    <Text style={styles.statusBtnText}>{evt.is_active ? '開催中' : '終了'}</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+      </ScrollView>
+    </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A', padding: 20 },
-  h1: { color: '#38BDF8', fontSize: 24, fontWeight: '900', marginBottom: 20, marginTop: 20 },
-  h2: { color: '#F1F5F9', fontSize: 16, fontWeight: 'bold', marginBottom: 10 },
-  section: { backgroundColor: '#1E293B', padding: 20, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#334155' },
-  white: { color: 'white', fontWeight: 'bold', lineHeight: 24 },
-  label: { color: '#94A3B8', marginBottom: 15, fontSize: 12, lineHeight: 18 },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 20, backgroundColor: '#1E293B' },
+  headerTitle: { fontSize: 20, fontWeight: '900', color: '#FFFFFF', letterSpacing: 1 },
+  logoutBtn: { backgroundColor: '#475569', paddingHorizontal: 12, paddingVertical: 6, borderRadius: 6 },
+  logoutText: { color: '#FFFFFF', fontSize: 12, fontWeight: '700' },
   
-  textArea: { backgroundColor: '#020617', color: '#10B981', padding: 15, borderRadius: 10, height: 150, textAlignVertical: 'top', fontFamily: 'monospace' },
-  inputFull: { backgroundColor: '#020617', color: 'white', padding: 15, borderRadius: 10, marginBottom: 10, borderWidth: 1, borderColor: '#334155' },
-  inputSmall: { backgroundColor: '#020617', color: 'white', padding: 8, borderRadius: 5, width: 60, textAlign: 'center', borderWidth: 1, borderColor: '#334155' },
+  tabContainer: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  tab: { flex: 1, paddingVertical: 16, alignItems: 'center' },
+  activeTab: { borderBottomWidth: 3, borderBottomColor: '#3B82F6' },
+  tabText: { color: '#64748B', fontWeight: '700', fontSize: 14 },
+  activeTabText: { color: '#3B82F6', fontWeight: '900' },
   
-  row: { flexDirection: 'row', alignItems: 'center', marginBottom: 8 },
-  btn: { backgroundColor: '#38BDF8', padding: 16, borderRadius: 12, marginTop: 10, alignItems: 'center' },
-  btnText: { fontWeight: '900', color: '#0F172A', fontSize: 15 },
-  chartMock: { marginTop: 10, padding: 15, backgroundColor: '#020617', borderRadius: 10, borderWidth: 1, borderColor: '#334155' }
+  content: { flex: 1, padding: 20 },
+  sectionTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 16, marginTop: 10 },
+  
+  formContainer: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 12, marginBottom: 24, borderWidth: 1, borderColor: '#E2E8F0' },
+  input: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', padding: 12, borderRadius: 8, marginBottom: 12 },
+  addBtn: { backgroundColor: '#10B981', padding: 16, borderRadius: 8, alignItems: 'center' },
+  addBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
+  
+  listItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 16, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
+  itemName: { fontSize: 16, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
+  itemSub: { fontSize: 13, color: '#64748B' },
+  
+  statusBtn: { paddingHorizontal: 12, paddingVertical: 6, borderRadius: 20 },
+  statusActive: { backgroundColor: '#DCFCE7' },
+  statusInactive: { backgroundColor: '#F1F5F9' },
+  statusBtnText: { fontSize: 12, fontWeight: '800', color: '#0F172A' },
+  
+  emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 20 }
 });
