@@ -6,7 +6,6 @@ import { useFocusEffect } from 'expo-router';
 export default function BattleScreen() {
   const [loading, setLoading] = useState(true);
   
-  // バトルの状態管理
   const [deck, setDeck] = useState<any[]>([]);
   const [boss, setBoss] = useState<any>(null);
   const [bossHp, setBossHp] = useState(0);
@@ -18,7 +17,6 @@ export default function BattleScreen() {
 
   const scrollViewRef = useRef<ScrollView>(null);
 
-  // 画面を開くたびに最新のデッキとボスを取得
   useFocusEffect(
     useCallback(() => {
       fetchBattleData();
@@ -33,7 +31,6 @@ export default function BattleScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
 
-    // 1. 出撃中（is_active = true）のカードを取得
     const { data: deckData, error: deckError } = await supabase
       .from('cards')
       .select('*')
@@ -46,7 +43,6 @@ export default function BattleScreen() {
       return;
     }
 
-    // 2. 出現中のボスを取得（今回は簡易的に最初のボスを取得）
     const { data: bossData, error: bossError } = await supabase
       .from('bosses')
       .select('*')
@@ -60,7 +56,6 @@ export default function BattleScreen() {
       return;
     }
 
-    // パーティの合計HPを計算
     const totalHp = deckData.reduce((sum, card) => sum + (card.status_hp || 100), 0);
 
     setDeck(deckData);
@@ -78,40 +73,53 @@ export default function BattleScreen() {
 
   const addLog = (message: string) => {
     setBattleLogs(prev => [...prev, message]);
-    // ログが追加されたら一番下までスクロール
     setTimeout(() => {
       scrollViewRef.current?.scrollToEnd({ animated: true });
     }, 100);
   };
 
-  // ターンの実行（プレイヤーの攻撃 → ボスの反撃）
+  // 👇 【重要】攻撃力に応じた派手なエフェクトロジック
+  const getEffectText = (atk: number) => {
+    if (atk >= 150) return "🌟【超絶必殺】銀河を切り裂く一撃！！🌟";
+    if (atk >= 100) return "🔥【強烈攻撃】猛烈な炎の衝撃波！🔥";
+    if (atk >= 50)  return "⚡【鋭い一撃】雷光が敵を貫く！⚡";
+    return "⚔️ 通常攻撃を繰り出した！";
+  };
+
+  // 👇 サポート用の回復エフェクトロジック
+  const getSupportEffectText = (atk: number) => {
+    if (atk >= 100) return "💖【奇跡の光】女神の息吹が全てを包み込む！💖";
+    return "✨【回復魔法】優しい光が傷を癒やす！✨";
+  };
+
   const executeTurn = async (selectedCard: any) => {
     if (isBattleOver || loading) return;
 
     const cardName = selectedCard.card_name || '名もなき戦士';
     const cardRole = selectedCard.card_role || 'attacker';
     const skillName = selectedCard.skill_name || '通常攻撃';
+    const cardAtk = selectedCard.status_atk || 10;
 
     let currentBossHp = bossHp;
     let currentPartyHp = partyHp;
 
-    // --- 1. プレイヤーの行動 ---
     if (cardRole === 'support') {
-      // サポートカードの行動（回復）
-      const healAmount = (selectedCard.status_atk || 10) * 2;
+      const healAmount = cardAtk * 2;
       currentPartyHp = Math.min(partyMaxHp, currentPartyHp + healAmount);
-      addLog(`✨ [${cardName}] のサポート技！\n『${skillName}』でパーティのHPが ${healAmount} 回復した！`);
+      const effectStr = getSupportEffectText(cardAtk);
+      addLog(`✨ [${cardName}] のサポート技！\n${effectStr}\n『${skillName}』でパーティのHPが ${healAmount} 回復した！`);
       setPartyHp(currentPartyHp);
     } else {
-      // アタッカーカードの行動（攻撃）
-      const damage = Math.max(1, (selectedCard.status_atk || 10) - (boss.def || 0) / 2);
-      const finalDamage = Math.floor(damage * (1 + Math.random() * 0.2)); // 乱数でダメージブレを実装
+      const damage = Math.max(1, cardAtk - (boss.def || 0) / 2);
+      const finalDamage = Math.floor(damage * (1 + Math.random() * 0.2));
       currentBossHp = Math.max(0, currentBossHp - finalDamage);
-      addLog(`💥 [${cardName}] の攻撃！\n『${skillName}』が炸裂！ ${boss.name} に ${finalDamage} のダメージ！`);
+      
+      // 演出テキストを組み込んでログを出力
+      const effectStr = getEffectText(cardAtk);
+      addLog(`💥 [${cardName}] の攻撃！\n${effectStr}\n『${skillName}』が炸裂！ ${boss.name} に ${finalDamage} のダメージ！`);
       setBossHp(currentBossHp);
     }
 
-    // ボス撃破判定
     if (currentBossHp <= 0) {
       addLog(`🎉 討伐成功！ ${boss.name} は崩れ落ちた...！`);
       addLog(`【システム】経験値と報酬を獲得しました。（※報酬付与機能は今後のアップデートで解放されます）`);
@@ -119,8 +127,6 @@ export default function BattleScreen() {
       return;
     }
 
-    // --- 2. ボスの行動（反撃） ---
-    // 少し遅延を入れて敵の攻撃を演出
     setTimeout(() => {
       const bossDamage = Math.max(1, (boss.atk || 20) - (selectedCard.status_def || 10) / 2);
       const finalBossDamage = Math.floor(bossDamage * (1 + Math.random() * 0.2));
@@ -129,12 +135,11 @@ export default function BattleScreen() {
       addLog(`💀 ${boss.name} の反撃！\n強烈な一撃により、パーティ全体に ${finalBossDamage} のダメージ！`);
       setPartyHp(currentPartyHp);
 
-      // パーティ全滅判定
       if (currentPartyHp <= 0) {
         addLog(`☠️ パーティは全滅してしまった...。図鑑で部隊を強化して再挑戦しよう。`);
         setIsBattleOver(true);
       }
-    }, 800); // 0.8秒後に敵が攻撃
+    }, 800);
   };
 
   const renderDeckCard = ({ item }: { item: any }) => {
@@ -179,8 +184,6 @@ export default function BattleScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      
-      {/* 敵エリア（上部） */}
       <View style={styles.enemyArea}>
         <Text style={styles.bossName}>Lv.? {boss.name}</Text>
         <View style={styles.hpBarContainer}>
@@ -189,12 +192,7 @@ export default function BattleScreen() {
         <Text style={styles.hpText}>HP: {bossHp} / {bossMaxHp}</Text>
       </View>
 
-      {/* バトルログエリア（中間） */}
-      <ScrollView 
-        style={styles.logArea} 
-        ref={scrollViewRef}
-        showsVerticalScrollIndicator={false}
-      >
+      <ScrollView style={styles.logArea} ref={scrollViewRef} showsVerticalScrollIndicator={false}>
         {battleLogs.map((log, index) => (
           <Text key={index} style={styles.logText}>{log}</Text>
         ))}
@@ -205,7 +203,6 @@ export default function BattleScreen() {
         )}
       </ScrollView>
 
-      {/* プレイヤーエリア（下部） */}
       <View style={styles.playerArea}>
         <Text style={styles.partyName}>あなたの軍勢（{deck.length}体）</Text>
         <View style={styles.hpBarContainer}>
@@ -225,7 +222,6 @@ export default function BattleScreen() {
           />
         </View>
       </View>
-
     </SafeAreaView>
   );
 }
