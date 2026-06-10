@@ -1,21 +1,24 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, SafeAreaView, ActivityIndicator, Alert, Modal, Share } from 'react-native';
+import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, SafeAreaView, ActivityIndicator, Alert, Modal, ScrollView } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 
 export default function TradeScreen() {
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('market'); // market, my_trades
+  const [activeTab, setActiveTab] = useState('market'); // market, my_trades, matches
   const [userId, setUserId] = useState<string | null>(null);
 
-  // データ
+  // データ状態
   const [marketListings, setMarketListings] = useState<any[]>([]);
   const [myListings, setMyListings] = useState<any[]>([]);
-  const [myDeck, setMyDeck] = useState<any[]>([]); // オファー用に自分のカード一覧を保持
+  const [activeMatches, setActiveMatches] = useState<any[]>([]);
+  const [myDeck, setMyDeck] = useState<any[]>([]);
 
-  // オファー用モーダル状態
-  const [offerModalVisible, setOfferModalVisible] = useState(false);
-  const [selectedListing, setSelectedListing] = useState<any>(null);
+  // 出品フォーム用モーダル
+  const [createModalVisible, setCreateModalVisible] = useState(false);
+  const [selectedCardForTrade, setSelectedCardForTrade] = useState<any>(null);
+  const [desiredRarity, setDesiredRarity] = useState('SR');
+  const [desiredRole, setDesiredRole] = useState('attacker');
 
   useFocusEffect(
     useCallback(() => {
@@ -29,257 +32,352 @@ export default function TradeScreen() {
     if (!user) return;
     setUserId(user.id);
 
+    // 自分の控えカード取得
+    const { data: myCards } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', false);
+    if (myCards) setMyDeck(myCards);
+
     if (activeTab === 'market') {
-      // 他人の出品一覧を取得（自分以外、かつステータスがopen）
+      // 市場の出品取得
       const { data } = await supabase
         .from('trade_listings')
-        .select(`id, status, cards (id, card_name, image_url, rarity, status_total)`)
+        .select(`id, desired_rarity, desired_role, cards (id, card_name, image_url, rarity, card_role, status_total)`)
         .neq('player_id', user.id)
         .eq('status', 'open')
         .order('created_at', { ascending: false });
       if (data) setMarketListings(data);
-    } else {
-      // 自分の出品と、それに紐づくオファーを取得
+
+    } else if (activeTab === 'my_trades') {
+      // 自分の出品取得
       const { data } = await supabase
         .from('trade_listings')
-        .select(`
-          id, status, 
-          cards (id, card_name, image_url),
-          trade_offers (id, status, cards (id, card_name, image_url, rarity, player_id))
-        `)
+        .select(`id, status, desired_rarity, desired_role, cards (id, card_name, image_url, rarity)`)
         .eq('player_id', user.id)
-        .eq('status', 'open')
-        .order('created_at', { ascending: false });
+        .eq('status', 'open');
       if (data) setMyListings(data);
-    }
 
-    // 自分の手持ちカードを取得（オファーや出品に使うため）
-    const { data: myCards } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', false);
-    if (myCards) setMyDeck(myCards);
+    } else if (activeTab === 'matches') {
+      // 💡【新規：自動マッチング通知の取得】
+      // 自分がプレイヤーA、またはプレイヤーBとして関わっている成立中のマッチを取得
+      const { data } = await supabase
+        .from('trade_matches')
+        .select(`
+          id, status, player_a_id, player_b_id,
+          listing_a:listing_a_id ( id, cards (id, card_name, image_url, rarity) ),
+          listing_b:listing_b_id ( id, cards (id, card_name, image_url, rarity) )
+        `)
+        .or(`player_a_id.eq.${user.id},player_b_id.eq.${user.id}`)
+        .eq('status', 'matching');
+      if (data) setActiveMatches(data);
+    }
 
     setLoading(false);
   };
 
-  // 1. 他人のカードに対して、自分のカードを選んでオファー（交換提案）を出す
-  const submitOffer = async (myCardId: string) => {
-    if (!selectedListing || !userId) return;
-    
-    const { error } = await supabase.from('trade_offers').insert([
-      { listing_id: selectedListing.id, offerer_player_id: userId, offered_card_id: myCardId }
-    ]);
+  // 💡【新規：出品 ＆ 同質カードの自動マッチング検出ロジック】
+  const handleCreateListing = async () => {
+    if (!selectedCardForTrade || !userId) return;
 
-    if (!error) {
-      Alert.alert('オファー完了', '相手に交換を提案しました。承認されるのをお待ちください！');
-      setOfferModalVisible(false);
+    setLoading(true);
+    // 1. 市場に出品を登録
+    const { data: newListing, error: listError } = await supabase
+      .from('trade_listings')
+      .insert([{
+        player_id: userId,
+        card_id: selectedCardForTrade.id,
+        desired_rarity: desiredRarity,
+        desired_role: desiredRole,
+        status: 'open'
+      }])
+      .select()
+      .single();
+
+    if (listError || !newListing) {
+      Alert.alert('出品失敗', listError?.message);
+      setLoading(false);
+      return;
+    }
+
+    // 2. 自動マッチングのアルゴリズム走査
+    // 「相手が出品したカード」が「自分の希望条件」に合い、かつ「相手の希望条件」が「自分のカード」に合うものを探す
+    const { data: matchTarget } = await supabase
+      .from('trade_listings')
+      .select('id, player_id, cards(rarity, card_role)')
+      .neq('player_id', userId)
+      .eq('status', 'open')
+      .eq('desired_rarity', selectedCardForTrade.rarity) // 相手の希望が私のカードのレアリティ
+      .eq('desired_role', selectedCardForTrade.card_role)   // 相手の希望が私のカードのロール
+      .eq('cards.rarity', desiredRarity)                 // 私の希望が相手のカードのレアリティ
+      .eq('cards.card_role', desiredRole)                 // 私の希望が相手のカードのロール
+      .limit(1)
+      .maybeSingle();
+
+    if (matchTarget) {
+      // 相互の条件が完全一致する「同質カード」を発見！マッチングテーブルに登録
+      await supabase.from('trade_matches').insert([{
+        listing_a_id: newListing.id,
+        listing_b_id: matchTarget.id,
+        player_a_id: userId,
+        player_b_id: matchTarget.player_id,
+        status: 'matching'
+      }]);
+      Alert.alert('⚡マッチング即時検知！', 'あなたの希望条件と完全に一致するトレード出品が自動検出されました！「マッチング通知」タブを確認してください。');
     } else {
-      Alert.alert('エラー', 'オファーに失敗しました。');
+      Alert.alert('出品完了', '掲示板への登録が完了しました。条件に合うカードが出品されると自動マッチングされます。');
     }
+
+    setCreateModalVisible(false);
+    setSelectedCardForTrade(null);
+    fetchTradeData();
   };
 
-  // 2. 届いたオファーを「承認」して、カードの所有権を入れ替える（取引成立）
-  const acceptOffer = async (listing: any, offer: any) => {
-    Alert.alert(
-      "トレード承認",
-      `${offer.cards.card_name} と交換しますか？この操作は取り消せません。`,
-      [
-        { text: "キャンセル", style: "cancel" },
-        { text: "交換する", onPress: async () => {
-            setLoading(true);
-            // 所有権の交換（アトミックな処理の簡易版）
-            await supabase.from('cards').update({ player_id: offer.cards.player_id }).eq('id', listing.cards.id); // 自分のカードを相手へ
-            await supabase.from('cards').update({ player_id: userId }).eq('id', offer.cards.id); // 相手のカードを自分へ
-            
-            // 取引ステータスを完了に
-            await supabase.from('trade_listings').update({ status: 'completed' }).eq('id', listing.id);
-            await supabase.from('trade_offers').update({ status: 'accepted' }).eq('id', offer.id);
-            
-            Alert.alert('トレード成立！', 'カードの交換が完了しました。図鑑を確認してください。');
-            fetchTradeData();
-          }
-        }
-      ]
-    );
-  };
-
-  // 3. SNS共有機能（ネイティブのShare APIを使用）
-  const shareToSNS = async (cardName: string) => {
-    try {
-      await Share.share({
-        message: `激レアカード「${cardName}」を取引所に出品中！誰か交換しませんか？ #SnapCard #RealPhotoTCG #ストリートスナップTCG`,
-      });
-    } catch (error: any) {
-      console.log(error.message);
+  // 💡【新規：マッチングの可否判断（承認・拒否）フロー】
+  const handleResolveMatch = async (matchId: string, action: 'approved' | 'rejected', matchData: any) => {
+    if (action === 'rejected') {
+      await supabase.from('trade_matches').update({ status: 'rejected' }).eq('id', matchId);
+      Alert.alert('拒否完了', 'このマッチング提案を破棄しました。');
+      fetchTradeData();
+      return;
     }
-  };
 
-  const renderMarketItem = ({ item }: { item: any }) => (
-    <View style={styles.tradeCard}>
-      <Image source={{ uri: item.cards.image_url }} style={styles.cardPreview} />
-      <View style={styles.cardInfo}>
-        <Text style={styles.cardName}>{item.cards.card_name}</Text>
-        <Text style={styles.cardStats}>レアリティ: {item.cards.rarity} | 総合力: {item.cards.status_total}</Text>
-        <TouchableOpacity 
-          style={styles.offerBtn} 
-          onPress={() => { setSelectedListing(item); setOfferModalVisible(true); }}
-        >
-          <Text style={styles.offerBtnText}>🔄 交換を提案する</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={styles.shareBtn} onPress={() => shareToSNS(item.cards.card_name)}>
-          <Text style={styles.shareBtnText}>📤 SNSで募集する</Text>
-        </TouchableOpacity>
-      </View>
-    </View>
-  );
+    // 承認時のカード所有権入れ替え処理
+    setLoading(true);
+    const cardA = matchData.listing_a.cards;
+    const cardB = matchData.listing_b.cards;
+    const playerA = matchData.player_a_id;
+    const playerB = matchData.player_b_id;
 
-  const renderMyListing = ({ item }: { item: any }) => {
-    const pendingOffers = item.trade_offers?.filter((o: any) => o.status === 'pending') || [];
-    
-    return (
-      <View style={styles.myListingCard}>
-        <View style={{ flexDirection: 'row', alignItems: 'center' }}>
-          <Image source={{ uri: item.cards.image_url }} style={styles.myCardPreview} />
-          <View style={{ flex: 1, marginLeft: 12 }}>
-            <Text style={styles.myCardName}>出品中: {item.cards.card_name}</Text>
-            <Text style={styles.offerCountText}>届いたオファー: {pendingOffers.length}件</Text>
-          </View>
-        </View>
+    // AのカードをBへ、BのカードをAへトレード
+    await supabase.from('cards').update({ player_id: playerB }).eq('id', cardA.id);
+    await supabase.from('cards').update({ player_id: playerA }).eq('id', cardB.id);
 
-        {pendingOffers.length > 0 && (
-          <View style={styles.offersContainer}>
-            <Text style={styles.offersTitle}>▼ 提案されているカード</Text>
-            {pendingOffers.map((offer: any) => (
-              <View key={offer.id} style={styles.offerItem}>
-                <Image source={{ uri: offer.cards.image_url }} style={styles.offerCardPreview} />
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.offerCardName}>{offer.cards.card_name}</Text>
-                  <Text style={styles.offerStats}>{offer.cards.rarity}</Text>
-                </View>
-                <TouchableOpacity style={styles.acceptBtn} onPress={() => acceptOffer(item, offer)}>
-                  <Text style={styles.acceptBtnText}>承認</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
-          </View>
-        )}
-      </View>
-    );
+    // 出品とマッチングのステータスをクローズ
+    await supabase.from('trade_listings').update({ status: 'completed' }).in('id', [matchData.listing_a.id, matchData.listing_b.id]);
+    await supabase.from('trade_matches').update({ status: 'approved' }).eq('id', matchId);
+
+    Alert.alert('🎉 トレード成立！', '自動マッチングの承認が完了し、カードがあなたに転送されました！');
+    fetchTradeData();
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
-        <Text style={styles.headerTitle}>GLOBAL TRADE</Text>
-        <Text style={styles.headerSub}>プレイヤー間カード取引所</Text>
+        <Text style={styles.headerTitle}>MATCHING TRADE</Text>
+        <Text style={styles.headerSub}>条件一致で自動通知される取引所</Text>
       </View>
 
+      {/* タブ */}
       <View style={styles.tabContainer}>
-        <TouchableOpacity style={[styles.tab, activeTab === 'market' && styles.activeTab]} onPress={() => setActiveTab('market')}>
-          <Text style={[styles.tabText, activeTab === 'market' && styles.activeTabText]}>マーケット（他人の出品）</Text>
-        </TouchableOpacity>
-        <TouchableOpacity style={[styles.tab, activeTab === 'my_trades' && styles.activeTab]} onPress={() => setActiveTab('my_trades')}>
-          <Text style={[styles.tabText, activeTab === 'my_trades' && styles.activeTabText]}>自分の出品とオファー</Text>
-        </TouchableOpacity>
+        {['market', 'my_trades', 'matches'].map((t) => (
+          <TouchableOpacity key={t} style={[styles.tab, activeTab === t && styles.activeTab]} onPress={() => setActiveTab(t)}>
+            <Text style={[styles.tabText, activeTab === t && styles.activeTabText]}>
+              {t === 'market' ? '公開市場' : t === 'my_trades' ? '自分の出品' : '⚡ マッチング通知'}
+            </Text>
+          </TouchableOpacity>
+        ))}
       </View>
 
       {loading ? (
         <ActivityIndicator size="large" color="#3B82F6" style={{ marginTop: 50 }} />
-      ) : activeTab === 'market' ? (
-        <FlatList
-          data={marketListings}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMarketItem}
-          contentContainerStyle={{ padding: 16 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>現在、取引所にカードはありません。</Text>}
-        />
       ) : (
-        <FlatList
-          data={myListings}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMyListing}
-          contentContainerStyle={{ padding: 16 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>現在出品しているカードはありません。</Text>}
-        />
+        <View style={{ flex: 1 }}>
+          {activeTab === 'market' && (
+            <FlatList
+              data={marketListings}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: 16 }}
+              ListHeaderComponent={
+                <TouchableOpacity style={styles.createBtn} onPress={() => setCreateModalVisible(true)}>
+                  <Text style={styles.createBtnText}>➕ 条件を指定して新しく出品する</Text>
+                </TouchableOpacity>
+              }
+              renderItem={({ item }) => (
+                <View style={styles.tradeCard}>
+                  <Image source={{ uri: item.cards?.image_url }} style={styles.cardPreview} />
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.cardName}>{item.cards?.card_name}</Text>
+                    <Text style={styles.cardStats}>保有カード: {item.cards?.rarity} ({item.cards?.card_role})</Text>
+                    <View style={styles.desireTag}>
+                      <Text style={styles.desireText}>求: {item.desired_rarity} / {item.desired_role}</Text>
+                    </View>
+                  </View>
+                </View>
+              )}
+            />
+          )}
+
+          {activeTab === 'my_trades' && (
+            <FlatList
+              data={myListings}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: 16 }}
+              renderItem={({ item }) => (
+                <View style={styles.tradeCard}>
+                  <Image source={{ uri: item.cards?.image_url }} style={styles.cardPreview} />
+                  <View style={styles.cardInfo}>
+                    <Text style={styles.cardName}>{item.cards?.card_name}</Text>
+                    <Text style={styles.cardStats}>あなたの出品: {item.cards?.rarity}</Text>
+                    <Text style={styles.matchConditionText}>自動マッチ設定 ➔ 求: {item.desired_rarity} ({item.desired_role})</Text>
+                  </View>
+                </View>
+              )}
+            />
+          )}
+
+          {/* 💡【新規：マッチング通知ビュー】 */}
+          {activeTab === 'matches' && (
+            <FlatList
+              data={activeMatches}
+              keyExtractor={(item) => item.id}
+              contentContainerStyle={{ padding: 16 }}
+              ListEmptyComponent={<Text style={styles.emptyText}>現在、条件が合致した自動マッチング提案はありません。</Text>}
+              renderItem={({ item }) => {
+                const isAmIPlayerA = item.player_a_id === userId;
+                const myMatchedCard = isAmIPlayerA ? item.listing_a.cards : item.listing_b.cards;
+                const opponentCard = isAmIPlayerA ? item.listing_b.cards : item.listing_a.cards;
+
+                return (
+                  <View style={styles.matchNotificationCard}>
+                    <Text style={styles.matchAlertTitle}>⚡ 同質カード自動マッチング検知！</Text>
+                    <View style={styles.matchSwapRow}>
+                      <View style={styles.matchHalf}>
+                        <Text style={styles.swapLabel}>あなたの出すカード</Text>
+                        <Image source={{ uri: myMatchedCard?.image_url }} style={styles.miniCardImg} />
+                        <Text style={styles.miniCardName}>{myMatchedCard?.card_name}</Text>
+                      </View>
+                      <View style={styles.swapIconContainer}><Text style={styles.swapIcon}>🔄</Text></View>
+                      <View style={styles.matchHalf}>
+                        <Text style={styles.swapLabel}>あなたに届くカード</Text>
+                        <Image source={{ uri: opponentCard?.image_url }} style={styles.miniCardImg} />
+                        <Text style={styles.miniCardName}>{opponentCard?.card_name}</Text>
+                      </View>
+                    </View>
+                    <View style={styles.matchActionRow}>
+                      <TouchableOpacity style={[styles.actionBtn, styles.rejectBtn]} onPress={() => handleResolveMatch(item.id, 'rejected', item)}>
+                        <Text style={styles.actionBtnText}>断る</Text>
+                      </TouchableOpacity>
+                      <TouchableOpacity style={[styles.actionBtn, styles.approveBtn]} onPress={() => handleResolveMatch(item.id, 'approved', item)}>
+                        <Text style={styles.actionBtnText}>交換を承認する</Text>
+                      </TouchableOpacity>
+                    </View>
+                  </View>
+                );
+              }}
+            />
+          )}
+        </View>
       )}
 
-      {/* オファーするカードを選択するモーダル */}
-      <Modal visible={offerModalVisible} animationType="slide" transparent={true}>
-        <View style={styles.modalOverlay}>
-          <View style={styles.modalContent}>
-            <Text style={styles.modalTitle}>どのカードを交換に出しますか？</Text>
-            <Text style={styles.modalSub}>※デッキに編成中のカードは選べません</Text>
+      {/* 出品条件設定用モーダル */}
+      <Modal visible={createModalVisible} animationType="slide">
+        <SafeAreaView style={styles.modalContainer}>
+          <ScrollView style={{ padding: 20 }}>
+            <Text style={styles.modalMainTitle}>トレード出品・自動マッチング条件設定</Text>
+            
+            <Text style={styles.label}>1. 放出するカードを選択（タップして決定）</Text>
             <FlatList
               data={myDeck}
               keyExtractor={(item) => item.id}
               horizontal
-              showsHorizontalScrollIndicator={false}
               renderItem={({ item }) => (
-                <TouchableOpacity style={styles.modalCardBtn} onPress={() => submitOffer(item.id)}>
-                  <Image source={{ uri: item.image_url }} style={styles.modalCardImg} />
-                  <Text style={styles.modalCardName} numberOfLines={1}>{item.card_name}</Text>
-                  <Text style={styles.modalCardSelectText}>これを選ぶ</Text>
+                <TouchableOpacity style={[styles.choiceCard, selectedCardForTrade?.id === item.id && styles.activeChoice]} onPress={() => setSelectedCardForTrade(item)}>
+                  <Image source={{ uri: item.image_url }} style={styles.choiceImg} />
+                  <Text style={styles.choiceName} numberOfLines={1}>{item.card_name}</Text>
                 </TouchableOpacity>
               )}
             />
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setOfferModalVisible(false)}>
-              <Text style={styles.closeBtnText}>キャンセル</Text>
-            </TouchableOpacity>
-          </View>
-        </View>
-      </Modal>
 
+            {selectedCardForTrade && (
+              <View style={{ marginTop: 20 }}>
+                <Text style={styles.selectedConfirmText}>選択中: 【{selectedCardForTrade.card_name}】</Text>
+                
+                <Text style={styles.label}>2. 自動交換を希望するレアリティ（同質条件）</Text>
+                <View style={styles.rowGap}>
+                  {['R', 'SR', 'SSR', 'UR'].map((r) => (
+                    <TouchableOpacity key={r} style={[styles.chip, desiredRarity === r && styles.activeChip]} onPress={() => setDesiredRarity(r)}>
+                      <Text style={styles.chipText}>{r}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <Text style={styles.label}>3. 自動交換を希望するカード役割</Text>
+                <View style={styles.rowGap}>
+                  {['attacker', 'support'].map((role) => (
+                    <TouchableOpacity key={role} style={[styles.chip, desiredRole === role && styles.activeChip]} onPress={() => setDesiredRole(role)}>
+                      <Text style={styles.chipText}>{role === 'attacker' ? '⚔️ アタッカー' : '🛡️ サポート'}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </View>
+
+                <TouchableOpacity style={styles.finalSubmitBtn} onPress={handleCreateListing}>
+                  <Text style={styles.finalSubmitBtnText}>この条件で自動検索・出品</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.closeModalBtn} onPress={() => setCreateModalVisible(false)}>
+              <Text style={styles.closeModalBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </ScrollView>
+        </SafeAreaView>
+      </Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { padding: 20, alignItems: 'center', backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  headerTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
-  headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '700' },
+  header: { padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  headerTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
+  headerSub: { fontSize: 11, color: '#64748B', marginTop: 2, fontWeight: '700' },
   
   tabContainer: { flexDirection: 'row', backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
   tab: { flex: 1, paddingVertical: 14, alignItems: 'center' },
   activeTab: { borderBottomWidth: 3, borderBottomColor: '#3B82F6' },
-  tabText: { color: '#64748B', fontWeight: '700', fontSize: 13 },
+  tabText: { color: '#64748B', fontWeight: '700', fontSize: 12 },
   activeTabText: { color: '#3B82F6', fontWeight: '900' },
   
-  tradeCard: { flexDirection: 'row', backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16, marginBottom: 16, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5 },
-  cardPreview: { width: 80, height: 110, borderRadius: 8, backgroundColor: '#F1F5F9' },
-  cardInfo: { flex: 1, marginLeft: 16, justifyContent: 'center' },
-  cardName: { fontSize: 16, fontWeight: '900', color: '#0F172A', marginBottom: 4 },
-  cardStats: { fontSize: 12, color: '#64748B', marginBottom: 12, fontWeight: '600' },
+  createBtn: { backgroundColor: '#0F172A', padding: 14, borderRadius: 12, alignItems: 'center', marginBottom: 16 },
+  createBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   
-  offerBtn: { backgroundColor: '#3B82F6', paddingVertical: 10, borderRadius: 8, alignItems: 'center', marginBottom: 8 },
-  offerBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
-  shareBtn: { backgroundColor: '#F1F5F9', paddingVertical: 10, borderRadius: 8, alignItems: 'center' },
-  shareBtnText: { color: '#475569', fontWeight: '800', fontSize: 13 },
-  
-  myListingCard: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 16, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0' },
-  myCardPreview: { width: 60, height: 80, borderRadius: 6 },
-  myCardName: { fontSize: 15, fontWeight: '800', color: '#0F172A', marginBottom: 4 },
-  offerCountText: { fontSize: 13, color: '#10B981', fontWeight: '800' },
-  
-  offersContainer: { marginTop: 16, paddingTop: 16, borderTopWidth: 1, borderTopColor: '#F1F5F9' },
-  offersTitle: { fontSize: 12, color: '#64748B', fontWeight: '800', marginBottom: 12 },
-  offerItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#F8FAFC', padding: 10, borderRadius: 10, marginBottom: 8 },
-  offerCardPreview: { width: 40, height: 55, borderRadius: 4, marginRight: 10 },
-  offerCardName: { fontSize: 13, fontWeight: '800', color: '#0F172A' },
-  offerStats: { fontSize: 11, color: '#64748B' },
-  acceptBtn: { backgroundColor: '#10B981', paddingHorizontal: 12, paddingVertical: 8, borderRadius: 6 },
-  acceptBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 12 },
-  
-  emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 40, fontWeight: '600', fontSize: 14 },
+  tradeCard: { flexDirection: 'row', backgroundColor: '#FFFFFF', padding: 14, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
+  cardPreview: { width: 65, height: 90, borderRadius: 8 },
+  cardInfo: { flex: 1, marginLeft: 14, justifyContent: 'center' },
+  cardName: { fontSize: 15, fontWeight: '900', color: '#0F172A', marginBottom: 2 },
+  cardStats: { fontSize: 12, color: '#64748B', marginBottom: 6 },
+  desireTag: { backgroundColor: '#EFF6FF', paddingHorizontal: 8, paddingVertical: 4, borderRadius: 6, alignSelf: 'flex-start', borderWidth: 1, borderColor: '#BFDBFE' },
+  desireText: { color: '#2563EB', fontSize: 11, fontWeight: '800' },
+  matchConditionText: { fontSize: 11, color: '#0EA5E9', fontWeight: '700' },
 
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.8)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFFFFF', borderTopLeftRadius: 24, borderTopRightRadius: 24, padding: 24, paddingBottom: 40, minHeight: 350 },
-  modalTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', marginBottom: 4, textAlign: 'center' },
-  modalSub: { fontSize: 12, color: '#F43F5E', fontWeight: '700', marginBottom: 20, textAlign: 'center' },
-  
-  modalCardBtn: { width: 100, marginRight: 16, alignItems: 'center' },
-  modalCardImg: { width: 100, height: 140, borderRadius: 8, marginBottom: 8, borderWidth: 1, borderColor: '#E2E8F0' },
-  modalCardName: { fontSize: 11, fontWeight: '800', color: '#0F172A', marginBottom: 8, textAlign: 'center' },
-  modalCardSelectText: { color: '#3B82F6', fontWeight: '800', fontSize: 13 },
-  
-  closeBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 20 },
-  closeBtnText: { color: '#475569', fontWeight: '800', fontSize: 14 }
+  matchNotificationCard: { backgroundColor: '#FFFFFF', borderRadius: 20, padding: 16, marginBottom: 16, borderWidth: 2, borderColor: '#10B981', shadowColor: '#10B981', shadowOpacity: 0.1, shadowRadius: 10 },
+  matchAlertTitle: { color: '#10B981', fontWeight: '900', fontSize: 14, marginBottom: 14, textAlign: 'center' },
+  matchSwapRow: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', backgroundColor: '#F0FDF4', padding: 12, borderRadius: 12 },
+  matchHalf: { width: '42%', alignItems: 'center' },
+  swapLabel: { fontSize: 10, color: '#475569', fontWeight: '700', marginBottom: 6 },
+  miniCardImg: { width: 70, height: 95, borderRadius: 6 },
+  miniCardName: { fontSize: 11, fontWeight: '800', color: '#0F172A', marginTop: 4, textAlign: 'center' },
+  swapIconContainer: { width: '10%', alignItems: 'center' },
+  swapIcon: { fontSize: 18 },
+  matchActionRow: { flexDirection: 'row', justifyContent: 'space-between', marginTop: 14 },
+  actionBtn: { width: '48%', padding: 12, borderRadius: 10, alignItems: 'center' },
+  rejectBtn: { backgroundColor: '#F1F5F9' },
+  approveBtn: { backgroundColor: '#10B981' },
+  actionBtnText: { fontWeight: '800', fontSize: 13, color: '#475569' },
+
+  modalContainer: { flex: 1, backgroundColor: '#FFFFFF' },
+  modalMainTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', marginBottom: 20, textAlign: 'center' },
+  label: { fontSize: 13, fontWeight: '800', color: '#475569', marginTop: 16, marginBottom: 10 },
+  choiceCard: { width: 80, marginRight: 10, alignItems: 'center', padding: 4, borderRadius: 8 },
+  activeChoice: { borderWidth: 2, borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
+  choiceImg: { width: 70, height: 95, borderRadius: 6 },
+  choiceName: { fontSize: 10, color: '#0F172A', marginTop: 4 },
+  selectedConfirmText: { color: '#2563EB', fontWeight: '900', fontSize: 14, textAlign: 'center', marginVertical: 10 },
+  rowGap: { flexDirection: 'row', gap: 8, flexWrap: 'wrap' },
+  chip: { backgroundColor: '#F1F5F9', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 20 },
+  activeChip: { backgroundColor: '#EFF6FF', borderWidth: 1, borderColor: '#3B82F6' },
+  chipText: { fontSize: 12, fontWeight: '700', color: '#475569' },
+  finalSubmitBtn: { backgroundColor: '#3B82F6', padding: 16, borderRadius: 12, alignItems: 'center', marginTop: 30 },
+  finalSubmitBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+  closeModalBtn: { backgroundColor: '#F1F5F9', padding: 14, borderRadius: 12, alignItems: 'center', marginTop: 40 },
+  closeModalBtnText: { color: '#475569', fontWeight: '700' },
+  emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 40, fontWeight: '600' }
 });
