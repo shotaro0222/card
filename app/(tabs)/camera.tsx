@@ -100,6 +100,11 @@ export default function CameraScreen() {
     }
   };
 
+  } catch (error: any) {
+      console.error("🚨カード生成の致命的エラー:", error); // 👈 この1行を追加！
+      Alert.alert('生成エラー', error.message);
+    } finally {
+
   const translateY = scanLineAnim.interpolate({
     inputRange: [0, 1],
     outputRange: [0, 250] // 枠の高さに合わせて移動
