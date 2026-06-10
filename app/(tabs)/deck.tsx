@@ -17,7 +17,10 @@ export default function DeckScreen() {
   const fetchCards = async () => {
     setLoading(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
+    if (!user) {
+      setLoading(false);
+      return;
+    }
     const { data, error } = await supabase
       .from('cards')
       .select('*')
@@ -25,7 +28,11 @@ export default function DeckScreen() {
       .order('is_active', { ascending: false })
       .order('created_at', { ascending: false });
       
-    if (!error && data) setCards(data);
+    if (!error && data) {
+      setCards(data);
+    } else {
+      console.error("図鑑取得エラー:", error);
+    }
     setLoading(false);
   };
 
@@ -43,42 +50,46 @@ export default function DeckScreen() {
   };
 
   const renderCard = ({ item }: { item: any }) => {
-    // 1レベルごとに必要な経験値（レベル × 100）
-    const nextLevelExp = item.level * 100;
-    // 進行バーの割合計算（安全に0〜100%に収める）
-    const progressPercent = Math.min(100, Math.max(0, (item.exp / nextLevelExp) * 100));
+    // ⚠️ データベースから null が来ても絶対にクラッシュさせない安全設計
+    const safeLevel = item.level || 1;
+    const safeExp = item.exp || 0;
+    const nextLevelExp = safeLevel * 100;
+    const progressPercent = Math.min(100, Math.max(0, (safeExp / nextLevelExp) * 100));
 
     return (
       <View style={[styles.card, item.is_active && styles.activeCard, item.is_fixed && styles.sponsorCard]}>
         <View style={styles.cardHeader}>
           <Text style={styles.cardName} numberOfLines={1}>
-            {item.is_fixed ? '🌟 ' : ''}{item.card_name}
+            {item.is_fixed ? '🌟 ' : ''}{item.card_name || '名称不明'}
           </Text>
-          <div style={styles.rarityBadge}>
-            <Text style={styles.rarityText}>{item.rarity}</Text>
-          </div>
+          {/* ⚠️ div を View に修正！ */}
+          <View style={styles.rarityBadge}>
+            <Text style={styles.rarityText}>{item.rarity || 'N'}</Text>
+          </View>
         </View>
         
-        <Image source={{ uri: item.image_url }} style={styles.cardImage} />
+        <Image 
+          source={{ uri: item.image_url || 'https://via.placeholder.com/400' }} 
+          style={styles.cardImage} 
+        />
 
-        {/* 📈 【新規】老若男女対応・ビジュアルレベルメーター */}
         <View style={styles.levelContainer}>
           <View style={styles.levelHeader}>
-            <Text style={styles.levelText}>レベル {item.level}</Text>
-            <Text style={styles.expText}>あと {nextLevelExp - item.exp} EXP で成長（{item.exp} / {nextLevelExp}）</Text>
+            <Text style={styles.levelText}>レベル {safeLevel}</Text>
+            <Text style={styles.expText}>あと {nextLevelExp - safeExp} EXP で成長（{safeExp} / {nextLevelExp}）</Text>
           </View>
           <View style={styles.progressBarBg}>
             <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
           </View>
         </View>
         
-        <Text style={styles.skillText}>必殺技: {item.skill_name}</Text>
+        <Text style={styles.skillText}>必殺技: {item.skill_name || '通常攻撃'}</Text>
         
         <View style={styles.statsRow}>
-          <View style={styles.statBox}><Text style={styles.statLabel}>HP</Text><Text style={styles.statValue}>{item.status_hp}</Text></View>
-          <View style={styles.statBox}><Text style={styles.statLabel}>ATK</Text><Text style={styles.statValue}>{item.status_atk}</Text></View>
-          <View style={styles.statBox}><Text style={styles.statLabel}>DEF</Text><Text style={styles.statValue}>{item.status_def}</Text></View>
-          <View style={styles.statBox}><Text style={styles.statLabel}>SPD</Text><Text style={styles.statValue}>{item.status_spd}</Text></View>
+          <View style={styles.statBox}><Text style={styles.statLabel}>HP</Text><Text style={styles.statValue}>{item.status_hp || 100}</Text></View>
+          <View style={styles.statBox}><Text style={styles.statLabel}>ATK</Text><Text style={styles.statValue}>{item.status_atk || 10}</Text></View>
+          <View style={styles.statBox}><Text style={styles.statLabel}>DEF</Text><Text style={styles.statValue}>{item.status_def || 10}</Text></View>
+          <View style={styles.statBox}><Text style={styles.statLabel}>SPD</Text><Text style={styles.statValue}>{item.status_spd || 10}</Text></View>
         </View>
 
         {item.ar_model_url && (
@@ -110,7 +121,7 @@ export default function DeckScreen() {
       ) : (
         <FlatList
           data={cards}
-          keyExtractor={(item) => item.id}
+          keyExtractor={(item) => item.id.toString()}
           renderItem={renderCard}
           contentContainerStyle={{ padding: 16, paddingBottom: 30 }}
           ListEmptyComponent={<Text style={styles.emptyText}>カードがありません。「カード化」からカメラを起動しましょう。</Text>}
@@ -152,7 +163,6 @@ const styles = StyleSheet.create({
   
   cardImage: { width: '100%', height: 220, borderRadius: 12, marginBottom: 15, backgroundColor: '#F1F5F9' },
   
-  // 📈 レベル・経験値メーターのユニバーサルスタイル
   levelContainer: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9', marginBottom: 12 },
   levelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   levelText: { color: '#2563EB', fontWeight: '900', fontSize: 14 },
