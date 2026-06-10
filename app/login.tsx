@@ -95,8 +95,13 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
+<<<<<<< HEAD
       <Text style={styles.title}>YOUR APP NAME</Text>
       <Text style={styles.subtitle}>REAL-PHOTO TCG</Text>
+=======
+<Text style={styles.title}>SnapCard</Text>
+<Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
+>>>>>>> 6a029b66396faeb471ebfe9157b0f462538cb118
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
 
