@@ -343,4 +343,4 @@ const styles = StyleSheet.create({
   statusActive: { backgroundColor: '#DCFCE7' },
   statusInactive: { backgroundColor: '#F1F5F9' },
   statusBtnText: { fontSize: 11, fontWeight: '800', color: '#1E293B' }
-});あ
+});
