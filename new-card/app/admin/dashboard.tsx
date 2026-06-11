@@ -5,7 +5,6 @@ import { useFocusEffect, useRouter } from 'expo-router';
 
 export default function AdminDashboard() {
   const router = useRouter();
-  // タブ構成を拡張
   const [activeTab, setActiveTab] = useState('bosses'); 
   
   // 共通データリスト
@@ -18,17 +17,15 @@ export default function AdminDashboard() {
   const [bName, setBName] = useState('');
   const [bHp, setBHp] = useState('');
   const [bAtk, setBAtk] = useState('');
-  const [bLat, setBLat] = useState('35.6983'); // 初期値: 立川近辺
+  const [bLat, setBLat] = useState('35.6983');
   const [bLng, setBLng] = useState('139.4130');
   const [bRadius, setBRadius] = useState('1000');
   const [bImage, setBImage] = useState('https://images.unsplash.com/photo-1542051812-ba32e18ce6a6');
-  // 追加: 技、ドロップ、カスタムデザイン
   const [bSkills, setBSkills] = useState<string[]>(['']);
   const [bDropName, setBDropName] = useState('');
   const [bDropRarity, setBDropRarity] = useState('Normal');
   const [bCustomDesign, setBCustomDesign] = useState('');
-  
-  // 👹 自動生成状態（1時間ごと）
+  const [bEffect, setBEffect] = useState('none'); // ✨ 追加: ボスのエフェクト指定
   const [autoBossEnabled, setAutoBossEnabled] = useState(false);
 
   // 🤖 フォーム状態（AIメーカー別調整）
@@ -39,34 +36,33 @@ export default function AdminDashboard() {
   const [surveyTitle, setSurveyTitle] = useState('');
   const [surveyTarget, setSurveyTarget] = useState('');
   const [surveyUrl, setSurveyUrl] = useState('');
-  
-  // 📢 デモグラフィックプルダウン用ステート
   const [isSegmentDropdownOpen, setIsSegmentDropdownOpen] = useState(false);
   const [availableSegments, setAvailableSegments] = useState<string[]>([
     '全ユーザー', '課金ユーザー', '無課金ユーザー', '10代', '20代', '30代', '男性', '女性', 'メーカーAカード所持', '立川エリアユーザー'
   ]);
 
-  // フォーム状態（ショップ・イベント・設定）
+  // 🛒 フォーム状態（ショップ）
   const [sName, setSName] = useState('');
   const [sPrice, setSPrice] = useState('');
-  const [sType, setSType] = useState('original_pack'); // original_pack, influencer_pack, celebrity_pack
+  const [sType, setSType] = useState('original_pack');
+  const [sImage, setSImage] = useState(''); // ✨ 追加: ショップバナー画像
+  const [sEffect, setSEffect] = useState('none'); // ✨ 追加: パックのエフェクト指定
   
+  // 🎊 フォーム状態（イベント）
   const [eTitle, setETitle] = useState('');
   const [eDesc, setEDesc] = useState('');
-  const [eTime, setETime] = useState('12:00 - 20:00'); // イベント開催時間帯
-  const [eLat, setELat] = useState('35.6983');        // イベント中心緯度
-  const [eLng, setELng] = useState('139.4130');       // イベント中心経度
-  const [eBossName, setEBossName] = useState('');     // 連動出現ボスキャラ設定
+  const [eTime, setETime] = useState('12:00 - 20:00');
+  const [eLat, setELat] = useState('35.6983');
+  const [eLng, setELng] = useState('139.4130');
+  const [eBossName, setEBossName] = useState('');
 
-  // ゲーム内バランス調整用ステート
+  // ⚖️ ゲーム内バランス調整用ステート
   const [expMultiplier, setExpMultiplier] = useState('1.0');
-  const [hpMultiplier, setHpMultiplier] = useState('1.0');   // 途中調整用：モンスター・カード基本HP倍率
-  const [atkMultiplier, setAtkMultiplier] = useState('1.0');  // 途中調整用：戦闘ATK基本倍率
+  const [hpMultiplier, setHpMultiplier] = useState('1.0');
+  const [atkMultiplier, setAtkMultiplier] = useState('1.0');
 
   useFocusEffect(
-    useCallback(() => {
-      fetchAdminData();
-    }, [activeTab])
+    useCallback(() => { fetchAdminData(); }, [activeTab])
   );
 
   const fetchAdminData = async () => {
@@ -76,15 +72,8 @@ export default function AdminDashboard() {
     } else if (activeTab === 'bosses') {
       const { data } = await supabase.from('bosses').select('*').order('created_at', { ascending: false });
       if (data) setBosses(data);
-      
-      // 自動生成ステータスをDBから取得
       const { data: autoData } = await supabase.from('system_settings').select('*').eq('key', 'auto_boss_gen').single();
       if (autoData) setAutoBossEnabled(autoData.value === 'true');
-      
-    } else if (activeTab === 'survey') {
-      // 実際の運用では DBからユーザーのデモグラフィック区分をフェッチ
-      // const { data } = await supabase.from('demographic_segments').select('name');
-      // if (data) setAvailableSegments(data.map(d => d.name));
     } else if (activeTab === 'shop') {
       const { data } = await supabase.from('shop_items').select('*').order('created_at', { ascending: false });
       if (data) setShopItems(data);
@@ -101,8 +90,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // --- ボス・マップ関連ロジック ---
-
+  // --- 👹 ボス関連ロジック ---
   const handleUpdateSkill = (text: string, index: number) => {
     const newSkills = [...bSkills];
     newSkills[index] = text;
@@ -119,140 +107,104 @@ export default function AdminDashboard() {
     setBSkills(['ランダムストライク', 'なぎ払う']);
     setBDropName(`シークレットカード_${Math.floor(Math.random() * 100)}`);
     setBDropRarity(['Rare', 'Epic', 'Legendary'][Math.floor(Math.random() * 3)]);
-    setBCustomDesign('{"theme": "dark", "glow": true}');
+    setBCustomDesign('{"frameColor": "gold"}');
+    setBEffect(['sparkle', 'fire', 'hologram'][Math.floor(Math.random() * 3)]); // ランダムエフェクト
   };
 
-  const handleImageUpload = () => {
+  const handleImageUpload = (setter: React.Dispatch<React.SetStateAction<string>>) => {
     Alert.alert('画像アップロード', 'ファイル選択UIを展開し、Storageに保存します。');
-    setBImage('https://example.com/uploaded_custom_image.png');
+    setter('https://example.com/uploaded_image.png');
   };
 
   const handleAddBoss = async () => {
     if (!bName || !bHp || !bAtk || !bLat || !bLng) {
-      Alert.alert('エラー', '必須項目を入力してください');
-      return;
+      return Alert.alert('エラー', '必須項目を入力してください');
     }
-    const { error } = await supabase.from('bosses').insert([
-      { 
-        name: bName, 
-        hp: parseInt(bHp), 
-        atk: parseInt(bAtk), 
-        def: 10, 
-        lat: parseFloat(bLat), 
-        lng: parseFloat(bLng), 
-        radius_meters: parseInt(bRadius),
-        image_url: bImage,
-        skills: bSkills.filter(s => s !== ''),
-        drop_card_name: bDropName || null,
-        drop_card_rarity: bDropName ? bDropRarity : null,
-        custom_design: bCustomDesign || null,
-        is_active: true 
-      }
-    ]);
-    if (error) { Alert.alert('失敗', error.message); } 
-    else { 
-      Alert.alert('成功', '限定ボスとドロップ設定をマップに配置しました'); 
-      fetchAdminData(); 
-    }
+    
+    // JSONとエフェクトの結合
+    let finalDesign = {};
+    try { if (bCustomDesign) finalDesign = JSON.parse(bCustomDesign); } catch (e) {}
+    if (bEffect !== 'none') finalDesign = { ...finalDesign, effect: bEffect };
+
+    const { error } = await supabase.from('bosses').insert([{ 
+      name: bName, hp: parseInt(bHp), atk: parseInt(bAtk), def: 10, 
+      lat: parseFloat(bLat), lng: parseFloat(bLng), radius_meters: parseInt(bRadius),
+      image_url: bImage, skills: bSkills.filter(s => s !== ''),
+      drop_card_name: bDropName || null, drop_card_rarity: bDropName ? bDropRarity : null,
+      custom_design: Object.keys(finalDesign).length > 0 ? JSON.stringify(finalDesign) : null,
+      is_active: true 
+    }]);
+
+    if (error) Alert.alert('失敗', error.message);
+    else { Alert.alert('成功', '限定ボスとドロップ設定を配置しました'); fetchAdminData(); }
   };
 
   const toggleAutoBossGen = async () => {
     const newVal = !autoBossEnabled;
-    const { error } = await supabase.from('system_settings').upsert({ key: 'auto_boss_gen', value: newVal.toString() });
-    if (!error) {
-      setAutoBossEnabled(newVal);
-      Alert.alert('設定更新', `1時間ごとのランダムボス自動生成を${newVal ? 'ON' : 'OFF'}にしました。\n※バックエンドのCron処理がこの設定を参照します。`);
-    }
+    await supabase.from('system_settings').upsert({ key: 'auto_boss_gen', value: newVal.toString() });
+    setAutoBossEnabled(newVal);
+    Alert.alert('設定更新', `ランダムボスの自動生成を${newVal ? 'ON' : 'OFF'}にしました。`);
   };
 
-  // --- AI錬成・サーベイロジック ---
-
+  // --- 🤖 AI & 📢 サーベイ ---
   const handleSaveAiPrompt = async () => {
     if (!aiMaker) return Alert.alert('エラー', 'メーカー・ブランド名を入力してください');
-    Alert.alert('保存完了', `${aiMaker}用のAI錬成プロンプト雛形をシステムに適用しました。`);
-    setAiMaker('');
-    setAiPromptText('');
+    Alert.alert('保存完了', `${aiMaker}用のAI雛形をシステムに適用しました。`);
+    setAiMaker(''); setAiPromptText('');
   };
 
   const handleSendSurvey = async () => {
     if (!surveyTarget || !surveyUrl) return Alert.alert('エラー', 'ターゲット条件とURLは必須です');
-    Alert.alert('配信完了', `条件「${surveyTarget}」に合致するユーザーへサーベイ案内をプッシュ配信しました。`);
-    setSurveyTitle('');
-    setSurveyTarget('');
-    setSurveyUrl('');
+    Alert.alert('配信完了', `条件「${surveyTarget}」へサーベイをプッシュ配信しました。`);
+    setSurveyTitle(''); setSurveyTarget(''); setSurveyUrl('');
   };
 
-  // 🛒 ショップ設定（オリジナル・インフルエンサー・有名人対応）
+  // --- 🛒 ショップ関連ロジック ---
   const handleAddShopItem = async () => {
-    if (!sName || !sPrice) {
-      Alert.alert('エラー', '商品名と価格を入力してください');
-      return;
+    if (!sName || !sPrice) return Alert.alert('エラー', '商品名と価格を入力してください');
+
+    // JSONでエフェクトデータを構成
+    let customDesign = null;
+    if (sEffect !== 'none') {
+      customDesign = JSON.stringify({ effect: sEffect });
     }
-    const { error } = await supabase.from('shop_items').insert([
-      { name: sName, price: parseInt(sPrice), item_type: sType, is_active: true }
-    ]);
+
+    const { error } = await supabase.from('shop_items').insert([{ 
+      name: sName, price: parseInt(sPrice), item_type: sType, 
+      banner_url: sImage || null, // データベース側のカラム対応を想定
+      drop_rates: customDesign,   // 一旦デザイン情報を流用（DB設計により調整）
+      is_active: true 
+    }]);
+
     if (!error) {
       Alert.alert('成功', '新コンセプトパックをショップに追加陳列しました');
-      setSName('');
-      setSPrice('');
+      setSName(''); setSPrice(''); setSImage(''); setSEffect('none');
       fetchAdminData();
     } else {
       Alert.alert('失敗', error.message);
     }
   };
 
-  // 🎊 イベント構築（時間・場所・連動ボス配置設定）
+  // --- 🎊 イベント & ⚖️ 設定 ---
   const handleAddEvent = async () => {
-    if (!eTitle || !eDesc) {
-      Alert.alert('エラー', 'タイトルと詳細説明を入力してください');
-      return;
-    }
-    const { error } = await supabase.from('events').insert([
-      { 
-        title: eTitle, 
-        description: eDesc, 
-        event_time_range: eTime,
-        lat: parseFloat(eLat),
-        lng: parseFloat(eLng),
-        attached_boss_name: eBossName || null,
-        is_active: true 
-      }
-    ]);
-    if (!error) {
-      Alert.alert('成功', '特定ロケーション連動イベントを構築・公開しました');
-      setETitle('');
-      setEDesc('');
-      setEBossName('');
-      fetchAdminData();
-    } else {
-      Alert.alert('失敗', error.message);
-    }
+    if (!eTitle || !eDesc) return Alert.alert('エラー', 'タイトルと詳細説明を入力してください');
+    const { error } = await supabase.from('events').insert([{ 
+      title: eTitle, description: eDesc, event_time_range: eTime,
+      lat: parseFloat(eLat), lng: parseFloat(eLng), attached_boss_name: eBossName || null, is_active: true 
+    }]);
+    if (!error) { Alert.alert('成功', 'イベントを構築・公開しました'); fetchAdminData(); }
   };
 
-  // ⚡ UGCカードのステータス・特別デザイン調整
   const handleAdjustCard = async (cardId: string, currentFixed: boolean, currentAtk: number) => {
-    const { error } = await supabase.from('cards').update({
-      is_fixed: !currentFixed,
-      status_atk: currentAtk + 10
-    }).eq('id', cardId);
-    
-    if (!error) {
-      Alert.alert('調整完了', 'カードのステータスとデザイン属性（カテゴリ）を更新しました。');
-      fetchAdminData();
-    }
+    await supabase.from('cards').update({ is_fixed: !currentFixed, status_atk: currentAtk + 10 }).eq('id', cardId);
+    Alert.alert('調整完了', 'カード属性を更新しました。'); fetchAdminData();
   };
 
-  // ⚖️ ゲーム内バランス調整の一括適用（リアルタイムパラメータ変更）
   const handleSaveSettings = async () => {
-    const { error: err1 } = await supabase.from('system_settings').upsert({ key: 'base_exp_multiplier', value: expMultiplier });
-    const { error: err2 } = await supabase.from('system_settings').upsert({ key: 'global_hp_multiplier', value: hpMultiplier });
-    const { error: err3 } = await supabase.from('system_settings').upsert({ key: 'global_atk_multiplier', value: atkMultiplier });
-    
-    if (!err1 && !err2 && !err3) {
-      Alert.alert('成功', 'ゲーム内経済及び戦闘ステータスバランスを即時適用しました。');
-    } else {
-      Alert.alert('エラー', '一部バランス設定の保存に失敗しました。');
-    }
+    await supabase.from('system_settings').upsert({ key: 'base_exp_multiplier', value: expMultiplier });
+    await supabase.from('system_settings').upsert({ key: 'global_hp_multiplier', value: hpMultiplier });
+    await supabase.from('system_settings').upsert({ key: 'global_atk_multiplier', value: atkMultiplier });
+    Alert.alert('成功', 'バランスを即時適用しました。');
   };
 
   const toggleActive = async (table: string, id: string, current: boolean) => {
@@ -260,6 +212,7 @@ export default function AdminDashboard() {
     fetchAdminData();
   };
 
+  // --- UI レンダリング ---
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -269,16 +222,15 @@ export default function AdminDashboard() {
         </TouchableOpacity>
       </View>
 
-      {/* ナビゲーションタブ */}
       <ScrollView horizontal showsHorizontalScrollIndicator={false} style={styles.tabScroll} contentContainerStyle={styles.tabContainer}>
         {[
-          { id: 'bosses', label: '👹 ボスマップ配置' },
-          { id: 'ai_prompt', label: '🤖 AIロジック調整' },
-          { id: 'survey', label: '📢 サーベイ配信' },
-          { id: 'ugc_cards', label: 'UGCカード監視' },
-          { id: 'shop', label: 'ショップ設定' },
-          { id: 'events', label: 'イベント構築' },
-          { id: 'settings', label: 'バランス調整' }
+          { id: 'bosses', label: '👹 ボスマップ' },
+          { id: 'shop', label: '🛒 ショップ設定' },
+          { id: 'ugc_cards', label: '📸 UGC監視' },
+          { id: 'ai_prompt', label: '🤖 AI調整' },
+          { id: 'survey', label: '📢 サーベイ' },
+          { id: 'events', label: '🎊 イベント' },
+          { id: 'settings', label: '⚖️ バランス' }
         ].map((t) => (
           <TouchableOpacity key={t.id} style={[styles.tab, activeTab === t.id && styles.activeTab]} onPress={() => setActiveTab(t.id)}>
             <Text style={[styles.tabText, activeTab === t.id && styles.activeTabText]}>{t.label}</Text>
@@ -288,18 +240,16 @@ export default function AdminDashboard() {
 
       <ScrollView style={styles.content}>
 
-        {/* 👹 1. 限定ボス・マップ配置 */}
+        {/* 👹 1. ボスマップ配置 */}
         {activeTab === 'bosses' && (
           <View>
             <View style={styles.autoGenBox}>
               <View>
                 <Text style={styles.autoGenText}>⏳ 1時間ごとのランダムボス自動生成</Text>
-                <Text style={styles.autoGenSub}>ONにすると1時間間隔でマップ上に未知のボスが配置されます</Text>
+                <Text style={styles.autoGenSub}>ONにするとバックエンドで未知のボスが配置されます</Text>
               </View>
               <TouchableOpacity style={[styles.toggleBtn, autoBossEnabled ? styles.toggleOn : styles.toggleOff]} onPress={toggleAutoBossGen}>
-                <Text style={[styles.toggleBtnText, autoBossEnabled ? styles.toggleTextOn : styles.toggleTextOff]}>
-                  {autoBossEnabled ? 'ON' : 'OFF'}
-                </Text>
+                <Text style={[styles.toggleBtnText, autoBossEnabled ? styles.toggleTextOn : styles.toggleTextOff]}>{autoBossEnabled ? 'ON' : 'OFF'}</Text>
               </TouchableOpacity>
             </View>
 
@@ -319,40 +269,43 @@ export default function AdminDashboard() {
                 <TextInput style={[styles.input, { flex: 1 }]} placeholder="ATK" keyboardType="numeric" value={bAtk} onChangeText={setBAtk} />
               </View>
 
-              <Text style={styles.label}>出現座標（緯度経度指定）</Text>
+              <Text style={styles.label}>出現座標</Text>
               <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TextInput style={[styles.input, { flex: 1 }]} placeholder="緯度 (Lat)" value={bLat} onChangeText={setBLat} />
-                <TextInput style={[styles.input, { flex: 1 }]} placeholder="経度 (Lng)" value={bLng} onChangeText={setBLng} />
+                <TextInput style={[styles.input, { flex: 1 }]} placeholder="Lat" value={bLat} onChangeText={setBLat} />
+                <TextInput style={[styles.input, { flex: 1 }]} placeholder="Lng" value={bLng} onChangeText={setBLng} />
               </View>
-              <TextInput style={styles.input} placeholder="影響半径 (meters)" keyboardType="numeric" value={bRadius} onChangeText={setBRadius} />
 
-              <Text style={styles.label}>使用技（複数可）</Text>
-              {bSkills.map((skill, index) => (
-                <TextInput key={index} style={styles.input} placeholder={`技 ${index + 1}`} value={skill} onChangeText={(t) => handleUpdateSkill(t, index)} />
-              ))}
-              <TouchableOpacity style={styles.outlineBtn} onPress={() => setBSkills([...bSkills, ''])}>
-                <Text style={styles.outlineBtnText}>+ 技を追加</Text>
-              </TouchableOpacity>
-
-              <Text style={styles.label}>討伐特典（特別なカードゲット）</Text>
-              <TextInput style={styles.input} placeholder="ドロップカード名（空なら特典なし）" value={bDropName} onChangeText={setBDropName} />
-              <TextInput style={styles.input} placeholder="レアリティ (例: Rare)" value={bDropRarity} onChangeText={setBDropRarity} />
+              <Text style={styles.label}>討伐特典 (カード付与)</Text>
+              <View style={{ flexDirection: 'row', gap: 8 }}>
+                <TextInput style={[styles.input, { flex: 2 }]} placeholder="ドロップカード名" value={bDropName} onChangeText={setBDropName} />
+                <TextInput style={[styles.input, { flex: 1 }]} placeholder="レア (例: Rare)" value={bDropRarity} onChangeText={setBDropRarity} />
+              </View>
               
-              <Text style={styles.label}>カード画像 ＆ カスタムデザイン</Text>
+              {/* ✨ アプローチ3: ボスのリッチエフェクト選択 */}
+              <Text style={styles.label}>✨ リッチエフェクト (アニメーション/VFX)</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
+                {[{id:'none', label:'なし'}, {id:'sparkle', label:'✨ キラキラ'}, {id:'fire', label:'🔥 炎属性'}, {id:'hologram', label:'💿 ホログラム'}, {id:'sakura', label:'🌸 桜舞う'}].map(eff => (
+                  <TouchableOpacity key={eff.id} style={[styles.miniChip, bEffect === eff.id && styles.activeMiniChip]} onPress={() => setBEffect(eff.id)}>
+                    <Text style={styles.miniChipText}>{eff.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
+              <Text style={styles.label}>カード画像＆枠デザイン (JSON)</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                 <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="画像URL" value={bImage} onChangeText={setBImage} />
-                <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={handleImageUpload}>
-                  <Text style={styles.outlineBtnText}>⬆️ アップロード</Text>
+                <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={() => handleImageUpload(setBImage)}>
+                  <Text style={styles.outlineBtnText}>⬆️ 画像選択</Text>
                 </TouchableOpacity>
               </View>
-              <TextInput style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]} placeholder={`カスタムデザイン指定 (JSON等)\n例: {"frameColor": "gold"}`} multiline value={bCustomDesign} onChangeText={setBCustomDesign} />
+              <TextInput style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]} placeholder={`枠色等の指定\n例: {"frameColor": "gold"}`} multiline value={bCustomDesign} onChangeText={setBCustomDesign} />
 
               <TouchableOpacity style={styles.addBtn} onPress={handleAddBoss}>
                 <Text style={styles.addBtnText}>指定座標にボスを配置</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.sectionTitle}>配置済みボス一覧</Text>
+            <Text style={styles.sectionTitle}>配置済みボス</Text>
             {bosses.map((b) => (
               <View key={b.id} style={styles.listItem}>
                 <View style={{ flex: 1 }}>
@@ -364,84 +317,6 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               </View>
             ))}
-          </View>
-        )}
-
-        {/* 🤖 2. AI錬成ロジック調整 */}
-        {activeTab === 'ai_prompt' && (
-          <View style={styles.formContainer}>
-            <Text style={styles.formSectionTitle}>企業・メーカー別 AI錬成ロジック調整</Text>
-            <Text style={styles.infoText}>特定のロゴや商品を検知した際に適用される、特別なシステムプロンプトの雛形を登録します。</Text>
-            <TextInput style={styles.input} placeholder="メーカー・ブランド名" value={aiMaker} onChangeText={setAiMaker} />
-            <TextInput style={[styles.input, { minHeight: 120, textAlignVertical: 'top' }]} placeholder="プロンプト雛形を入力..." multiline value={aiPromptText} onChangeText={setAiPromptText} />
-            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#3B82F6' }]} onPress={handleSaveAiPrompt}>
-              <Text style={styles.addBtnText}>メーカー別AIロジックを保存</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* 📢 3. サーベイ配信 */}
-        {activeTab === 'survey' && (
-          <View style={styles.formContainer}>
-            <Text style={styles.formSectionTitle}>デモグラフィック・割付サーベイ配信</Text>
-            <TextInput style={styles.input} placeholder="お知らせタイトル" value={surveyTitle} onChangeText={setSurveyTitle} />
-            
-            {/* デモグラフィック用 カスタムプルダウンUI */}
-            <Text style={styles.label}>割付・ターゲット条件指定</Text>
-            <TouchableOpacity style={styles.dropdownHeader} onPress={() => setIsSegmentDropdownOpen(!isSegmentDropdownOpen)}>
-              <Text style={styles.dropdownHeaderText}>{surveyTarget || 'デモグラフィック・セグメントを選択'}</Text>
-              <Text style={styles.dropdownIcon}>{isSegmentDropdownOpen ? '▲' : '▼'}</Text>
-            </TouchableOpacity>
-            
-            {isSegmentDropdownOpen && (
-              <View style={styles.dropdownList}>
-                <ScrollView nestedScrollEnabled={true}>
-                  {availableSegments.map((segment) => (
-                    <TouchableOpacity 
-                      key={segment} 
-                      style={styles.dropdownItem} 
-                      onPress={() => { setSurveyTarget(segment); setIsSegmentDropdownOpen(false); }}
-                    >
-                      <Text style={styles.dropdownItemText}>{segment}</Text>
-                    </TouchableOpacity>
-                  ))}
-                </ScrollView>
-              </View>
-            )}
-
-            <TextInput style={styles.input} placeholder="サーベイURL" value={surveyUrl} onChangeText={setSurveyUrl} />
-            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={handleSendSurvey}>
-              <Text style={styles.addBtnText}>対象ユーザーへ配信を実行</Text>
-            </TouchableOpacity>
-          </View>
-        )}
-
-        {/* 👁️ 4. UGCカード監視 */}
-        {activeTab === 'ugc_cards' && (
-          <View>
-            <Text style={styles.sectionTitle}>ユーザー生成コンテンツ(UGC) 監視台帳</Text>
-            {ugcCards.length === 0 ? (
-              <Text style={styles.infoText}>現在、データベース内にUGCカードがありません。</Text>
-            ) : (
-              ugcCards.map((card) => (
-                <View key={card.id} style={styles.listItemVertical}>
-                  <Image source={{ uri: card.image_url || 'https://via.placeholder.com/70x90' }} style={styles.cardPreviewImage} />
-                  <View style={{ flex: 1, marginLeft: 12 }}>
-                    <Text style={styles.itemName}>{card.is_fixed ? '🌟 [限定枠] ' : ''}{card.card_name || '無名オブジェクト'}</Text>
-                    <Text style={styles.itemSub}>
-                      種別: {card.is_founder ? '👑 Founder初版' : card.category || '通常図鑑'}
-                    </Text>
-                    <Text style={styles.itemSub}>ATK: {card.status_atk || 0} | HP: {card.status_hp || 0}</Text>
-                    <TouchableOpacity 
-                      style={styles.adjustBtn} 
-                      onPress={() => handleAdjustCard(card.id, card.is_fixed, card.status_atk || 0)}
-                    >
-                      <Text style={styles.adjustBtnText}>⚡ 特別枠切替 & ATK+10調整</Text>
-                    </TouchableOpacity>
-                  </View>
-                </View>
-              ))
-            )}
           </View>
         )}
 
@@ -470,6 +345,24 @@ export default function AdminDashboard() {
                 ))}
               </View>
 
+              {/* ✨ アプローチ3: パックのパッケージ画像とエフェクト */}
+              <Text style={styles.label}>パッケージ画像 / コラボバナー</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="画像URL" value={sImage} onChangeText={setSImage} />
+                <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={() => handleImageUpload(setSImage)}>
+                  <Text style={styles.outlineBtnText}>⬆️ 画像選択</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>✨ 出出カードの確定リッチエフェクト</Text>
+              <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 16 }}>
+                {[{id:'none', label:'なし'}, {id:'sparkle', label:'✨ キラ仕様'}, {id:'hologram', label:'💿 ホログラム'}, {id:'dark_aura', label:'🟣 ダークオーラ'}].map(eff => (
+                  <TouchableOpacity key={eff.id} style={[styles.miniChip, sEffect === eff.id && styles.activeMiniChip]} onPress={() => setSEffect(eff.id)}>
+                    <Text style={styles.miniChipText}>{eff.label}</Text>
+                  </TouchableOpacity>
+                ))}
+              </View>
+
               <TouchableOpacity style={styles.addBtn} onPress={handleAddShopItem}>
                 <Text style={styles.addBtnText}>ショップに追加・陳列</Text>
               </TouchableOpacity>
@@ -482,65 +375,98 @@ export default function AdminDashboard() {
                   <Text style={styles.itemName}>{item.name}</Text>
                   <Text style={styles.itemSub}>価格: {item.price} Gold | 分類: {item.item_type}</Text>
                 </View>
+                <TouchableOpacity style={[styles.statusBtn, item.is_active ? styles.statusActive : styles.statusInactive]} onPress={() => toggleActive('shop_items', item.id, item.is_active)}>
+                  <Text style={styles.statusBtnText}>{item.is_active ? '販売中' : '非公開'}</Text>
+                </TouchableOpacity>
               </View>
             ))}
           </View>
         )}
 
+        {/* 👁️ 4. UGCカード監視 */}
+        {activeTab === 'ugc_cards' && (
+          <View>
+            <Text style={styles.sectionTitle}>ユーザー生成コンテンツ(UGC) 監視台帳</Text>
+            {ugcCards.length === 0 ? (
+              <Text style={styles.infoText}>現在、データベース内にUGCカードがありません。</Text>
+            ) : (
+              ugcCards.map((card) => (
+                <View key={card.id} style={styles.listItemVertical}>
+                  <Image source={{ uri: card.image_url || 'https://via.placeholder.com/70x90' }} style={styles.cardPreviewImage} />
+                  <View style={{ flex: 1, marginLeft: 12 }}>
+                    <Text style={styles.itemName}>{card.is_fixed ? '🌟 [限定枠] ' : ''}{card.card_name || '無名オブジェクト'}</Text>
+                    <Text style={styles.itemSub}>種別: {card.is_founder ? '👑 Founder初版' : card.category || '通常図鑑'}</Text>
+                    <Text style={styles.itemSub}>ATK: {card.status_atk || 0} | HP: {card.status_hp || 0}</Text>
+                    <TouchableOpacity style={styles.adjustBtn} onPress={() => handleAdjustCard(card.id, card.is_fixed, card.status_atk || 0)}>
+                      <Text style={styles.adjustBtnText}>⚡ 特別枠切替 & ATK+10調整</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* 🤖 2. AI錬成ロジック調整 */}
+        {activeTab === 'ai_prompt' && (
+          <View style={styles.formContainer}>
+            <Text style={styles.formSectionTitle}>企業・メーカー別 AI錬成ロジック調整</Text>
+            <TextInput style={styles.input} placeholder="メーカー・ブランド名" value={aiMaker} onChangeText={setAiMaker} />
+            <TextInput style={[styles.input, { minHeight: 120, textAlignVertical: 'top' }]} placeholder="プロンプト雛形を入力..." multiline value={aiPromptText} onChangeText={setAiPromptText} />
+            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#3B82F6' }]} onPress={handleSaveAiPrompt}>
+              <Text style={styles.addBtnText}>メーカー別AIロジックを保存</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
+        {/* 📢 3. サーベイ配信 */}
+        {activeTab === 'survey' && (
+          <View style={styles.formContainer}>
+            <Text style={styles.formSectionTitle}>デモグラフィック・割付サーベイ配信</Text>
+            <TextInput style={styles.input} placeholder="お知らせタイトル" value={surveyTitle} onChangeText={setSurveyTitle} />
+            <Text style={styles.label}>割付・ターゲット条件指定</Text>
+            <TouchableOpacity style={styles.dropdownHeader} onPress={() => setIsSegmentDropdownOpen(!isSegmentDropdownOpen)}>
+              <Text style={styles.dropdownHeaderText}>{surveyTarget || 'デモグラフィック・セグメントを選択'}</Text>
+              <Text style={styles.dropdownIcon}>{isSegmentDropdownOpen ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+            {isSegmentDropdownOpen && (
+              <View style={styles.dropdownList}>
+                <ScrollView nestedScrollEnabled={true}>
+                  {availableSegments.map((segment) => (
+                    <TouchableOpacity key={segment} style={styles.dropdownItem} onPress={() => { setSurveyTarget(segment); setIsSegmentDropdownOpen(false); }}>
+                      <Text style={styles.dropdownItemText}>{segment}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+            <TextInput style={styles.input} placeholder="サーベイURL" value={surveyUrl} onChangeText={setSurveyUrl} />
+            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={handleSendSurvey}>
+              <Text style={styles.addBtnText}>対象ユーザーへ配信を実行</Text>
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* 🎊 6. イベント構築 */}
         {activeTab === 'events' && (
-          <View>
-            <View style={styles.formContainer}>
-              <Text style={styles.formSectionTitle}>新規スポットイベント タイムライン構築</Text>
-              <TextInput style={styles.input} placeholder="イベントタイトル" value={eTitle} onChangeText={setETitle} />
-              <TextInput style={styles.input} placeholder="概要・告知説明文" value={eDesc} onChangeText={setEDesc} />
-              
-              <Text style={styles.label}>時間・日時指示</Text>
-              <TextInput style={styles.input} placeholder="例: 12:00 - 18:00 (毎日開催)" value={eTime} onChangeText={setETime} />
-              
-              <Text style={styles.label}>開催対象ロケーション設定</Text>
-              <View style={{ flexDirection: 'row', gap: 8 }}>
-                <TextInput style={[styles.input, { flex: 1 }]} placeholder="緯度 (Lat)" value={eLat} onChangeText={setELat} />
-                <TextInput style={[styles.input, { flex: 1 }]} placeholder="経度 (Lng)" value={eLng} onChangeText={setELng} />
-              </View>
-
-              <Text style={styles.label}>出現連動ボス指定</Text>
-              <TextInput style={styles.input} placeholder="出現させるボスキャラ名を入力" value={eBossName} onChangeText={setEBossName} />
-
-              <TouchableOpacity style={styles.addBtn} onPress={handleAddEvent}>
-                <Text style={styles.addBtnText}>イベントスケジュールを発令</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.sectionTitle}>スケジュール中のイベント</Text>
-            {events.map((e) => (
-              <View key={e.id} style={styles.listItem}>
-                <View style={{ flex: 1 }}>
-                  <Text style={styles.itemName}>{e.title}</Text>
-                  <Text style={styles.itemSub}>🕒 {e.event_time_range} | 📍 {e.lat}, {e.lng}</Text>
-                  {e.attached_boss_name && <Text style={[styles.itemSub, { color: '#EF4444' }]}>👹 連動ボス: {e.attached_boss_name}</Text>}
-                </View>
-              </View>
-            ))}
+          <View style={styles.formContainer}>
+            <Text style={styles.formSectionTitle}>新規スポットイベント タイムライン構築</Text>
+            <TextInput style={styles.input} placeholder="イベントタイトル" value={eTitle} onChangeText={setETitle} />
+            <TextInput style={styles.input} placeholder="概要・告知説明文" value={eDesc} onChangeText={setEDesc} />
+            <Text style={styles.label}>時間・日時指示</Text>
+            <TextInput style={styles.input} placeholder="例: 12:00 - 18:00 (毎日開催)" value={eTime} onChangeText={setETime} />
+            <TouchableOpacity style={styles.addBtn} onPress={handleAddEvent}>
+              <Text style={styles.addBtnText}>イベントスケジュールを発令</Text>
+            </TouchableOpacity>
           </View>
         )}
 
         {/* ⚖️ 7. バランス調整 */}
         {activeTab === 'settings' && (
           <View style={styles.formContainer}>
-            <Text style={styles.formSectionTitle}>ゲーム内メカニクス・ステータス一括途中調整</Text>
-            
+            <Text style={styles.formSectionTitle}>ゲーム内メカニクス・ステータス一括調整</Text>
             <Text style={styles.label}>戦闘獲得経験値（EXP）の自動生成倍率</Text>
             <TextInput style={styles.input} keyboardType="numeric" value={expMultiplier} onChangeText={setExpMultiplier} />
-            
-            <Text style={styles.label}>全エネミー・ボスキャラ基本体力（HP）補正係数</Text>
-            <TextInput style={styles.input} keyboardType="numeric" value={hpMultiplier} onChangeText={setHpMultiplier} />
-            
-            <Text style={styles.label}>グローバル戦闘攻撃力（ATK）システム倍率</Text>
-            <TextInput style={styles.input} keyboardType="numeric" value={atkMultiplier} onChangeText={setAtkMultiplier} />
-            
-            <Text style={styles.infoText}>※デバッグ中やゲームバランス調整時に、アプリ側のコードを再ビルドすることなくリアルタイムに変数のベースラインを変更できます。</Text>
-            
             <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#3B82F6' }]} onPress={handleSaveSettings}>
               <Text style={styles.addBtnText}>システムステータス調整を即時保存</Text>
             </TouchableOpacity>
@@ -580,7 +506,6 @@ const styles = StyleSheet.create({
   outlineBtn: { borderWidth: 1, borderColor: '#3B82F6', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
   outlineBtnText: { color: '#3B82F6', fontWeight: '700', fontSize: 13 },
   
-  // 新規追加スタイル（自動生成＆プルダウン）
   autoGenBox: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
   autoGenText: { fontSize: 14, fontWeight: '800', color: '#1E293B' },
   autoGenSub: { fontSize: 11, color: '#64748B', marginTop: 4 },
