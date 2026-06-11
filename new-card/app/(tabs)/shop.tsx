@@ -32,7 +32,7 @@ export default function ShopScreen() {
   };
 
   const buyPremium = async () => {
-    Alert.alert("購入確認", "プレミアムパス(￥500/月)を契約しますか？", [
+    Alert.alert("購入確認", "プレミアムパス(￥1,000/月)を契約しますか？", [
       { text: "キャンセル", style: "cancel" },
       { text: "購入", onPress: async () => {
           setLoading(true);
@@ -111,7 +111,7 @@ export default function ShopScreen() {
       <View style={styles.productCard}>
         <View style={styles.productHeader}>
           <Text style={styles.productTitle}>👑 プレミアムパス</Text>
-          <Text style={styles.price}>￥500 / 月</Text>
+          <Text style={styles.price}>￥1,000 / 月</Text>
         </View>
         <Text style={styles.desc}>・1日の錬成回数が【無制限】に！</Text>
         <Text style={styles.desc}>・カードに【好きな名前】を指定可能！</Text>
@@ -127,7 +127,7 @@ export default function ShopScreen() {
       <View style={styles.productCard}>
         <View style={styles.productHeader}>
           <Text style={styles.productTitle}>🎟️ 錬成チケット x10</Text>
-          <Text style={styles.price}>￥100</Text>
+          <Text style={styles.price}>￥500</Text>
         </View>
         <Text style={styles.desc}>・現在の所持数: {tickets}枚</Text>
         <TouchableOpacity style={[styles.buyBtn, { backgroundColor: '#3b82f6' }]} onPress={buyTickets}>
