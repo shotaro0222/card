@@ -27,6 +27,9 @@ export default function AdminDashboard() {
   const [bDropName, setBDropName] = useState('');
   const [bDropRarity, setBDropRarity] = useState('Normal');
   const [bCustomDesign, setBCustomDesign] = useState('');
+  
+  // 👹 自動生成状態（1時間ごと）
+  const [autoBossEnabled, setAutoBossEnabled] = useState(false);
 
   // 🤖 フォーム状態（AIメーカー別調整）
   const [aiMaker, setAiMaker] = useState('');
@@ -36,6 +39,12 @@ export default function AdminDashboard() {
   const [surveyTitle, setSurveyTitle] = useState('');
   const [surveyTarget, setSurveyTarget] = useState('');
   const [surveyUrl, setSurveyUrl] = useState('');
+  
+  // 📢 デモグラフィックプルダウン用ステート
+  const [isSegmentDropdownOpen, setIsSegmentDropdownOpen] = useState(false);
+  const [availableSegments, setAvailableSegments] = useState<string[]>([
+    '全ユーザー', '課金ユーザー', '無課金ユーザー', '10代', '20代', '30代', '男性', '女性', 'メーカーAカード所持', '立川エリアユーザー'
+  ]);
 
   // フォーム状態（ショップ・イベント・設定）
   const [sName, setSName] = useState('');
@@ -67,6 +76,15 @@ export default function AdminDashboard() {
     } else if (activeTab === 'bosses') {
       const { data } = await supabase.from('bosses').select('*').order('created_at', { ascending: false });
       if (data) setBosses(data);
+      
+      // 自動生成ステータスをDBから取得
+      const { data: autoData } = await supabase.from('system_settings').select('*').eq('key', 'auto_boss_gen').single();
+      if (autoData) setAutoBossEnabled(autoData.value === 'true');
+      
+    } else if (activeTab === 'survey') {
+      // 実際の運用では DBからユーザーのデモグラフィック区分をフェッチ
+      // const { data } = await supabase.from('demographic_segments').select('name');
+      // if (data) setAvailableSegments(data.map(d => d.name));
     } else if (activeTab === 'shop') {
       const { data } = await supabase.from('shop_items').select('*').order('created_at', { ascending: false });
       if (data) setShopItems(data);
@@ -74,7 +92,6 @@ export default function AdminDashboard() {
       const { data } = await supabase.from('events').select('*').order('created_at', { ascending: false });
       if (data) setEvents(data);
     } else if (activeTab === 'settings') {
-      // 複数のシステム環境変数を取得
       const { data: expData } = await supabase.from('system_settings').select('*').eq('key', 'base_exp_multiplier').single();
       if (expData) setExpMultiplier(expData.value);
       const { data: hpData } = await supabase.from('system_settings').select('*').eq('key', 'global_hp_multiplier').single();
@@ -136,6 +153,15 @@ export default function AdminDashboard() {
     else { 
       Alert.alert('成功', '限定ボスとドロップ設定をマップに配置しました'); 
       fetchAdminData(); 
+    }
+  };
+
+  const toggleAutoBossGen = async () => {
+    const newVal = !autoBossEnabled;
+    const { error } = await supabase.from('system_settings').upsert({ key: 'auto_boss_gen', value: newVal.toString() });
+    if (!error) {
+      setAutoBossEnabled(newVal);
+      Alert.alert('設定更新', `1時間ごとのランダムボス自動生成を${newVal ? 'ON' : 'OFF'}にしました。\n※バックエンドのCron処理がこの設定を参照します。`);
     }
   };
 
@@ -265,9 +291,21 @@ export default function AdminDashboard() {
         {/* 👹 1. 限定ボス・マップ配置 */}
         {activeTab === 'bosses' && (
           <View>
+            <View style={styles.autoGenBox}>
+              <View>
+                <Text style={styles.autoGenText}>⏳ 1時間ごとのランダムボス自動生成</Text>
+                <Text style={styles.autoGenSub}>ONにすると1時間間隔でマップ上に未知のボスが配置されます</Text>
+              </View>
+              <TouchableOpacity style={[styles.toggleBtn, autoBossEnabled ? styles.toggleOn : styles.toggleOff]} onPress={toggleAutoBossGen}>
+                <Text style={[styles.toggleBtnText, autoBossEnabled ? styles.toggleTextOn : styles.toggleTextOff]}>
+                  {autoBossEnabled ? 'ON' : 'OFF'}
+                </Text>
+              </TouchableOpacity>
+            </View>
+
             <View style={{ flexDirection: 'row', gap: 10, marginBottom: 16 }}>
               <TouchableOpacity style={[styles.addBtn, { flex: 1, marginTop: 0, backgroundColor: '#8B5CF6' }]} onPress={handleGenerateRandomBoss}>
-                <Text style={styles.addBtnText}>🎲 ランダムボス自動生成</Text>
+                <Text style={styles.addBtnText}>🎲 パラメータをランダム生成 (手動)</Text>
               </TouchableOpacity>
             </View>
 
@@ -347,15 +385,38 @@ export default function AdminDashboard() {
           <View style={styles.formContainer}>
             <Text style={styles.formSectionTitle}>デモグラフィック・割付サーベイ配信</Text>
             <TextInput style={styles.input} placeholder="お知らせタイトル" value={surveyTitle} onChangeText={setSurveyTitle} />
-            <TextInput style={styles.input} placeholder="割付・ターゲット条件指定 (例: メーカーAのカード所持者)" value={surveyTarget} onChangeText={setSurveyTarget} />
+            
+            {/* デモグラフィック用 カスタムプルダウンUI */}
+            <Text style={styles.label}>割付・ターゲット条件指定</Text>
+            <TouchableOpacity style={styles.dropdownHeader} onPress={() => setIsSegmentDropdownOpen(!isSegmentDropdownOpen)}>
+              <Text style={styles.dropdownHeaderText}>{surveyTarget || 'デモグラフィック・セグメントを選択'}</Text>
+              <Text style={styles.dropdownIcon}>{isSegmentDropdownOpen ? '▲' : '▼'}</Text>
+            </TouchableOpacity>
+            
+            {isSegmentDropdownOpen && (
+              <View style={styles.dropdownList}>
+                <ScrollView nestedScrollEnabled={true}>
+                  {availableSegments.map((segment) => (
+                    <TouchableOpacity 
+                      key={segment} 
+                      style={styles.dropdownItem} 
+                      onPress={() => { setSurveyTarget(segment); setIsSegmentDropdownOpen(false); }}
+                    >
+                      <Text style={styles.dropdownItemText}>{segment}</Text>
+                    </TouchableOpacity>
+                  ))}
+                </ScrollView>
+              </View>
+            )}
+
             <TextInput style={styles.input} placeholder="サーベイURL" value={surveyUrl} onChangeText={setSurveyUrl} />
-            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#10B981' }]} onPress={handleSendSurvey}>
+            <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={handleSendSurvey}>
               <Text style={styles.addBtnText}>対象ユーザーへ配信を実行</Text>
             </TouchableOpacity>
           </View>
         )}
 
-        {/* 👁️ 4. UGCカード監視（DBデータ紐付け・完全版） */}
+        {/* 👁️ 4. UGCカード監視 */}
         {activeTab === 'ugc_cards' && (
           <View>
             <Text style={styles.sectionTitle}>ユーザー生成コンテンツ(UGC) 監視台帳</Text>
@@ -384,7 +445,7 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* 🛒 5. ショップ設定（オリジナル・インフルエンサー・有名人パック対応） */}
+        {/* 🛒 5. ショップ設定 */}
         {activeTab === 'shop' && (
           <View>
             <View style={styles.formContainer}>
@@ -426,7 +487,7 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* 🎊 6. イベント構築（時間・場所・特定ボス連動） */}
+        {/* 🎊 6. イベント構築 */}
         {activeTab === 'events' && (
           <View>
             <View style={styles.formContainer}>
@@ -464,7 +525,7 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ⚖️ 7. バランス調整（ゲーム内パラメータ・リアルタイム途中変更） */}
+        {/* ⚖️ 7. バランス調整 */}
         {activeTab === 'settings' && (
           <View style={styles.formContainer}>
             <Text style={styles.formSectionTitle}>ゲーム内メカニクス・ステータス一括途中調整</Text>
@@ -518,6 +579,23 @@ const styles = StyleSheet.create({
   addBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
   outlineBtn: { borderWidth: 1, borderColor: '#3B82F6', padding: 10, borderRadius: 8, alignItems: 'center', marginBottom: 10 },
   outlineBtnText: { color: '#3B82F6', fontWeight: '700', fontSize: 13 },
+  
+  // 新規追加スタイル（自動生成＆プルダウン）
+  autoGenBox: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  autoGenText: { fontSize: 14, fontWeight: '800', color: '#1E293B' },
+  autoGenSub: { fontSize: 11, color: '#64748B', marginTop: 4 },
+  toggleBtn: { paddingVertical: 6, paddingHorizontal: 16, borderRadius: 20, borderWidth: 1 },
+  toggleOn: { backgroundColor: '#10B981', borderColor: '#059669' },
+  toggleOff: { backgroundColor: '#F8FAFC', borderColor: '#CBD5E1' },
+  toggleTextOn: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
+  toggleTextOff: { color: '#64748B', fontWeight: '800', fontSize: 13 },
+
+  dropdownHeader: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', padding: 14, borderRadius: 10, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  dropdownHeaderText: { color: '#0F172A', fontSize: 14 },
+  dropdownIcon: { color: '#64748B', fontSize: 12, fontWeight: 'bold' },
+  dropdownList: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, marginBottom: 16, maxHeight: 180 },
+  dropdownItem: { padding: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  dropdownItemText: { color: '#1E293B', fontSize: 14, fontWeight: '500' },
   
   listItem: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 14, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#E2E8F0' },
   listItemVertical: { flexDirection: 'row', backgroundColor: '#FFFFFF', padding: 12, borderRadius: 16, marginBottom: 10, borderWidth: 1, borderColor: '#E2E8F0', alignItems: 'center' },
