@@ -74,16 +74,47 @@ export default function DeckScreen() {
     const safeExp = item.exp || 0;
     const nextLevelExp = safeLevel * 100;
     const progressPercent = Math.min(100, Math.max(0, (safeExp / nextLevelExp) * 100));
-    
     const isSupport = item.card_role === 'support';
 
+    // 🎨 カスタムデザインのパース（JSONを読み解く）
+    let customDesign: any = {};
+    try {
+      if (item.custom_design) {
+        customDesign = JSON.parse(item.custom_design);
+      }
+    } catch (e) {
+      console.warn('カスタムデザインの読み込みに失敗しました', e);
+    }
+
     return (
-      <View style={[styles.card, item.is_active && styles.activeCard, item.is_fixed && styles.sponsorCard]}>
+      <View style={[
+        styles.card, 
+        item.is_active && styles.activeCard, 
+        item.is_fixed && styles.sponsorCard,
+        // ここから下で、DBから来たデザインJSONの指定を上書き適用します
+        customDesign.frameColor && { borderColor: customDesign.frameColor, borderWidth: 4 },
+        customDesign.backgroundColor && { backgroundColor: customDesign.backgroundColor }
+      ]}>
+        
+        {/* ✨ エフェクト指定がある場合（例: {"effect": "sparkle"}）オーバーレイを表示 */}
+        {customDesign.effect === 'sparkle' && (
+          <View style={styles.sparkleOverlay} pointerEvents="none" />
+        )}
+        {customDesign.theme === 'dark' && (
+          <View style={styles.darkOverlay} pointerEvents="none" />
+        )}
+
         <View style={styles.cardHeader}>
-          <Text style={styles.cardName} numberOfLines={1}>
+          <Text style={[
+            styles.cardName, 
+            customDesign.textColor && { color: customDesign.textColor }
+          ]} numberOfLines={1}>
             {item.is_fixed ? '🌟 ' : ''}{item.card_name || '名称不明'}
           </Text>
-          <View style={styles.rarityBadge}>
+          <View style={[
+            styles.rarityBadge,
+            customDesign.rarityBgColor && { backgroundColor: customDesign.rarityBgColor }
+          ]}>
             <Text style={styles.rarityText}>{item.rarity || 'N'}</Text>
           </View>
         </View>
@@ -107,7 +138,10 @@ export default function DeckScreen() {
           <View style={[styles.roleBadge, isSupport ? styles.roleSupport : styles.roleAttacker]}>
             <Text style={styles.roleText}>{isSupport ? '🛡️ サポート' : '⚔️ アタッカー'}</Text>
           </View>
-          <Text style={styles.skillText}> 技: {item.skill_name || '通常攻撃'}</Text>
+          <Text style={[
+            styles.skillText,
+            customDesign.textColor && { color: customDesign.textColor }
+          ]}> 技: {item.skill_name || '通常攻撃'}</Text>
         </View>
         
         <View style={styles.statsRow}>
@@ -181,18 +215,23 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
   headerSub: { fontSize: 13, color: '#2563EB', marginTop: 4, fontWeight: '800' },
   
-  card: { backgroundColor: '#FFFFFF', padding: 16, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
+  // position: 'relative' を追加してオーバーレイを重ねやすくしています
+  card: { position: 'relative', overflow: 'hidden', backgroundColor: '#FFFFFF', padding: 16, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
   activeCard: { borderColor: '#3B82F6', borderWidth: 2, shadowColor: '#3B82F6', shadowOpacity: 0.15 },
   sponsorCard: { borderColor: '#F59E0B', borderWidth: 2 },
   
-  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  // 🎨 新規追加：エフェクト用スタイル
+  sparkleOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 215, 0, 0.1)', zIndex: 0 },
+  darkOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.8)', zIndex: 0 },
+
+  cardHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12, zIndex: 1 },
   cardName: { color: '#0F172A', fontWeight: '800', fontSize: 18, flex: 1 },
   rarityBadge: { backgroundColor: '#FFFBEB', paddingHorizontal: 10, paddingVertical: 4, borderRadius: 12, borderWidth: 1, borderColor: '#FDE68A' },
   rarityText: { color: '#D97706', fontWeight: '800', fontSize: 12 },
   
-  cardImage: { width: '100%', height: 220, borderRadius: 12, marginBottom: 15, backgroundColor: '#F1F5F9' },
+  cardImage: { width: '100%', height: 220, borderRadius: 12, marginBottom: 15, backgroundColor: '#F1F5F9', zIndex: 1 },
   
-  levelContainer: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9', marginBottom: 12 },
+  levelContainer: { backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9', marginBottom: 12, zIndex: 1 },
   levelHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 6 },
   levelText: { color: '#2563EB', fontWeight: '900', fontSize: 14 },
   expText: { color: '#64748B', fontSize: 11, fontWeight: '700' },
@@ -204,19 +243,19 @@ const styles = StyleSheet.create({
   roleSupport: { backgroundColor: '#DCFCE7' },
   roleText: { fontSize: 11, fontWeight: '800', color: '#0F172A' },
   
-  skillText: { color: '#475569', fontSize: 13, fontWeight: '700', marginLeft: 8 },
+  skillText: { color: '#475569', fontSize: 13, fontWeight: '700', marginLeft: 8, zIndex: 1 },
   
-  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20 },
+  statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, zIndex: 1 },
   statBox: { alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9' },
   statLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '800', marginBottom: 4 },
   statValue: { color: '#0F172A', fontSize: 16, fontWeight: '900', fontFamily: 'monospace' },
   
-  equipBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center' },
+  equipBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center', zIndex: 1 },
   equipBtnText: { color: '#475569', fontWeight: '800', fontSize: 14 },
   equippedBtn: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1 },
   equippedBtnText: { color: '#2563EB' },
   
-  arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12 },
+  arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12, zIndex: 1 },
   arBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   
   emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 50, fontWeight: '600', fontSize: 14 },
