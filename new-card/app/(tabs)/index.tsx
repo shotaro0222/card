@@ -175,7 +175,7 @@ export default function ForgeScreen() {
         location_lng: lng,
         is_fixed: aiData.is_fixed || false,
         ar_model_url: aiData.ar_model_url || null,
-        card_role: Math.random() > 0.7 ? 'support' : 'attacker',
+        card_role: aiData.card_role || 'attacker', // ✅ Geminiの判定結果を使うように修正
         is_active: false
       }]);
 
@@ -255,7 +255,7 @@ export default function ForgeScreen() {
 
                 {/* カード情報 */}
                 <Text style={styles.resultCardName} numberOfLines={1}>{forgedCardResult.card_name}</Text>
-                <Text style={styles.resultCardSkill} numberOfLines={1}>【${forgedCardResult.skill_name}】</Text>
+                <Text style={styles.resultCardSkill} numberOfLines={1}>【{forgedCardResult.skill_name}】</Text>
                 <Text style={styles.resultCardPower}>総合力: {forgedCardResult.status_total}</Text>
               </>
             )}
