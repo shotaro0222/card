@@ -9,11 +9,9 @@ import { Camera } from 'lucide-react-native';
 
 export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
-  const [tickets, setTickets] = useState<number>(0);
-  const [isPremium, setIsPremium] = useState<boolean>(false);
   const [customName, setCustomName] = useState<string>('');
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
-  const [debugError, setDebugError] = useState<string | null>(null); // 🚨 エラー表示用
+  const [debugError, setDebugError] = useState<string | null>(null);
   
   const router = useRouter();
 
@@ -24,25 +22,13 @@ export default function ForgeScreen() {
   );
 
   const fetchUserDataAndCampaigns = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-
-    const { data: profile } = await supabase.from('profiles').select('forge_tickets, last_ticket_reset, is_premium').eq('id', user.id).single();
-    if (profile) {
-      setIsPremium(profile.is_premium);
-      const lastReset = new Date(profile.last_ticket_reset).toDateString();
-      const today = new Date().toDateString();
-      setTickets(lastReset !== today ? 3 : profile.forge_tickets);
-    }
+    // キャンペーン情報だけ取得（チケット数は無視）
     const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true);
     if (campaigns) setActiveCampaigns(campaigns);
   };
 
   const takePhoto = async () => {
-    if (!isPremium && tickets <= 0) {
-      Alert.alert('チケットがありません', '本日の無料作成枠を使い切りました。ストアをご確認ください。');
-      return;
-    }
+    // 💡【変更点】チケットが0枚でも弾かないように制限チェックを完全削除しました
 
     const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
     if (!cameraPerm.granted) {
@@ -80,11 +66,7 @@ export default function ForgeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('認証エラー: ログインし直してください');
 
-      if (!isPremium) {
-        const { data: canForge, error: rpcError } = await supabase.rpc('use_forge_ticket', { target_user_id: user.id });
-        if (rpcError || !canForge) throw new Error(`チケット処理エラー: ${rpcError?.message}`);
-        setTickets(prev => prev - 1);
-      }
+      // 💡【変更点】データベースのチケット消費処理（RPC呼び出し）を無力化
 
       // 画像のアップロード
       const fileName = `${user.id}/${Date.now()}.jpg`;
@@ -92,16 +74,17 @@ export default function ForgeScreen() {
       if (uploadError) throw new Error(`画像アップロードエラー: ${uploadError.message}`);
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
-      // 💡【修正箇所1】宛先を 'super-task' に変更
+      // Edge Function通信
       const { data: aiData, error: aiError } = await supabase.functions.invoke('super-task', {
-        body: { base64Image: base64Img, mimeType: 'image/jpeg', isPremium, customName: isPremium ? customName : null, activeCampaigns, userLat: lat, userLng: lng }
+        // isPremium を常に true として送り、自由な名前設定を許可
+        body: { base64Image: base64Img, mimeType: 'image/jpeg', isPremium: true, customName: customName, activeCampaigns, userLat: lat, userLng: lng }
       });
       
       if (aiError) throw new Error(`AI通信エラー: ${aiError.message || JSON.stringify(aiError)}`);
       if (!aiData) throw new Error('AIからデータが返ってきませんでした');
       if (aiData.error) throw new Error(`AI内部エラー: ${aiData.error}`);
 
-      // 💡【修正箇所2】新旧どちらのAIプロンプトから返ってきても対応できるようにデータを整理
+      // データ整理
       const finalName = aiData.card_name || aiData.name || '名称不明';
       const finalSkill = aiData.skill_name || aiData.skill || '通常攻撃';
       const finalHp = aiData.status_hp || aiData.hp || 100;
@@ -128,8 +111,8 @@ export default function ForgeScreen() {
         location_lng: lng,
         is_fixed: aiData.is_fixed || false,
         ar_model_url: aiData.ar_model_url || null,
-        card_role: Math.random() > 0.7 ? 'support' : 'attacker', // アタッカー/サポートの役割付与
-        is_active: false // 保存時は未出撃状態にする
+        card_role: Math.random() > 0.7 ? 'support' : 'attacker',
+        is_active: false
       }]);
 
       if (insertError) throw new Error(`DB保存エラー: ${insertError.message}`);
@@ -141,7 +124,7 @@ export default function ForgeScreen() {
       
     } catch (error: any) {
       console.error("🚨 エラー発生:", error);
-      setDebugError(error.message || JSON.stringify(error)); // 画面にエラー理由を強制表示
+      setDebugError(error.message || JSON.stringify(error));
     } finally {
       setLoading(false);
     }
@@ -150,7 +133,6 @@ export default function ForgeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       
-      {/* 🚨 デバッグ用エラー表示領域（エラー発生時のみ出現） */}
       {debugError && (
         <View style={styles.errorBox}>
           <Text style={styles.errorTitle}>🚨 エラーが発生しました</Text>
@@ -165,9 +147,9 @@ export default function ForgeScreen() {
 
       {/* 上部ステータス */}
       <View style={styles.statusRow}>
-        <View style={[styles.ticketPill, isPremium && styles.premiumPill]}>
-          <Text style={[styles.ticketText, isPremium && styles.premiumText]}>
-            {isPremium ? '👑 無制限パス適用中' : `残り ${tickets} 枚`}
+        <View style={[styles.ticketPill, styles.premiumPill]}>
+          <Text style={[styles.ticketText, styles.premiumText]}>
+            🛠️ 開発モード: 無制限
           </Text>
         </View>
       </View>
@@ -181,18 +163,18 @@ export default function ForgeScreen() {
           </View>
         ) : (
           <View style={styles.actionBox}>
-            {isPremium && (
-              <TextInput
-                style={styles.input}
-                placeholder="好きな名前を指定 (任意)"
-                placeholderTextColor="#94A3B8"
-                value={customName}
-                onChangeText={setCustomName}
-                maxLength={15}
-              />
-            )}
+            {/* 無限モードなので常に名前指定を表示 */}
+            <TextInput
+              style={styles.input}
+              placeholder="好きな名前を指定 (任意)"
+              placeholderTextColor="#94A3B8"
+              value={customName}
+              onChangeText={setCustomName}
+              maxLength={15}
+            />
+            
             <TouchableOpacity 
-              style={[styles.primaryButton, (!isPremium && tickets <= 0) && styles.disabledButton]} 
+              style={styles.primaryButton} 
               onPress={takePhoto}
               activeOpacity={0.8}
             >
@@ -235,7 +217,6 @@ const styles = StyleSheet.create({
   input: { backgroundColor: '#FFFFFF', width: '100%', padding: 18, borderRadius: 16, fontSize: 16, color: '#0F172A', marginBottom: 20, shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
   
   primaryButton: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 65, borderRadius: 20, alignItems: 'center', justifyContent: 'center', shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 8 }, shadowOpacity: 0.3, shadowRadius: 15, elevation: 5 },
-  disabledButton: { backgroundColor: '#CBD5E1', shadowOpacity: 0 },
   primaryButtonText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800', letterSpacing: 1 },
   
   subText: { color: '#64748b', fontSize: 13, marginTop: 15, fontWeight: '500' },
