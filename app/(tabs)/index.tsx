@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, ScrollView, Modal, Animated, Easing, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
@@ -11,7 +11,6 @@ export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
   const [customName, setCustomName] = useState<string>('');
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
-  const [debugError, setDebugError] = useState<string | null>(null);
   
   const [forgedCardResult, setForgedCardResult] = useState<any | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
@@ -74,60 +73,90 @@ export default function ForgeScreen() {
     });
   };
 
-  // 💡 カメラ起動メインロジック
-  const takePhoto = async () => {
-    const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
-    if (!cameraPerm.granted) {
-      Alert.alert('カメラへのアクセス', 'カードを作成するためにカメラへのアクセスを許可してください。');
-      return;
-    }
-
-    let userLat = null, userLng = null;
-    const locationPerm = await Location.requestForegroundPermissionsAsync();
-    if (locationPerm.granted) {
-      try {
-        const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        userLat = location.coords.latitude;
-        userLng = location.coords.longitude;
-      } catch (e) { console.log(e); }
-    }
-
-    const result = await ImagePicker.launchCameraAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.5,
-      base64: true,
-    });
-
-    if (!result.canceled && result.assets[0].base64) {
-      forgeCard(result.assets[0].base64, userLat, userLng);
-    }
+  // 💡 カメラ / アルバムの選択ダイアログを復活
+  const handleLaunchCamera = async () => {
+    Alert.alert(
+      '素材の抽出',
+      'カード化する画像のソースを選択してください',
+      [
+        {
+          text: '📸 カメラで撮影',
+          onPress: async () => {
+            const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
+            if (!cameraPerm.granted) {
+              Alert.alert('権限エラー', 'カメラへのアクセスを許可してください。');
+              return;
+            }
+            const result = await ImagePicker.launchCameraAsync({
+              mediaTypes: ImagePicker.MediaTypeOptions.Images,
+              allowsEditing: true,
+              aspect: [3, 4],
+              quality: 0.5,
+              base64: true,
+            });
+            if (!result.canceled && result.assets[0].base64) {
+              forgeCard(result.assets[0].base64);
+            }
+          }
+        },
+        {
+          text: '🖼️ アルバムから選択',
+          onPress: async () => {
+             const result = await ImagePicker.launchImageLibraryAsync({
+               mediaTypes: ImagePicker.MediaTypeOptions.Images,
+               allowsEditing: true,
+               aspect: [3, 4],
+               quality: 0.5,
+               base64: true,
+             });
+             if (!result.canceled && result.assets[0].base64) {
+               forgeCard(result.assets[0].base64);
+             }
+          }
+        },
+        { text: 'キャンセル', style: 'cancel' }
+      ]
+    );
   };
 
-  const forgeCard = async (base64Img: string, lat: number | null, lng: number | null) => {
+  const forgeCard = async (base64Img: string) => {
     setLoading(true);
-    setDebugError(null);
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('認証エラー');
+      if (!user) throw new Error('ユーザー認証エラー：ログインし直してください。');
 
+      // 1. 位置情報の取得
+      let userLat = null, userLng = null;
+      const locationPerm = await Location.requestForegroundPermissionsAsync();
+      if (locationPerm.granted) {
+        try {
+          const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+          userLat = location.coords.latitude;
+          userLng = location.coords.longitude;
+        } catch (e) { console.warn("位置情報取得スキップ"); }
+      }
+
+      // 2. 画像のアップロード
       const fileName = `${user.id}/${Date.now()}.jpg`;
-      await supabase.storage.from('card_images').upload(fileName, decode(base64Img), { contentType: 'image/jpeg' });
+      const { error: uploadError } = await supabase.storage.from('card_images').upload(fileName, decode(base64Img), { contentType: 'image/jpeg' });
+      if (uploadError) throw new Error(`画像保存エラー: ${uploadError.message}`);
+      
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
+      // 3. AIによる解析
       let aiResultData;
       try {
         const { data: aiData, error: aiError } = await supabase.functions.invoke('super-task', {
-          body: { base64Image: base64Img, mimeType: 'image/jpeg', isPremium: true, customName: customName, activeCampaigns, userLat: lat, userLng: lng }
+          body: { base64Image: base64Img, mimeType: 'image/jpeg', isPremium: true, customName: customName, activeCampaigns, userLat, userLng }
         });
-        if (aiError || !aiData) throw new Error("AI通信失敗");
+        if (aiError || !aiData) throw new Error("AI通信に失敗しました。");
         aiResultData = aiData;
       } catch (e) {
-        // 💡 エラー時は「ダストカード」にする
-        aiResultData = { card_name: "UNKNOWN_ENTITY", skill_name: "システム・クラッシュ", status_hp: 404, status_atk: 404, status_def: 404, status_spd: 404, rarity: "DUST", feature: "解析不能なノイズデータ。" };
+        console.warn("AI機能エラー、ダストカード化:", e);
+        aiResultData = { card_name: "UNKNOWN_ENTITY", skill_name: "システム・クラッシュ", status_hp: 404, status_atk: 404, status_def: 404, status_spd: 404, rarity: "DUST", element: "虚無" };
       }
 
+      // 4. データベースへの保存
       const { error: insertError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: aiResultData.card_name || customName || '名称不明',
@@ -144,13 +173,24 @@ export default function ForgeScreen() {
         is_active: false
       }]);
 
-      if (insertError) throw insertError;
+      if (insertError) throw new Error(`DB保存エラー: ${insertError.message}`);
 
-      setForgedCardResult({ ...aiResultData, image_url: publicUrl, status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10) });
+      // 5. 成功時のUI更新
+      setForgedCardResult({ 
+        ...aiResultData, 
+        image_url: publicUrl, 
+        status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10) 
+      });
       setShowResultModal(true);
       setCustomName('');
+      
     } catch (error: any) {
-      setDebugError(error.message);
+      console.error("生成フローエラー:", error);
+      // 💡 エラー内容を画面にポップアップ表示して無言落ちを防ぐ
+      Alert.alert(
+        'カード化失敗',
+        `エラーが発生しました。\n${error.message}\n\n※「element」カラム追加のSQLを実行していない場合、DB保存エラーになります。`
+      );
     } finally {
       setLoading(false);
     }
@@ -167,6 +207,7 @@ export default function ForgeScreen() {
           <View style={styles.loadingArea}>
             <ActivityIndicator size="large" color="#3B82F6" />
             <Text style={styles.loadingText}>次元からデータを抽出中...</Text>
+            <Text style={styles.loadingSubText}>AIが画像を解析しています</Text>
           </View>
         ) : (
           <View style={styles.mainBox}>
@@ -179,9 +220,9 @@ export default function ForgeScreen() {
               maxLength={15}
             />
             
-            <TouchableOpacity style={styles.actionButton} onPress={takePhoto} activeOpacity={0.8}>
+            <TouchableOpacity style={styles.actionButton} onPress={handleLaunchCamera} activeOpacity={0.8}>
               <Camera color="#FFFFFF" size={24} style={{ marginRight: 10 }} />
-              <Text style={styles.actionButtonText}>カメラを起動</Text>
+              <Text style={styles.actionButtonText}>抽出を開始する</Text>
             </TouchableOpacity>
             
             <Text style={styles.subInfo}>現実の風景や商品を撮影してカード生成</Text>
@@ -200,7 +241,13 @@ export default function ForgeScreen() {
               <Image source={{ uri: forgedCardResult?.image_url }} style={styles.resultImage} />
             </Animated.View>
             <Text style={styles.resultName}>{forgedCardResult?.card_name}</Text>
-            <Text style={styles.resultPower}>総合力: {forgedCardResult?.status_total}</Text>
+            
+            {/* 属性とステータスの表示 */}
+            <View style={styles.resultStatsRow}>
+              <Text style={styles.resultPower}>属性: {forgedCardResult?.element}</Text>
+              <Text style={styles.resultPower}>総合力: {forgedCardResult?.status_total}</Text>
+            </View>
+
             <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)}>
               <Text style={styles.closeBtnText}>図鑑に格納</Text>
             </TouchableOpacity>
@@ -215,14 +262,15 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 100 },
   loadingArea: { alignItems: 'center' },
-  loadingText: { marginTop: 20, color: '#3B82F6', fontWeight: '700' },
+  loadingText: { marginTop: 20, color: '#3B82F6', fontWeight: '800', fontSize: 16 },
+  loadingSubText: { marginTop: 8, color: '#94A3B8', fontWeight: '600', fontSize: 12 },
   devBadge: { backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, marginBottom: 40 },
   devText: { color: '#2563EB', fontWeight: '700', fontSize: 12 },
   mainBox: { width: '85%', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 30, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
   instruction: { fontSize: 14, color: '#64748B', marginBottom: 15, fontWeight: '600' },
   input: { width: '100%', backgroundColor: '#F1F5F9', padding: 15, borderRadius: 12, fontSize: 16, marginBottom: 20 },
   actionButton: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 60, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  actionButtonText: { color: '#FFFFFF', fontSize: 18, fontWeight: '800' },
+  actionButtonText: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
   subInfo: { color: '#94A3B8', fontSize: 12, marginTop: 15, fontWeight: '500' },
   
   // モーダル
@@ -232,8 +280,9 @@ const styles = StyleSheet.create({
   resultTitle: { fontSize: 20, fontWeight: '900', marginBottom: 20 },
   cardPreview: { width: 200, height: 280, borderRadius: 15, overflow: 'hidden', marginBottom: 20, borderWidth: 3, borderColor: '#DDD' },
   resultImage: { width: '100%', height: '100%' },
-  resultName: { fontSize: 22, fontWeight: '900', color: '#333' },
-  resultPower: { fontSize: 16, color: '#666', marginTop: 5 },
-  closeBtn: { marginTop: 30, backgroundColor: '#000', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 15 },
+  resultName: { fontSize: 22, fontWeight: '900', color: '#0F172A' },
+  resultStatsRow: { flexDirection: 'row', gap: 15, marginTop: 8 },
+  resultPower: { fontSize: 14, color: '#64748B', fontWeight: '700' },
+  closeBtn: { marginTop: 30, backgroundColor: '#0F172A', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 15 },
   closeBtnText: { color: '#FFF', fontWeight: '800' }
 });
