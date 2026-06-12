@@ -2,7 +2,6 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, TextInput, Image, Platform } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
-// 💡【追加】画像アップロード用のライブラリをインポート
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
 
@@ -49,7 +48,8 @@ export default function AdminDashboard() {
   const [sPrice, setSPrice] = useState('');
   const [sType, setSType] = useState('original_pack');
   const [sImage, setSImage] = useState(''); 
-  const [sCardImage, setSCardImage] = useState(''); 
+  // 💡【修正】複数枚の枠デザイン画像を保持するための配列ステートに変更
+  const [sCardImages, setSCardImages] = useState<string[]>([]); 
   const [sEffect, setSEffect] = useState('none'); 
   
   // 🎊 フォーム状態（イベント）
@@ -118,22 +118,19 @@ export default function AdminDashboard() {
     setBEffect(['sparkle', 'fire', 'hologram'][Math.floor(Math.random() * 3)]); 
   };
 
-  // 💡【修正】ダミーから実際の画像選択＆Storageアップロード処理に変更
+  // 1枚用画像アップロード（ボス画像、パッケージ画像など）
   const handleImageUpload = async (setter: React.Dispatch<React.SetStateAction<string>>) => {
     try {
-      // 1. アルバムアクセスの許可を要求
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
       if (permissionResult.granted === false) {
-        Alert.alert('エラー', '画像を選択するにはカメラロールへのアクセス許可が必要です。');
-        return;
+        return Alert.alert('エラー', '画像を選択するにはカメラロールへのアクセス許可が必要です。');
       }
 
-      // 2. 画像ピッカーを起動
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsEditing: true, // トリミングを許可
-        quality: 0.8,        // 画質調整
-        base64: true,        // base64データを取得
+        allowsEditing: true, 
+        quality: 0.8,        
+        base64: true,        
       });
 
       if (!result.canceled && result.assets && result.assets.length > 0) {
@@ -141,25 +138,67 @@ export default function AdminDashboard() {
         if (!asset.base64) throw new Error('画像のデータが取得できませんでした。');
 
         setIsUploading(true);
-
-        // 3. Supabase Storage にアップロード
-        const fileName = `admin_uploads/${Date.now()}.jpg`; // わかりやすくadmin_uploadsディレクトリにする
+        const fileName = `admin_uploads/${Date.now()}.jpg`;
         const { error: uploadError } = await supabase.storage
-          .from('card_images') // 既存のバケットを使用
+          .from('card_images') 
           .upload(fileName, decode(asset.base64), { contentType: 'image/jpeg' });
 
         if (uploadError) throw uploadError;
 
-        // 4. アップロードした画像の公開URLを取得してセット
-        const { data: { publicUrl } } = supabase.storage
-          .from('card_images')
-          .getPublicUrl(fileName);
-
+        const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
         setter(publicUrl);
         Alert.alert('成功', '画像のアップロードが完了しました。');
       }
     } catch (error: any) {
-      console.error('画像アップロードエラー:', error);
+      Alert.alert('アップロード失敗', error.message || '画像の保存に失敗しました。');
+    } finally {
+      setIsUploading(false);
+    }
+  };
+
+  // 💡【追加】複数枚用画像アップロード（パック内の複数カード枠デザイン用）
+  const handleMultipleImagesUpload = async (setter: React.Dispatch<React.SetStateAction<string[]>>) => {
+    try {
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permissionResult.granted === false) {
+        return Alert.alert('エラー', '画像を選択するにはアクセス許可が必要です。');
+      }
+
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsMultipleSelection: true, // 複数選択を許可
+        quality: 0.8,
+        base64: true,
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        setIsUploading(true);
+        const uploadedUrls: string[] = [];
+
+        // 選択された全画像をループで順次アップロード
+        for (const asset of result.assets) {
+          if (!asset.base64) continue;
+          
+          const fileName = `admin_uploads/pack_${Date.now()}_${Math.floor(Math.random() * 1000)}.jpg`;
+          const { error: uploadError } = await supabase.storage
+            .from('card_images')
+            .upload(fileName, decode(asset.base64), { contentType: 'image/jpeg' });
+
+          if (!uploadError) {
+            const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
+            uploadedUrls.push(publicUrl);
+          }
+        }
+
+        if (uploadedUrls.length > 0) {
+          // 既存の配列に新しいURLを追加する
+          setter(prev => [...prev, ...uploadedUrls]);
+          Alert.alert('成功', `${uploadedUrls.length}枚の画像のアップロードが完了しました。`);
+        } else {
+          throw new Error('全てのアップロードに失敗しました');
+        }
+      }
+    } catch (error: any) {
       Alert.alert('アップロード失敗', error.message || '画像の保存に失敗しました。');
     } finally {
       setIsUploading(false);
@@ -216,7 +255,11 @@ export default function AdminDashboard() {
 
     let customDesignObj: any = {};
     if (sEffect !== 'none') customDesignObj.effect = sEffect;
-    if (sCardImage) customDesignObj.frameUrl = sCardImage;
+    
+    // 💡【修正】複数枚の画像URL配列を frameUrls としてJSONに格納
+    if (sCardImages.length > 0) {
+      customDesignObj.frameUrls = sCardImages;
+    }
 
     const finalDesignJson = Object.keys(customDesignObj).length > 0 ? JSON.stringify(customDesignObj) : null;
 
@@ -229,7 +272,7 @@ export default function AdminDashboard() {
 
     if (!error) {
       Alert.alert('成功', '新コンセプトパックをショップに追加陳列しました');
-      setSName(''); setSPrice(''); setSImage(''); setSCardImage(''); setSEffect('none');
+      setSName(''); setSPrice(''); setSImage(''); setSCardImages([]); setSEffect('none');
       fetchAdminData();
     } else {
       Alert.alert('失敗', error.message);
@@ -411,15 +454,26 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>排出カードの特別デザイン / 枠画像</Text>
-              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="カードデザイン画像URL" value={sCardImage} onChangeText={setSCardImage} />
+              {/* 💡【修正】複数枚の画像をアップロード・一覧表示できるUI */}
+              <Text style={styles.label}>排出カードの特別デザイン / 枠画像 (複数枚登録可能)</Text>
+              <View style={styles.multiImageContainer}>
+                {sCardImages.map((url, index) => (
+                  <View key={index} style={styles.thumbnailWrapper}>
+                    <Image source={{ uri: url }} style={styles.thumbnailImage} />
+                    <TouchableOpacity 
+                      style={styles.removeImgBtn} 
+                      onPress={() => setSCardImages(prev => prev.filter((_, i) => i !== index))}
+                    >
+                      <Text style={styles.removeImgText}>×</Text>
+                    </TouchableOpacity>
+                  </View>
+                ))}
                 <TouchableOpacity 
-                  style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} 
-                  onPress={() => handleImageUpload(setSCardImage)}
+                  style={styles.addImgBtn} 
+                  onPress={() => handleMultipleImagesUpload(setSCardImages)}
                   disabled={isUploading}
                 >
-                  <Text style={styles.outlineBtnText}>{isUploading ? '送信中...' : '⬆️ 画像選択'}</Text>
+                  <Text style={styles.addImgText}>{isUploading ? '送信中' : '➕ 追加'}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -626,5 +680,14 @@ const styles = StyleSheet.create({
   
   miniChip: { backgroundColor: '#F1F5F9', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
   activeMiniChip: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6', borderWidth: 1 },
-  miniChipText: { fontSize: 12, fontWeight: '700', color: '#475569' }
+  miniChipText: { fontSize: 12, fontWeight: '700', color: '#475569' },
+
+  // 💡【追加】複数枚画像アップロード用のUIスタイル
+  multiImageContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
+  thumbnailWrapper: { position: 'relative', width: 75, height: 75, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  thumbnailImage: { width: '100%', height: '100%', borderRadius: 8 },
+  removeImgBtn: { position: 'absolute', top: -5, right: -5, backgroundColor: '#EF4444', width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
+  removeImgText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
+  addImgBtn: { width: 75, height: 75, borderRadius: 8, borderWidth: 1, borderColor: '#3B82F6', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', backgroundColor: '#EFF6FF' },
+  addImgText: { color: '#2563EB', fontSize: 12, fontWeight: '700' }
 });
