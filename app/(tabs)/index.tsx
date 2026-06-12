@@ -7,7 +7,6 @@ import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Camera, Image as ImageIcon } from 'lucide-react-native';
 
-// 💡 Web環境でも確実にアラートを出すための安全な関数
 const safeAlert = (title: string, msg: string) => {
   if (Platform.OS === 'web') {
     window.alert(`${title}\n${msg}`);
@@ -78,7 +77,6 @@ export default function ForgeScreen() {
     });
   };
 
-  // 💡 ポップアップを廃止し、直接カメラを起動する関数
   const launchCamera = async () => {
     try {
       const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
@@ -95,7 +93,6 @@ export default function ForgeScreen() {
     }
   };
 
-  // 💡 直接アルバムを開く関数
   const launchLibrary = async () => {
     try {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
@@ -115,7 +112,6 @@ export default function ForgeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('ログインが必要です');
 
-      // 💡 位置情報でフリーズしないよう「3秒ルール（タイムアウト）」を設定
       let userLat = null, userLng = null;
       try {
         const locResult: any = await Promise.race([
@@ -148,14 +144,17 @@ export default function ForgeScreen() {
         if (aiError || !aiData) throw new Error("AI応答なし");
         aiResultData = aiData;
       } catch (e) {
-        aiResultData = { card_name: "ERROR_ENTITY", rarity: "DUST", element: "虚無", skill_name: "ノイズ・バースト", status_hp: 404, status_atk: 404, status_def: 404, status_spd: 404 };
+        aiResultData = { card_name: "ERROR_ENTITY", rarity: "DUST", element: "虚無", skill_name: "ノイズ・バースト", feature: "解析不能なノイズデータ。", status_hp: 404, status_atk: 404, status_def: 404, status_spd: 404 };
       }
 
       setLoadingSubText('データベースに登録中...');
+      
+      // 💡 ここで feature カラムの保存をしっかり追加しました！
       const { error: insertError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: aiResultData.card_name || customName || '名称不明',
         image_url: publicUrl,
+        feature: aiResultData.feature || '解析不能な対象物', // ← ココが抜けていました
         skill_name: aiResultData.skill_name || '通常攻撃',
         status_hp: aiResultData.status_hp || 100,
         status_atk: aiResultData.status_atk || 10,
@@ -167,7 +166,7 @@ export default function ForgeScreen() {
         is_active: false
       }]);
 
-      if (insertError) throw new Error(`DB保存失敗: ${insertError.message}\n属性(element)カラムは追加しましたか？`);
+      if (insertError) throw new Error(`DB保存失敗: ${insertError.message}`);
 
       setForgedCardResult({ ...aiResultData, image_url: publicUrl, status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10) });
       setShowResultModal(true);
@@ -197,7 +196,6 @@ export default function ForgeScreen() {
             <Text style={styles.instruction}>好きな名前を指定（任意）</Text>
             <TextInput style={styles.input} placeholder="カードの名称を入力..." value={customName} onChangeText={setCustomName} maxLength={15} />
             
-            {/* 💡 ポップアップを廃止し、2つのボタンを直接配置 */}
             <View style={styles.buttonRow}>
               <TouchableOpacity style={styles.actionButtonHalf} onPress={launchCamera} activeOpacity={0.8}>
                 <Camera color="#FFFFFF" size={20} />
@@ -246,13 +244,10 @@ const styles = StyleSheet.create({
   mainBox: { width: '85%', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 30, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
   instruction: { fontSize: 14, color: '#64748B', marginBottom: 15, fontWeight: '600' },
   input: { width: '100%', backgroundColor: '#F1F5F9', padding: 15, borderRadius: 12, fontSize: 16, marginBottom: 20 },
-  
-  // 💡 2つのボタンを横並びにするスタイル
   buttonRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 10 },
   actionButtonHalf: { flex: 1, flexDirection: 'row', backgroundColor: '#3B82F6', height: 60, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  actionButtonLibrary: { backgroundColor: '#0F172A' }, // アルバム用は黒っぽく
+  actionButtonLibrary: { backgroundColor: '#0F172A' },
   actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', marginLeft: 8 },
-  
   subInfo: { color: '#94A3B8', fontSize: 12, marginTop: 15, fontWeight: '500' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 30, padding: 30, alignItems: 'center' },
