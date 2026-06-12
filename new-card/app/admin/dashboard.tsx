@@ -2,6 +2,9 @@ import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, TextInput, Image, Platform } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
+// 💡【追加】画像アップロード用のライブラリをインポート
+import * as ImagePicker from 'expo-image-picker';
+import { decode } from 'base64-arraybuffer';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -20,7 +23,7 @@ export default function AdminDashboard() {
   const [bLat, setBLat] = useState('35.6983');
   const [bLng, setBLng] = useState('139.4130');
   const [bRadius, setBRadius] = useState('1000');
-  const [bImage, setBImage] = useState('https://images.unsplash.com/photo-1542051812-ba32e18ce6a6');
+  const [bImage, setBImage] = useState('');
   const [bSkills, setBSkills] = useState<string[]>(['']);
   const [bDropName, setBDropName] = useState('');
   const [bDropRarity, setBDropRarity] = useState('Normal');
@@ -34,7 +37,6 @@ export default function AdminDashboard() {
 
   // 📢 フォーム状態（サーベイ配信）
   const [surveyTitle, setSurveyTitle] = useState('');
-  // 💡【修正】複数選択のために配列に変更
   const [surveyTargets, setSurveyTargets] = useState<string[]>([]);
   const [surveyUrl, setSurveyUrl] = useState('');
   const [isSegmentDropdownOpen, setIsSegmentDropdownOpen] = useState(false);
@@ -46,8 +48,8 @@ export default function AdminDashboard() {
   const [sName, setSName] = useState('');
   const [sPrice, setSPrice] = useState('');
   const [sType, setSType] = useState('original_pack');
-  const [sImage, setSImage] = useState(''); // パッケージ画像
-  const [sCardImage, setSCardImage] = useState(''); // 💡【追加】排出カードの枠・デザイン画像
+  const [sImage, setSImage] = useState(''); 
+  const [sCardImage, setSCardImage] = useState(''); 
   const [sEffect, setSEffect] = useState('none'); 
   
   // 🎊 フォーム状態（イベント）
@@ -62,6 +64,9 @@ export default function AdminDashboard() {
   const [expMultiplier, setExpMultiplier] = useState('1.0');
   const [hpMultiplier, setHpMultiplier] = useState('1.0');
   const [atkMultiplier, setAtkMultiplier] = useState('1.0');
+
+  // 画像アップロード中のローディング状態
+  const [isUploading, setIsUploading] = useState(false);
 
   useFocusEffect(
     useCallback(() => { fetchAdminData(); }, [activeTab])
@@ -113,10 +118,52 @@ export default function AdminDashboard() {
     setBEffect(['sparkle', 'fire', 'hologram'][Math.floor(Math.random() * 3)]); 
   };
 
-  const handleImageUpload = (setter: React.Dispatch<React.SetStateAction<string>>) => {
-    // 実際の運用ではここで ImagePicker を起動して Supabase Storage に送る
-    Alert.alert('画像アップロード', 'ファイル選択UIを展開し、Storageに保存します。');
-    setter('https://example.com/uploaded_image.png');
+  // 💡【修正】ダミーから実際の画像選択＆Storageアップロード処理に変更
+  const handleImageUpload = async (setter: React.Dispatch<React.SetStateAction<string>>) => {
+    try {
+      // 1. アルバムアクセスの許可を要求
+      const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
+      if (permissionResult.granted === false) {
+        Alert.alert('エラー', '画像を選択するにはカメラロールへのアクセス許可が必要です。');
+        return;
+      }
+
+      // 2. 画像ピッカーを起動
+      const result = await ImagePicker.launchImageLibraryAsync({
+        mediaTypes: ImagePicker.MediaTypeOptions.Images,
+        allowsEditing: true, // トリミングを許可
+        quality: 0.8,        // 画質調整
+        base64: true,        // base64データを取得
+      });
+
+      if (!result.canceled && result.assets && result.assets.length > 0) {
+        const asset = result.assets[0];
+        if (!asset.base64) throw new Error('画像のデータが取得できませんでした。');
+
+        setIsUploading(true);
+
+        // 3. Supabase Storage にアップロード
+        const fileName = `admin_uploads/${Date.now()}.jpg`; // わかりやすくadmin_uploadsディレクトリにする
+        const { error: uploadError } = await supabase.storage
+          .from('card_images') // 既存のバケットを使用
+          .upload(fileName, decode(asset.base64), { contentType: 'image/jpeg' });
+
+        if (uploadError) throw uploadError;
+
+        // 4. アップロードした画像の公開URLを取得してセット
+        const { data: { publicUrl } } = supabase.storage
+          .from('card_images')
+          .getPublicUrl(fileName);
+
+        setter(publicUrl);
+        Alert.alert('成功', '画像のアップロードが完了しました。');
+      }
+    } catch (error: any) {
+      console.error('画像アップロードエラー:', error);
+      Alert.alert('アップロード失敗', error.message || '画像の保存に失敗しました。');
+    } finally {
+      setIsUploading(false);
+    }
   };
 
   const handleAddBoss = async () => {
@@ -131,7 +178,7 @@ export default function AdminDashboard() {
     const { error } = await supabase.from('bosses').insert([{ 
       name: bName, hp: parseInt(bHp), atk: parseInt(bAtk), def: 10, 
       lat: parseFloat(bLat), lng: parseFloat(bLng), radius_meters: parseInt(bRadius),
-      image_url: bImage, skills: bSkills.filter(s => s !== ''),
+      image_url: bImage || null, skills: bSkills.filter(s => s !== ''),
       drop_card_name: bDropName || null, drop_card_rarity: bDropName ? bDropRarity : null,
       custom_design: Object.keys(finalDesign).length > 0 ? JSON.stringify(finalDesign) : null,
       is_active: true 
@@ -156,13 +203,8 @@ export default function AdminDashboard() {
   };
 
   const handleSendSurvey = async () => {
-    // 💡【修正】複数選択配列のチェック
     if (surveyTargets.length === 0 || !surveyUrl) return Alert.alert('エラー', 'ターゲット条件とURLは必須です');
-    
-    // バックエンド等に送信する処理（ここではモックアップとしてアラート）
     Alert.alert('配信完了', `条件「${surveyTargets.join(', ')}」へサーベイをプッシュ配信しました。`);
-    
-    // 送信後に状態をリセット
     setSurveyTitle(''); 
     setSurveyTargets([]); 
     setSurveyUrl('');
@@ -172,7 +214,6 @@ export default function AdminDashboard() {
   const handleAddShopItem = async () => {
     if (!sName || !sPrice) return Alert.alert('エラー', '商品名と価格を入力してください');
 
-    // 💡【修正】カードデザイン画像（frameUrl）とエフェクト（effect）を統合してJSON化
     let customDesignObj: any = {};
     if (sEffect !== 'none') customDesignObj.effect = sEffect;
     if (sCardImage) customDesignObj.frameUrl = sCardImage;
@@ -182,13 +223,12 @@ export default function AdminDashboard() {
     const { error } = await supabase.from('shop_items').insert([{ 
       name: sName, price: parseInt(sPrice), item_type: sType, 
       banner_url: sImage || null, 
-      drop_rates: finalDesignJson, // アプリ側で読み取れるようにデザインJSONを保存
+      drop_rates: finalDesignJson,
       is_active: true 
     }]);
 
     if (!error) {
       Alert.alert('成功', '新コンセプトパックをショップに追加陳列しました');
-      // フォームをリセット
       setSName(''); setSPrice(''); setSImage(''); setSCardImage(''); setSEffect('none');
       fetchAdminData();
     } else {
@@ -304,8 +344,12 @@ export default function AdminDashboard() {
               <Text style={styles.label}>カード画像＆枠デザイン (JSON)</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                 <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="画像URL" value={bImage} onChangeText={setBImage} />
-                <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={() => handleImageUpload(setBImage)}>
-                  <Text style={styles.outlineBtnText}>⬆️ 画像選択</Text>
+                <TouchableOpacity 
+                  style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} 
+                  onPress={() => handleImageUpload(setBImage)}
+                  disabled={isUploading}
+                >
+                  <Text style={styles.outlineBtnText}>{isUploading ? '送信中...' : '⬆️ 画像選択'}</Text>
                 </TouchableOpacity>
               </View>
               <TextInput style={[styles.input, { minHeight: 60, textAlignVertical: 'top' }]} placeholder={`枠色等の指定\n例: {"frameColor": "gold"}`} multiline value={bCustomDesign} onChangeText={setBCustomDesign} />
@@ -358,17 +402,24 @@ export default function AdminDashboard() {
               <Text style={styles.label}>パッケージ画像 / コラボバナー</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                 <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="パッケージ画像URL" value={sImage} onChangeText={setSImage} />
-                <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={() => handleImageUpload(setSImage)}>
-                  <Text style={styles.outlineBtnText}>⬆️ 画像選択</Text>
+                <TouchableOpacity 
+                  style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} 
+                  onPress={() => handleImageUpload(setSImage)}
+                  disabled={isUploading}
+                >
+                  <Text style={styles.outlineBtnText}>{isUploading ? '送信中...' : '⬆️ 画像選択'}</Text>
                 </TouchableOpacity>
               </View>
 
-              {/* 💡【追加】排出カードの枠やデザイン画像をアップロードできる領域 */}
               <Text style={styles.label}>排出カードの特別デザイン / 枠画像</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
                 <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="カードデザイン画像URL" value={sCardImage} onChangeText={setSCardImage} />
-                <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={() => handleImageUpload(setSCardImage)}>
-                  <Text style={styles.outlineBtnText}>⬆️ 画像選択</Text>
+                <TouchableOpacity 
+                  style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} 
+                  onPress={() => handleImageUpload(setSCardImage)}
+                  disabled={isUploading}
+                >
+                  <Text style={styles.outlineBtnText}>{isUploading ? '送信中...' : '⬆️ 画像選択'}</Text>
                 </TouchableOpacity>
               </View>
 
@@ -444,7 +495,6 @@ export default function AdminDashboard() {
             <TextInput style={styles.input} placeholder="お知らせタイトル" value={surveyTitle} onChangeText={setSurveyTitle} />
             <Text style={styles.label}>割付・ターゲット条件指定 (複数選択可)</Text>
             <TouchableOpacity style={styles.dropdownHeader} onPress={() => setIsSegmentDropdownOpen(!isSegmentDropdownOpen)}>
-              {/* 💡【修正】選択済みのターゲットをカンマ区切りで表示 */}
               <Text style={styles.dropdownHeaderText} numberOfLines={1}>
                 {surveyTargets.length > 0 ? surveyTargets.join(', ') : 'デモグラフィック・セグメントを選択'}
               </Text>
@@ -461,7 +511,6 @@ export default function AdminDashboard() {
                         key={segment} 
                         style={[styles.dropdownItem, isSelected && { backgroundColor: '#EFF6FF' }]} 
                         onPress={() => {
-                          // 💡【修正】配列への追加と削除（ドロップダウンは閉じない）
                           if (isSelected) {
                             setSurveyTargets(surveyTargets.filter(t => t !== segment));
                           } else {
