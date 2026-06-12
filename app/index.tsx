@@ -46,7 +46,6 @@ export default function ForgeScreen() {
       case 'SSR': return { color: '#EF4444', shakeIntensity: 1.5, effectTitle: '🔥【SSR】超・実体化！！🔥' };
       case 'SR': return { color: '#A855F7', shakeIntensity: 0.8, effectTitle: '⚡【SR】強・実体化！⚡' };
       case 'R': return { color: '#3B82F6', shakeIntensity: 0, effectTitle: '✨【R】レア・実体化✨' };
-      // 💡【新規：エラーから生まれるダストカード専用の演出】
       case 'DUST': return { color: '#3F3F46', shakeIntensity: 0.5, effectTitle: '⚠️【ERROR】ノイズ・実体化⚠️' };
       case 'N': default: return { color: '#FFFFFF', shakeIntensity: 0, effectTitle: '⚙️【N】通常・実体化' };
     }
@@ -91,7 +90,10 @@ export default function ForgeScreen() {
       return;
     }
 
-    let userLat = null, userLng = null;
+    // 💡【修正】TypeScriptの型推論エラーを防ぐため、明示的に number | null 型を指定
+    let userLat: number | null = null;
+    let userLng: number | null = null;
+
     const locationPerm = await Location.requestForegroundPermissionsAsync();
     if (locationPerm.granted) {
       try {
@@ -109,7 +111,7 @@ export default function ForgeScreen() {
       base64: true,
     });
 
-    if (!result.canceled && result.assets[0].base64) {
+    if (!result.canceled && result.assets && result.assets[0].base64) {
       forgeCard(result.assets[0].base64, userLat, userLng);
     }
   };
@@ -121,15 +123,14 @@ export default function ForgeScreen() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('認証エラー: ログインし直してください');
 
-      // 画像のアップロード (ここは失敗するとカード絵がないので通常エラーとする)
       const fileName = `${user.id}/${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage.from('card_images').upload(fileName, decode(base64Img), { contentType: 'image/jpeg' });
       if (uploadError) throw new Error(`画像アップロードエラー: ${uploadError.message}`);
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
-      let aiResultData;
+      // 💡【修正】未定義エラーを防ぐため any 型を指定
+      let aiResultData: any;
 
-      // 💡【変更点：AI通信だけを独立させてエラーを「捕獲」する】
       try {
         const { data: aiData, error: aiError } = await supabase.functions.invoke('super-task', {
           body: { base64Image: base64Img, mimeType: 'image/jpeg', isPremium: true, customName: customName, activeCampaigns, userLat: lat, userLng: lng }
@@ -141,7 +142,6 @@ export default function ForgeScreen() {
         aiResultData = aiData;
 
       } catch (apiError) {
-        // AI通信が失敗した場合、赤いエラー画面を出さずに「ダストカード」として上書きする！
         console.warn("API通信エラーを検知。ダストカードを生成します。");
         aiResultData = {
           card_name: "UNKNOWN_ENTITY",
@@ -150,7 +150,7 @@ export default function ForgeScreen() {
           status_atk: 404,
           status_def: 404,
           status_spd: 404,
-          rarity: "DUST", // 特殊レアリティ
+          rarity: "DUST", 
           feature: "解析不能。エラーにより生み出されたノイズデータの塊。",
           is_fixed: false,
           ar_model_url: null,
@@ -158,7 +158,6 @@ export default function ForgeScreen() {
         };
       }
 
-      // データの整理（通常カード または ダストカード）
       const finalName = aiResultData.card_name || aiResultData.name || '名称不明';
       const finalSkill = aiResultData.skill_name || aiResultData.skill || '通常攻撃';
       const finalHp = aiResultData.status_hp || aiResultData.hp || 100;
@@ -167,7 +166,6 @@ export default function ForgeScreen() {
       const finalSpd = aiResultData.status_spd || aiResultData.spd || 10;
       const finalRarity = aiResultData.rarity || 'N';
 
-      // データベースに保存
       const { error: insertError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: finalName,
@@ -192,7 +190,6 @@ export default function ForgeScreen() {
 
       if (insertError) throw new Error(`DB保存エラー: ${insertError.message}`);
 
-      // 結果ステータスを設定してモーダルを表示
       const completeCardData = {
         card_name: finalName,
         image_url: publicUrl,
@@ -206,7 +203,6 @@ export default function ForgeScreen() {
       setCustomName('');
       
     } catch (error: any) {
-      // 写真アップロード失敗やデータベース接続エラーなど、カードが物理的に作れない致命傷の時だけここに来る
       console.error("🚨 致命的エラー:", error);
       setDebugError(error.message || JSON.stringify(error));
     } finally {
@@ -217,7 +213,6 @@ export default function ForgeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       
-      {/* 致命的エラー表示（AIエラー以外） */}
       {debugError && (
         <View style={styles.errorBox}>
           <Text style={styles.errorTitle}>🚨 致命的なエラー</Text>
@@ -230,7 +225,6 @@ export default function ForgeScreen() {
         </View>
       )}
 
-      {/* 結果表示モーダル */}
       <Modal visible={showResultModal} animationType="fade" transparent={true} onRequestClose={() => { setShowResultModal(false); router.push('/(tabs)') }}>
         <Animated.View style={[styles.modalOverlay, { transform: [{ translateX: shakeX }] }]}>
           
@@ -273,7 +267,6 @@ export default function ForgeScreen() {
         </Animated.View>
       </Modal>
 
-      {/* 上部ステータス */}
       <View style={styles.statusRow}>
         <View style={[styles.ticketPill, styles.premiumPill]}>
           <Text style={[styles.ticketText, styles.premiumText]}>
@@ -282,7 +275,6 @@ export default function ForgeScreen() {
         </View>
       </View>
 
-      {/* メインのアクションエリア */}
       <View style={styles.centerArea}>
         {loading ? (
           <View style={styles.loadingBox}>
@@ -348,7 +340,6 @@ const styles = StyleSheet.create({
   flashOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 999 },
   modalContent: { backgroundColor: '#FFFFFF', width: '100%', borderRadius: 24, padding: 24, alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 10 }, shadowOpacity: 0.2, shadowRadius: 20, elevation: 10 },
   
-  // 💡【ダストカードのときはモーダルの背景色を黒くする】
   modalContentDust: { backgroundColor: '#18181B', borderColor: '#3F3F46', borderWidth: 2 },
   
   resultTitle: { fontSize: 20, fontWeight: '900', textAlign: 'center', marginBottom: 24, textShadowColor: 'rgba(0,0,0,0.2)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3 },
