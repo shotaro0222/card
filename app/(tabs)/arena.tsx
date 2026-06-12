@@ -233,7 +233,6 @@ export default function ArenaScreen() {
           </View>
         </View>
       </Modal>
-
     </SafeAreaView>
   );
 }

@@ -1,458 +1,366 @@
-import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, SafeAreaView, ActivityIndicator, ScrollView, Alert, Animated, Easing } from 'react-native';
+import React, { useState, useCallback } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView } from 'react-native';
+import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
-
-// 🌌 ボスの画像プール
-const BOSS_IMAGES = {
-  small: 'https://images.unsplash.com/photo-1538481199705-c710c4e965fc?w=150&q=80',
-  medium: 'https://images.unsplash.com/photo-1518709268805-4e9042af9f23?w=150&q=80',
-  large: 'https://images.unsplash.com/photo-1579783902614-a3fb3927b6a5?w=150&q=80',
-  special: 'https://images.unsplash.com/photo-1618005182384-a83a8bd57fbe?w=150&q=80'
-};
+import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps'; // 🗺️ 【新規】マップライブラリ
+import { WebView } from 'react-native-webview';
+import { ShieldAlert, Trophy, Activity, MapPin } from 'lucide-react-native';
 
 export default function BattleScreen() {
-  const [loading, setLoading] = useState(true);
-  const [screenMode, setScreenMode] = useState<'explore' | 'battle'>('explore'); // explore(マップ) か battle(戦闘)
-  
-  // デッキ情報
-  const [deck, setDeck] = useState<any[]>([]);
-  const [partyHp, setPartyHp] = useState(0);
-  const [partyMaxHp, setPartyMaxHp] = useState(0);
+  const [battleLog, setBattleLog] = useState<any[]>([]);
+  const [isBattling, setIsBattling] = useState(false);
+  const [loadingBoss, setLoadingBoss] = useState(false);
+  const [detectedBoss, setDetectedBoss] = useState<any>(null);
+  const [isArModalVisible, setArModalVisible] = useState(false);
+  const [arUrl, setArUrl] = useState<string | null>(null);
 
-  // マップ上の周辺ボス一覧（固定の相対座標でプロット）
-  const [nearbyBosses, setNearbyBosses] = useState<any[]>([]);
-  const [selectedMapBoss, setSelectedMapBoss] = useState<any | null>(null);
+  // 📊 ユーザーの累計戦績保持用ステート
+  const [playerStats, setPlayerStats] = useState({ totalWins: 0, bossDefeats: 0 });
 
-  // 現在戦闘中のボス情報
-  const [boss, setBoss] = useState<any>(null);
-  const [bossHp, setBossHp] = useState(0);
-  const [bossMaxHp, setBossMaxHp] = useState(0);
-  const [bossAtkDebuff, setBossAtkDebuff] = useState(1.0);
-  const [battleLogs, setBattleLogs] = useState<string[]>([]);
-  const [isBattleOver, setIsBattleOver] = useState(false);
-
-  const scrollViewRef = useRef<ScrollView>(null);
-
-  // アニメーション用の値
-  const shakeAnim = useRef(new Animated.Value(0)).current;
-  const flashAnim = useRef(new Animated.Value(0)).current;
-  const radarPulseAnim = useRef(new Animated.Value(0)).current; // レーダーの波紋用
-  const [flashColor, setFlashColor] = useState('rgba(255, 0, 0, 0.4)');
-
-  // レーダーのパルス（波紋）アニメーションループ
-  useEffect(() => {
-    Animated.loop(
-      Animated.timing(radarPulseAnim, {
-        toValue: 1,
-        duration: 3000,
-        easing: Easing.linear,
-        useNativeDriver: true
-      })
-    ).start();
-  }, []);
+  // 🗺️ 【新規】マップ表示領域管理用ステート
+  const [mapRegion, setMapRegion] = useState({
+    latitude: 35.681236, // デフォルト：東京駅
+    longitude: 139.767125,
+    latitudeDelta: 0.005, // ズームレベル（小さいほどズーム）
+    longitudeDelta: 0.005,
+  });
 
   useFocusEffect(
-    useCallback(() => {
-      fetchDeckData();
+    useCallback(() => { 
+      checkNearbyBoss(); 
+      fetchPlayerStats(); 
     }, [])
   );
 
-  // 1. プレイヤーのデッキデータを取得
-  const fetchDeckData = async () => {
-    setLoading(true);
+  const fetchPlayerStats = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
+    const { data } = await supabase.from('profiles').select('total_wins, boss_defeats').eq('id', user.id).single();
+    if (data) {
+      setPlayerStats({
+        totalWins: data.total_wins,
+        bossDefeats: data.boss_defeats
+      });
+    }
+  };
 
-    const { data: deckData } = await supabase
-      .from('cards')
-      .select('*')
-      .eq('player_id', user.id)
-      .eq('is_active', true);
+  // 🛰️ 周辺ボス索敵 ＆ 【新規】マップ更新ロジック
+  const checkNearbyBoss = async () => {
+    setLoadingBoss(true);
+    try {
+      const locationPerm = await Location.requestForegroundPermissionsAsync();
+      if (!locationPerm.granted) return;
+      // 🗺️ マップ表示用に精度をHighに設定
+      const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      const { latitude, longitude } = location.coords;
 
-    if (!deckData || deckData.length === 0) {
-      setLoading(false);
-      Alert.alert('出撃エラー', 'デッキにカードが編成されていません。図鑑から「デッキに編成」を行ってください。');
+      // 🗺️ 【新規】現在地をマップの中心に設定
+      setMapRegion(prev => ({
+        ...prev,
+        latitude,
+        longitude,
+      }));
+
+      const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true).not('target_lat', 'is', null);
+      if (!campaigns) return;
+
+      const nearbyCampaign = campaigns.find((c: any) => {
+        const dist = getDistance(latitude, longitude, c.target_lat, c.target_lng);
+        return dist <= (c.radius_meters || 100);
+      });
+
+      if (nearbyCampaign) {
+        const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).single();
+        if (boss) {
+          // 🗺️ 【新規】detectedBossに座標情報を付与
+          setDetectedBoss({ 
+            ...boss, 
+            campaign_title: nearbyCampaign.title, 
+            sponsor_name: nearbyCampaign.sponsor_name,
+            lat: nearbyCampaign.target_lat, // マーカー表示用
+            lng: nearbyCampaign.target_lng
+          });
+        }
+      } else { setDetectedBoss(null); }
+    } catch (e) { console.log(e); } finally { setLoadingBoss(false); }
+  };
+
+  const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
+    const R = 6371e3;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  const startPvpBattle = async () => {
+    setIsBattling(true);
+    setBattleLog([]);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true).single();
+    if (!myCard) {
+      Alert.alert('準備不足', '出撃中のカードがありません。「図鑑」タブからカードを出撃させてください。');
+      setIsBattling(false);
       return;
     }
-
-    const totalHp = deckData.reduce((sum, card) => sum + (card.status_hp || 100), 0);
-    setDeck(deckData);
-    setPartyMaxHp(totalHp);
-    setPartyHp(totalHp);
-
-    // 周辺スポットボスのシミュレート生成
-    generateNearbyBosses();
-    setLoading(false);
+    const minStatus = Math.floor(myCard.status_total * 0.75);
+    const maxStatus = Math.floor(myCard.status_total * 1.25);
+    const { data: oppCards } = await supabase.from('cards').select('*').neq('player_id', user.id).eq('is_active', true).gte('status_total', minStatus).lte('status_total', maxStatus).limit(20);
+    if (!oppCards || oppCards.length === 0) {
+      Alert.alert('索敵中', '同格のライバルが見つかりませんでした。時間をおいて再度お試しください。');
+      setIsBattling(false);
+      return;
+    }
+    const oppCard = oppCards[Math.floor(Math.random() * oppCards.length)];
+    simulateBattle(myCard, oppCard, false);
   };
 
-  // 🎲【位置情報シミュレート】周辺にサイズ違いのボスをプロットする
-  const generateNearbyBosses = () => {
-    const list = [
-      { id: 'b_small', name: 'スライム・ノイズ', type: 'small', size: 24, color: '#10B981', top: 60, left: 70, hp: 400, atk: 70, def: 30, marker: '🟢' },
-      { id: 'b_medium', name: 'ヘビー・コードギア', type: 'medium', size: 34, color: '#3B82F6', top: 140, left: 240, hp: 700, atk: 110, def: 50, marker: '🔵' },
-      { id: 'b_large', name: 'コア・デストラクター', type: 'large', size: 44, color: '#EF4444', top: 40, left: 200, hp: 1200, atk: 160, def: 70, marker: '🔴' },
-      { id: 'b_special', name: '協賛限定: シャドウ・マトリクス', type: 'special', size: 54, color: '#F59E0B', top: 160, left: 40, hp: 2000, atk: 220, def: 100, marker: '🌟' },
-    ];
-    setNearbyBosses(list);
+  const startBossBattle = async () => {
+    if (!detectedBoss) return;
+    setIsBattling(true);
+    setBattleLog([]);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true).single();
+    if (!myCard) {
+      Alert.alert('エラー', '出撃中のカードがありません。');
+      setIsBattling(false);
+      return;
+    }
+    const bossMonster = { id: 'BOSS_NPC', card_name: `【エリアボス】${detectedBoss.name}`, skill_name: 'カタストロフィ・レイ', status_hp: detectedBoss.hp, status_atk: detectedBoss.atk, status_def: detectedBoss.def, status_spd: 40, level: 10, rarity: '👑' };
+    simulateBattle(myCard, bossMonster, true);
   };
 
-  // ⚔️ マップ上のボスを選択して戦闘を開始する
-  const startBattle = (targetBoss: any) => {
-    setBoss(targetBoss);
-    setBossMaxHp(targetBoss.hp);
-    setBossHp(targetBoss.hp);
-    setBossAtkDebuff(1.0);
-    setIsBattleOver(false);
-    
-    // 戦闘画面モードへ切り替え
-    setScreenMode('battle');
-    setBattleLogs([
-      `⚔️ アリーナ戦域に侵入：vs ${targetBoss.name}`,
-      `🚨 警告：【${targetBoss.type.toUpperCase()}クラス】のエネルギー反応を感知！`
+  const generateVisualLog = (attacker: any, defender: any, damage: number, skillUsed: string, turn: number) => {
+    let prefix = ''; let suffix = ''; let isSpecialStyle = false;
+    if (attacker.status_atk >= 200 || attacker.level >= 15) { prefix = '🔥【限界突破】💥 '; suffix = ' 💥!!!'; isSpecialStyle = true; }
+    else if (attacker.status_atk >= 100 || attacker.level >= 5) { prefix = '⚡ '; suffix = ' !'; }
+    if (attacker.rarity === 'CP' || attacker.rarity === 'P' || attacker.rarity === '★★★★') { prefix = `✨🌟 ${prefix}`; suffix = `${suffix} 🌟✨\n(タイアップ特別演出が発動！)`; isSpecialStyle = true; }
+    return { text: `[第 ${turn} ターン]\n${prefix}${attacker.card_name}のわざ『${skillUsed}』が炸裂！\n${defender.card_name}に ${damage} の痛撃を与えた！`, isSpecial: isSpecialStyle };
+  };
+
+  const simulateBattle = (p1: any, p2: any, isBossMode: boolean) => {
+    let log: any[] = [];
+    log.push({ text: `🏁 【対戦開始】\n${p1.card_name} (Lv.${p1.level}) \n   VS \n${p2.card_name} (Lv.${p2.level})`, isSpecial: true });
+    let first = p1.status_spd >= p2.status_spd ? p1 : p2;
+    let second = p1.status_spd >= p2.status_spd ? p2 : p1;
+    let winner = null;
+    let p1Hp = p1.status_hp; let p2Hp = p2.status_hp;
+    for (let turn = 1; turn <= 5; turn++) {
+      let dmg1 = Math.max(1, first.status_atk - Math.floor(second.status_def / 2) + Math.floor(Math.random() * 10));
+      if (first === p1) p2Hp -= dmg1; else p1Hp -= dmg1;
+      log.push(generateVisualLog(first, second, dmg1, first.skill_name, turn));
+      if (p1Hp <= 0) { winner = p2; break; }
+      if (p2Hp <= 0) { winner = p1; break; }
+      let dmg2 = Math.max(1, second.status_atk - Math.floor(first.status_def / 2) + Math.floor(Math.random() * 10));
+      if (second === p1) p2Hp -= dmg2; else p1Hp -= dmg2;
+      log.push(generateVisualLog(second, first, dmg2, second.skill_name, turn));
+      if (p1Hp <= 0) { winner = p2; break; }
+      if (p2Hp <= 0) { winner = p1; break; }
+    }
+    if (!winner) { log.push({ text: "⏳ 規定ターン数が経過。決着がつかず引き分け。", isSpecial: false }); }
+    else { log.push({ text: `🏆 【試合終了】\n勝者：${winner.card_name}！`, isSpecial: true }); }
+    let currentLogIndex = 0;
+    const interval = setInterval(async () => {
+      if (currentLogIndex < log.length) { setBattleLog(prev => [...prev, log[currentLogIndex]]); currentLogIndex++; }
+      else {
+        clearInterval(interval); setIsBattling(false);
+        if (winner === p1) { if (isBossMode) { await handleBossVictory(); } else { await handlePvpVictory(p1.id); } }
+        else { await handlePvpLoss(p1.id); }
+      }
+    }, 800);
+  };
+
+  const handlePvpVictory = async (cardId: string) => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const newWins = playerStats.totalWins + 1;
+    await supabase.from('profiles').update({ total_wins: newWins }).eq('id', user.id);
+    setPlayerStats(prev => ({ ...prev, totalWins: newWins }));
+    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 120 });
+    if (!error && data[0]) {
+      if (data[0].leveled_up) { Alert.alert('🎉 レベルアップ!!!', `出撃カードが レベル ${data[0].new_level} に到達しました！能力値が強化されました。`); }
+      else { Alert.alert('作戦成功', 'バトルに勝利！120 EXPを獲得し、累計勝利数がカウントされました。'); }
+    }
+  };
+
+  const handlePvpLoss = async (cardId: string) => {
+    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 30 });
+    if (!error && data[0] && data[0].leveled_up) { Alert.alert('🎉 レベルアップ!', `カードが レベル ${data[0].new_level} に成長しました！`); }
+    else { Alert.alert('敗北', 'バトルに敗れましたが、カードは 30 EXP 獲得して成長しました。'); }
+  };
+
+  const handleBossVictory = async () => {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user || !detectedBoss) return;
+    const newBossDefeats = playerStats.bossDefeats + 1;
+    await supabase.from('profiles').update({ boss_defeats: newBossDefeats }).eq('id', user.id);
+    setPlayerStats(prev => ({ ...prev, bossDefeats: newBossDefeats }));
+    const reward = detectedBoss.fixed_cards;
+    if (!reward) return;
+    await supabase.from('cards').insert([{ player_id: user.id, card_name: reward.card_name, image_url: reward.image_url, feature: reward.stats.feature || "エリアボス討伐の証", skill_name: reward.stats.skill || "レイド・バースト", status_hp: reward.stats.hp, status_atk: reward.stats.atk, status_def: reward.stats.def, status_spd: reward.stats.spd, status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd, rarity: "P", card_type: 'local', is_fixed: true, ar_model_url: reward.ar_model_url }]);
+    Alert.alert("👹 ボス討伐完了！", `限定カード「${reward.card_name}」を獲得！\n累計ボス討伐数が更新されました。`, [
+      { text: "閉じる" },
+      { text: "👁️ AR報酬を見る", onPress: () => { if (reward.ar_model_url) { setArUrl(reward.ar_model_url); setArModalVisible(true); } }, style: "destructive" }
     ]);
   };
 
-  const addLog = (message: string) => {
-    setBattleLogs(prev => [...prev, message]);
-    setTimeout(() => scrollViewRef.current?.scrollToEnd({ animated: true }), 100);
-  };
-
-  const triggerShake = (intensity = 1) => {
-    Animated.sequence([
-      Animated.timing(shakeAnim, { toValue: 10 * intensity, duration: 40, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: -10 * intensity, duration: 40, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 10 * intensity, duration: 40, useNativeDriver: true }),
-      Animated.timing(shakeAnim, { toValue: 0, duration: 40, useNativeDriver: true })
-    ]).start();
-  };
-
-  const triggerFlash = (color: string) => {
-    setFlashColor(color);
-    Animated.sequence([
-      Animated.timing(flashAnim, { toValue: 1, duration: 50, useNativeDriver: true }),
-      Animated.timing(flashAnim, { toValue: 0, duration: 400, useNativeDriver: true })
-    ]).start();
-  };
-
-  // ターン計算ロジック
-  const executeTurn = async (selectedCard: any) => {
-    if (isBattleOver || loading) return;
-
-    const cardName = selectedCard.card_name || '名もなき戦士';
-    const cardRole = selectedCard.card_role || 'attacker';
-    const skillName = selectedCard.skill_name || '通常攻撃';
-    const cardAtk = selectedCard.status_atk || 10;
-
-    let currentBossHp = bossHp;
-    let currentPartyHp = partyHp;
-
-    // プレイヤーフェーズ
-    if (cardRole === 'support') {
-      const rand = Math.random();
-      if (rand > 0.8) {
-        const sacrificeDmg = Math.floor(partyMaxHp * 0.15);
-        const massiveDmg = cardAtk * 4;
-        currentPartyHp = Math.max(1, currentPartyHp - sacrificeDmg);
-        currentBossHp = Math.max(0, currentBossHp - massiveDmg);
-        triggerFlash('rgba(147, 51, 234, 0.6)');
-        triggerShake(2.0);
-        addLog(`☠️ [${cardName}] の禁忌技『${skillName}』！\n自身のデータをオーバーロードさせ、${boss.name} に ${massiveDmg} の反物質ダメージ！(自傷:${sacrificeDmg})`);
-      } else if (rand > 0.5) {
-        setBossAtkDebuff(0.4); 
-        triggerFlash('rgba(14, 165, 233, 0.4)');
-        addLog(`🌫️ [${cardName}] の妨害技『${skillName}』！\nジャミング電波を展開。ボスの次回の攻撃力を【60%ダウン】させた！`);
-      } else {
-        const healAmount = cardAtk * 2;
-        currentPartyHp = Math.min(partyMaxHp, currentPartyHp + healAmount);
-        triggerFlash('rgba(16, 185, 129, 0.4)');
-        addLog(`✨ [${cardName}] の支援技『${skillName}』！\nナノリペアを照射し、パーティのHPを ${healAmount} 回復した！`);
-      }
-      setPartyHp(currentPartyHp);
-      setBossHp(currentBossHp);
-    } else {
-      const damage = Math.max(1, cardAtk - (boss.def || 0) / 2);
-      const finalDamage = Math.floor(damage * (1 + Math.random() * 0.2));
-      currentBossHp = Math.max(0, currentBossHp - finalDamage);
-      
-      if (cardAtk >= 150) {
-        triggerFlash('rgba(251, 191, 36, 0.6)');
-        triggerShake(1.6);
-        addLog(`🌟 [${cardName}] の超絶必殺『${skillName}』！！\n銀河を断ち切る一撃が炸裂！ ${boss.name} に ${finalDamage} の大ダメージ！`);
-      } else if (cardAtk >= 100) {
-        triggerFlash('rgba(239, 68, 68, 0.5)');
-        triggerShake(1.0);
-        addLog(`🔥 [${cardName}] の『${skillName}』！\n熱線砲を発射！ ${boss.name} に ${finalDamage} のダメージ！`);
-      } else {
-        triggerShake(0.4);
-        addLog(`⚔️ [${cardName}] の『${skillName}』！\nターゲットを斬りつけ、 ${finalDamage} の通常ダメージ！`);
-      }
-      setBossHp(currentBossHp);
-    }
-
-    if (currentBossHp <= 0) {
-      triggerFlash('rgba(255, 255, 255, 0.9)');
-      triggerShake(3.0);
-      addLog(`🎉 MISSION COMPLETE：${boss.name} の撃破・完全データ消去に成功！`);
-      setIsBattleOver(true);
-      return;
-    }
-
-    // ボス（NPC）の反撃フェーズ
-    setTimeout(() => {
-      const baseBossAtk = (boss.atk || 20) * bossAtkDebuff;
-      setBossAtkDebuff(1.0);
-
-      const bossRand = Math.random();
-      let finalBossDamage = 0;
-
-      if (bossRand > 0.7) {
-        finalBossDamage = Math.floor((baseBossAtk * 1.6) * (1 + Math.random() * 0.1));
-        currentPartyHp = Math.max(0, currentPartyHp - finalBossDamage);
-        triggerFlash('rgba(225, 29, 72, 0.7)');
-        triggerShake(2.2);
-        addLog(`🚨 警告！${boss.name} の広域壊滅技！！\n『インフェルノ・バースト』発動！パーティ全員に ${finalBossDamage} の壊滅的ダメージ！`);
-      } else if (bossRand > 0.4) {
-        finalBossDamage = Math.floor(baseBossAtk * (1 + Math.random() * 0.2));
-        const drainHeal = Math.floor(finalBossDamage * 0.5);
-        currentPartyHp = Math.max(0, currentPartyHp - finalBossDamage);
-        currentBossHp = Math.min(bossMaxHp, currentBossHp + drainHeal);
-        triggerFlash('rgba(236, 72, 153, 0.5)');
-        triggerShake(1.0);
-        setBossHp(currentBossHp);
-        addLog(`🧛 ${boss.name} の生命吸収技！！\n『コード・ドレイン』を喰らった！味方に ${finalBossDamage} ダメージ、ボスが ${drainHeal} 回復。`);
-      } else {
-        finalBossDamage = Math.floor(baseBossAtk * (1 + Math.random() * 0.2));
-        currentPartyHp = Math.max(0, currentPartyHp - finalBossDamage);
-        triggerFlash('rgba(241, 245, 249, 0.3)');
-        triggerShake(0.8);
-        addLog(`💀 ${boss.name} の通常迎撃！\n強烈な一撃を受け、パーティのHPが ${finalBossDamage} 減少。`);
-      }
-
-      setPartyHp(currentPartyHp);
-
-      if (currentPartyHp <= 0) {
-        addLog(`☠️ MISSION FAILED：戦線が崩壊し、全滅した...。`);
-        setIsBattleOver(true);
-      }
-    }, 1000);
-  };
-
-  const radarScale = radarPulseAnim.interpolate({ inputRange: [0, 1], outputRange: [0, 1] });
-  const radarOpacity = radarPulseAnim.interpolate({ inputRange: [0, 0.8, 1], outputRange: [0.6, 0.4, 0] });
-
-  if (loading) return (
-    <SafeAreaView style={styles.centerContainer}><ActivityIndicator size="large" color="#0ea5e9" /></SafeAreaView>
-  );
-
   return (
     <SafeAreaView style={styles.container}>
-      {screenMode === 'explore' ? (
-        // 🌐 【探索・近接レーダーマップ画面】
-        <View style={styles.innerContainer}>
-          <View style={styles.mapHeader}>
-            <Text style={styles.mapTitle}>TACTICAL RADAR</Text>
-            <Text style={styles.mapSub}>現在地周辺の次元シグナルを捕捉</Text>
-          </View>
+      
+      {/* 📊 戦績表示パネル */}
+      <View style={styles.statsDashboard}>
+        <View style={styles.statItem}>
+          <Trophy color="#F59E0B" size={24} />
+          <Text style={styles.statValue}>{playerStats.totalWins} 人</Text>
+          <Text style={styles.statLabel}>倒したライバル数</Text>
+        </View>
+        <View style={styles.divider} />
+        <View style={styles.statItem}>
+          <Activity color="#EF4444" size={24} />
+          <Text style={styles.statValue}>{playerStats.bossDefeats} 体</Text>
+          <Text style={styles.statLabel}>討伐したボス数</Text>
+        </View>
+      </View>
 
-          {/* 🔘 レーダー本体 */}
-          <View style={styles.radarContainer}>
-            <View style={styles.radarCircleBig}>
-              <View style={styles.radarCircleMid}>
-                <View style={styles.radarCircleSmall}>
-                  {/* 🟢 中心（プレイヤー現在地） */}
-                  <View style={styles.playerNode}>
-                    <Text style={{ fontSize: 10 }}>📍</Text>
-                  </View>
-                </View>
-              </View>
-            </View>
-
-            {/* アニメーションするパルス波紋 */}
-            <Animated.View style={[styles.radarPulse, { transform: [{ scale: radarScale }], opacity: radarOpacity }]} />
-
-            {/* 👾 プロットされた周辺ボスマーク（小中大スペシャル） */}
-            {nearbyBosses.map((b) => (
-              <TouchableOpacity
-                key={b.id}
-                style={[
-                  styles.bossMarker, 
-                  { top: b.top, left: b.left, width: b.size, height: b.size, borderRadius: b.size / 2, backgroundColor: b.color },
-                  selectedMapBoss?.id === b.id && styles.selectedMarker
-                ]}
-                onPress={() => setSelectedMapBoss(b)}
+      <ScrollView style={styles.scrollArea}>
+        {/* 1. 🗺️ 【修正】エリアボス ＆ マップ挿入 */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>📍 周辺のスポット限定ボス</Text>
+          {loadingBoss ? (
+            <ActivityIndicator size="small" color="#3B82F6" style={{ padding: 20 }} />
+          ) : (
+            // 🗺️ 【新規】マップコンテナ
+            <View style={styles.mapPanel}>
+              <MapView
+                provider={PROVIDER_GOOGLE} // 高速・高精度なGoogle Mapを使用
+                style={styles.map}
+                region={mapRegion}
+                showsUserLocation={true} // 📍 自分の居場所を表示
+                loadingEnabled={true}
               >
-                <Text style={{ fontSize: b.size * 0.5 }}>{b.marker}</Text>
-              </TouchableOpacity>
+                {detectedBoss && (
+                  // 👹 ボスマーク（Marker）
+                  <Marker
+                    coordinate={{ latitude: detectedBoss.lat, longitude: detectedBoss.lng }}
+                    title={detectedBoss.name}
+                    description={`${detectedBoss.sponsor_name} 協賛`}
+                  >
+                    <View style={styles.bossMarker}>
+                      <Text style={{ fontSize: 24 }}>👹</Text>
+                    </View>
+                  </Marker>
+                )}
+              </MapView>
+
+              {detectedBoss && (
+                // マップ下部に重なるボス情報パネル
+                <View style={styles.bossInfoOverlay}>
+                  <View style={styles.bossHeader}>
+                    <Text style={styles.sponsorTag}>{detectedBoss.sponsor_name} 協賛</Text>
+                    <Text style={styles.bossName}>{detectedBoss.name}</Text>
+                  </View>
+                  <TouchableOpacity style={[styles.primaryButton, styles.bossAttackBtn, isBattling && styles.disabledButton]} onPress={startBossBattle} disabled={isBattling}>
+                    <Swords color="#FFFFFF" size={20} style={{marginRight: 8}} />
+                    <Text style={styles.btnText}>ボスに挑む</Text>
+                  </TouchableOpacity>
+                </View>
+              )}
+
+              {!detectedBoss && (
+                // ボスがいない時のマップ用オーバーレイ
+                <View style={styles.emptyOverlay}>
+                  <ShieldAlert color="#FFFFFF" size={28} />
+                  <Text style={styles.emptyText}>周辺に限定ボスはいません。{"\n"}対象の観光地や店舗へ向かいましょう。</Text>
+                </View>
+              )}
+            </View>
+          )}
+        </View>
+
+        {/* 2. PVP対戦アリーナ */}
+        <View style={styles.section}>
+          <Text style={styles.sectionTitle}>⚔️ 全国オンライン対戦（同格マッチング）</Text>
+          <View style={styles.pvpPanel}>
+            <View style={styles.pvpHeader}>
+              <Users color="#94A3B8" size={32} />
+              <Text style={styles.pvpDesc}>あなたの出撃カードと近い実力のプレイヤーを自動で索敵し、PVPバトルを行います。</Text>
+            </View>
+            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: '#0F172A' }, isBattling && styles.disabledButton]} onPress={startPvpBattle} disabled={isBattling}>
+              <Text style={styles.btnText}>{isBattling ? '戦闘計算中...' : '対戦相手を自動検索'}</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+
+        {/* 3. バトルログ出力 */}
+        {battleLog.length > 0 && (
+          <View style={styles.logSection}>
+            <Text style={styles.logSectionTitle}>⚡ バトル実況・ログシミュレーター</Text>
+            {battleLog.map((log, index) => (
+              <View key={index} style={[styles.logBox, log.isSpecial && styles.specialLogBox]}>
+                <Text style={[styles.logText, log.isSpecial && styles.specialLogText]}>{log.text}</Text>
+              </View>
             ))}
           </View>
+        )}
+      </ScrollView>
 
-          {/* 📄 選択中のボス情報パネル */}
-          <View style={styles.infoPanel}>
-            {selectedMapBoss ? (
-              <View style={styles.infoContent}>
-                <View style={{ flexDirection: 'row', alignItems: 'center', marginBottom: 10 }}>
-                  <Text style={[styles.infoClassTag, { backgroundColor: selectedMapBoss.color }]}>
-                    {selectedMapBoss.type.toUpperCase()}
-                  </Text>
-                  <Text style={styles.infoBossName}>{selectedMapBoss.name}</Text>
-                </View>
-                <Text style={styles.infoStatsText}>
-                  初期体力: {selectedMapBoss.hp}  |  攻撃力: {selectedMapBoss.atk}  |  防御力: {selectedMapBoss.def}
-                </Text>
-                <TouchableOpacity style={[styles.engageBtn, { backgroundColor: selectedMapBoss.color }]} onPress={() => startBattle(selectedMapBoss)}>
-                  <Text style={styles.engageBtnText}>⚔️ この戦域へエンゲージ（戦闘開始）</Text>
-                </TouchableOpacity>
-              </View>
-            ) : (
-              <View style={styles.infoPlaceHolder}>
-                <Text style={styles.placeHolderText}>レーダー上のボスマーク（🟢🔵🔴🌟）をタップして、ターゲットを選択してください</Text>
-              </View>
-            )}
-          </View>
-
-          {/* デッキ確認用 */}
-          <View style={styles.mapFooterDeck}>
-            <Text style={styles.deckTitle}>現在の迎撃部隊（デッキ編成数: {deck.length}枚）</Text>
-            <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={{ gap: 8, marginTop: 8 }}>
-              {deck.map(item => (
-                <Image key={item.id} source={{ uri: item.image_url }} style={styles.miniDeckImg} />
-              ))}
-            </ScrollView>
-          </View>
+      {/* ARモーダル */}
+      <Modal visible={isArModalVisible} animationType="slide" onRequestClose={() => setArModalVisible(false)}>
+        <View style={styles.modalHeader}>
+          <Text style={styles.modalTitle}>🎉 討伐成功AR報酬</Text>
+          <TouchableOpacity onPress={() => setArModalVisible(false)} style={styles.closeBtn}><Text style={styles.closeBtnText}>閉じる</Text></TouchableOpacity>
         </View>
-      ) : (
-        // 💥 【コマンドバトル画面】
-        <View style={styles.innerContainer}>
-          <Animated.View style={[styles.flashOverlay, { backgroundColor: flashColor, opacity: flashAnim }]} pointerEvents="none" />
-          <Animated.View style={[styles.innerContainer, { transform: [{ translateX: shakeAnim }] }]}>
-            
-            {/* 敵エリア */}
-            <View style={styles.enemyArea}>
-              <Image source={{ uri: BOSS_IMAGES[boss.type as keyof typeof BOSS_IMAGES] || 'https://via.placeholder.com/150' }} style={[styles.bossAvatar, { borderColor: getRarityConfig(boss.type.toUpperCase()).color }]} />
-              <Text style={styles.bossName}>{boss?.name}</Text>
-              <View style={styles.hpBarContainer}>
-                <View style={[styles.hpBarFill, { width: `${Math.max(0, (bossHp / bossMaxHp) * 100)}%`, backgroundColor: '#E11D48' }]} />
-              </View>
-              <Text style={styles.hpText}>BOSS HP: {bossHp} / {bossMaxHp}</Text>
-            </View>
-
-            {/* ログエリア */}
-            <ScrollView style={styles.logArea} ref={scrollViewRef}>
-              {battleLogs.map((log, index) => <Text key={index} style={styles.logText}>{log}</Text>)}
-              {isBattleOver && (
-                <TouchableOpacity style={styles.retreatBtn} onPress={() => setScreenMode('explore')}>
-                  <Text style={styles.retreatBtnText}>戦域から離脱してレーダーに戻る</Text>
-                </TouchableOpacity>
-              )}
-            </ScrollView>
-
-            {/* プレイヤーエリア */}
-            <View style={styles.playerArea}>
-              <Text style={styles.partyName}>司令部コマンド</Text>
-              <View style={styles.hpBarContainer}>
-                <View style={[styles.hpBarFill, { width: `${Math.max(0, (partyHp / partyMaxHp) * 100)}%`, backgroundColor: '#10B981' }]} />
-              </View>
-              <Text style={styles.hpText}>PARTY HP: {partyHp} / {partyMaxHp}</Text>
-              <Text style={styles.instructionText}>カードをタップして作戦を実行指令↓</Text>
-              
-              <View style={styles.deckContainer}>
-                <FlatList
-                  data={deck}
-                  keyExtractor={(item) => item.id.toString()}
-                  horizontal
-                  showsHorizontalScrollIndicator={false}
-                  renderItem={({ item }) => {
-                    const isSupport = item.card_role === 'support';
-                    return (
-                      <TouchableOpacity 
-                        style={[styles.cardBtn, isBattleOver && styles.cardBtnDisabled]} 
-                        onPress={() => executeTurn(item)}
-                        disabled={isBattleOver || loading}
-                      >
-                        <Image source={{ uri: item.image_url || 'https://via.placeholder.com/100' }} style={styles.cardImage} />
-                        <View style={[styles.roleBadge, isSupport ? styles.roleSupport : styles.roleAttacker]}>
-                          <Text style={styles.roleText}>{isSupport ? '🛡️' : '⚔️'}</Text>
-                        </View>
-                      </TouchableOpacity>
-                    );
-                  }}
-                />
-              </View>
-            </View>
-          </Animated.View>
-        </View>
-      )}
+        {arUrl && <WebView source={{ uri: arUrl }} style={{ flex: 1 }} allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} />}
+      </Modal>
     </SafeAreaView>
   );
 }
 
-// 💥 レアリティ/規模に応じたバトルログのタイトル演出マッピング
-const getRarityConfig = (type: string) => {
-  switch (type) {
-    case 'SPECIAL': return { color: '#F59E0B' };
-    case 'LARGE': return { color: '#EF4444' };
-    case 'MEDIUM': return { color: '#3B82F6' };
-    case 'SMALL': default: return { color: '#10B981' };
-  }
-};
-
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#000' },
-  innerContainer: { flex: 1, backgroundColor: '#0F172A' },
-  flashOverlay: { ...StyleSheet.absoluteFillObject, zIndex: 999 },
-  centerContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', backgroundColor: '#0F172A' },
-
-  // 🌐 レーダーマップ用スタイル
-  mapHeader: { padding: 16, alignItems: 'center', backgroundColor: '#1E293B', borderBottomWidth: 1, borderBottomColor: '#334155' },
-  mapTitle: { fontSize: 18, fontWeight: '900', color: '#0EA5E9', letterSpacing: 2 },
-  mapSub: { fontSize: 11, color: '#94A3B8', marginTop: 4, fontWeight: '700' },
+  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  statsDashboard: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#FFFFFF', paddingVertical: 18, marginHorizontal: 20, marginTop: 20, borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2 },
+  statItem: { alignItems: 'center', flex: 1 },
+  divider: { width: 1, height: 40, backgroundColor: '#E2E8F0' },
+  statValue: { color: '#0F172A', fontSize: 20, fontWeight: '900', marginTop: 6, fontFamily: 'monospace' },
+  statLabel: { color: '#64748B', fontSize: 11, fontWeight: '700', marginTop: 2 },
+  scrollArea: { flex: 1 },
+  section: { padding: 20 },
+  sectionTitle: { color: '#64748B', fontSize: 13, fontWeight: '700', marginBottom: 12, letterSpacing: 1 },
   
-  radarContainer: { width: 300, height: 260, alignSelf: 'center', marginTop: 30, position: 'relative', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  radarCircleBig: { width: 250, height: 250, borderRadius: 125, borderWidth: 1, borderColor: 'rgba(14, 165, 233, 0.2)', justifyContent: 'center', alignItems: 'center' },
-  radarCircleMid: { width: 170, height: 170, borderRadius: 85, borderWidth: 1, borderColor: 'rgba(14, 165, 233, 0.25)', justifyContent: 'center', alignItems: 'center' },
-  radarCircleSmall: { width: 90, height: 90, borderRadius: 45, borderWidth: 1, borderColor: 'rgba(14, 165, 233, 0.3)', justifyContent: 'center', alignItems: 'center' },
-  playerNode: { width: 16, height: 16, borderRadius: 8, backgroundColor: '#FFF', justifyContent: 'center', alignItems: 'center', shadowColor: '#0EA5E9', shadowRadius: 10, shadowOpacity: 1 },
+  // 🗺️ 【新規・修正】マップ表示関連スタイル
+  mapPanel: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', height: 400, position: 'relative' },
+  map: { width: '100%', height: '100%' },
+  bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.8)', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#EF4444', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
   
-  radarPulse: { position: 'absolute', width: 250, height: 250, borderRadius: 125, borderWidth: 2, borderColor: '#0EA5E9' },
+  bossInfoOverlay: { position: 'absolute', bottom: 15, left: 15, right: 15, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: 18, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.1, shadowRadius: 6, elevation: 3 },
+  bossHeader: { flex: 1, marginRight: 15 },
+  sponsorTag: { color: '#EF4444', fontSize: 11, fontWeight: '800', backgroundColor: '#FFEEEE', paddingVertical: 3, paddingHorizontal: 10, borderRadius: 10, alignSelf: 'flex-start' },
+  bossName: { color: '#1E293B', fontSize: 18, fontWeight: '900', marginTop: 8 },
+  bossAttackBtn: { flex: 0, width: 'auto', paddingHorizontal: 20, height: 50, backgroundColor: '#EF4444' }, // ボス用ボタンは赤
+
+  emptyOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center', padding: 30 },
+  emptyText: { color: '#FFFFFF', fontSize: 14, textAlign: 'center', marginTop: 12, fontWeight: '700', lineHeight: 22, textShadowColor: 'rgba(0,0,0,0.3)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3 },
   
-  bossMarker: { position: 'absolute', justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.5, shadowRadius: 4, elevation: 5 },
-  selectedMarker: { borderWidth: 3, borderColor: '#FFF', transform: [{ scale: 1.15 }] },
-
-  infoPanel: { margin: 16, padding: 16, backgroundColor: '#1E293B', borderRadius: 16, borderWidth: 1, borderColor: '#334155', minHeight: 130, justifyContent: 'center' },
-  infoPlaceHolder: { alignItems: 'center', paddingHorizontal: 10 },
-  placeHolderText: { color: '#64748B', fontSize: 12, textAlign: 'center', fontWeight: '600', lineHeight: 18 },
-  infoContent: { width: '100%' },
-  infoClassTag: { paddingHorizontal: 8, paddingVertical: 2, borderRadius: 4, color: '#FFF', fontSize: 10, fontWeight: '900', marginRight: 8 },
-  infoBossName: { color: '#F8FAFC', fontSize: 16, fontWeight: '900' },
-  infoStatsText: { color: '#94A3B8', fontSize: 11, marginVertical: 8, fontWeight: '600' },
-  engageBtn: { padding: 12, borderRadius: 10, alignItems: 'center', marginTop: 4 },
-  engageBtnText: { color: '#FFF', fontWeight: '900', fontSize: 13 },
-
-  mapFooterDeck: { paddingHorizontal: 16, marginBottom: 20 },
-  deckTitle: { color: '#64748B', fontSize: 11, fontWeight: '800' },
-  miniDeckImg: { width: 40, height: 55, borderRadius: 4, borderWidth: 1, borderColor: '#334155' },
-
-  // 💥 コマンドバトル用スタイル
-  enemyArea: { padding: 16, alignItems: 'center', backgroundColor: '#1E293B', borderBottomWidth: 2, borderBottomColor: '#334155' },
-  bossAvatar: { width: 65, height: 65, borderRadius: 32.5, marginBottom: 6, borderWidth: 2, backgroundColor: '#000' },
-  bossName: { color: '#F8FAFC', fontSize: 18, fontWeight: '900', marginBottom: 6 },
-  hpBarContainer: { width: '100%', height: 10, backgroundColor: '#334155', borderRadius: 5, overflow: 'hidden', marginBottom: 4 },
-  hpBarFill: { height: '100%', borderRadius: 5 },
-  hpText: { color: '#CBD5E1', fontSize: 11, fontWeight: '800', alignSelf: 'flex-end' },
-  logArea: { flex: 1, padding: 14, backgroundColor: '#000000' },
-  logText: { color: '#38BDF8', fontSize: 13, marginBottom: 10, lineHeight: 20, fontWeight: '600', fontFamily: 'monospace' },
-  playerArea: { padding: 16, backgroundColor: '#1E293B', borderTopWidth: 2, borderTopColor: '#334155', paddingBottom: 24 },
-  partyName: { color: '#F8FAFC', fontSize: 14, fontWeight: '800', marginBottom: 4 },
-  instructionText: { color: '#94A3B8', fontSize: 11, textAlign: 'center', marginTop: 12, marginBottom: 6, fontWeight: '700' },
-  deckContainer: { height: 110 },
-  cardBtn: { width: 75, height: 100, marginRight: 10, borderRadius: 8, borderWidth: 2, borderColor: '#475569', overflow: 'hidden', position: 'relative' },
-  cardBtnDisabled: { opacity: 0.3 },
-  cardImage: { width: '100%', height: '100%', resizeMode: 'cover' },
-  roleBadge: { position: 'absolute', top: 4, right: 4, padding: 4, borderRadius: 12, backgroundColor: '#00000090' },
-  roleAttacker: { borderColor: '#FCA5A5', borderWidth: 1 },
-  roleSupport: { borderColor: '#86EFAC', borderWidth: 1 },
-  roleText: { fontSize: 9 },
-  retreatBtn: { backgroundColor: '#0EA5E9', padding: 14, borderRadius: 8, alignItems: 'center', marginTop: 16, marginBottom: 20 },
-  retreatBtnText: { color: '#F8FAFC', fontWeight: '800', fontSize: 13 }
+  pvpPanel: { backgroundColor: '#FFFFFF', padding: 24, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0' },
+  pvpHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 20 },
+  pvpDesc: { color: '#94A3B8', fontSize: 13, flex: 1, marginLeft: 15, fontWeight: '600', lineHeight: 20 },
+  
+  primaryButton: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 55, borderRadius: 16, alignItems: 'center', justifyContent: 'center', shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.2, shadowRadius: 8, elevation: 3 },
+  disabledButton: { backgroundColor: '#CBD5E1', shadowOpacity: 0 },
+  btnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
+  
+  logSection: { padding: 20, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF' },
+  logSectionTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 15, textAlign: 'center', fontFamily: 'monospace' },
+  logBox: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#F1F5F9', padding: 16, borderRadius: 16, marginBottom: 12 },
+  specialLogBox: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1.5 },
+  logText: { color: '#334155', fontSize: 14, lineHeight: 22, fontWeight: '500' },
+  specialLogText: { color: '#1E40AF', fontWeight: '800' },
+  modalHeader: { height: 60, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  modalTitle: { color: '#EF4444', fontSize: 16, fontWeight: '800' },
+  closeBtn: { backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
+  closeBtnText: { color: '#475569', fontWeight: '700', fontSize: 13 }
 });
