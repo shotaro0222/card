@@ -25,7 +25,7 @@ export default function AdminDashboard() {
   const [bDropName, setBDropName] = useState('');
   const [bDropRarity, setBDropRarity] = useState('Normal');
   const [bCustomDesign, setBCustomDesign] = useState('');
-  const [bEffect, setBEffect] = useState('none'); // ✨ 追加: ボスのエフェクト指定
+  const [bEffect, setBEffect] = useState('none'); 
   const [autoBossEnabled, setAutoBossEnabled] = useState(false);
 
   // 🤖 フォーム状態（AIメーカー別調整）
@@ -34,7 +34,8 @@ export default function AdminDashboard() {
 
   // 📢 フォーム状態（サーベイ配信）
   const [surveyTitle, setSurveyTitle] = useState('');
-  const [surveyTarget, setSurveyTarget] = useState('');
+  // 💡【修正】複数選択のために配列に変更
+  const [surveyTargets, setSurveyTargets] = useState<string[]>([]);
   const [surveyUrl, setSurveyUrl] = useState('');
   const [isSegmentDropdownOpen, setIsSegmentDropdownOpen] = useState(false);
   const [availableSegments, setAvailableSegments] = useState<string[]>([
@@ -45,8 +46,9 @@ export default function AdminDashboard() {
   const [sName, setSName] = useState('');
   const [sPrice, setSPrice] = useState('');
   const [sType, setSType] = useState('original_pack');
-  const [sImage, setSImage] = useState(''); // ✨ 追加: ショップバナー画像
-  const [sEffect, setSEffect] = useState('none'); // ✨ 追加: パックのエフェクト指定
+  const [sImage, setSImage] = useState(''); // パッケージ画像
+  const [sCardImage, setSCardImage] = useState(''); // 💡【追加】排出カードの枠・デザイン画像
+  const [sEffect, setSEffect] = useState('none'); 
   
   // 🎊 フォーム状態（イベント）
   const [eTitle, setETitle] = useState('');
@@ -108,10 +110,11 @@ export default function AdminDashboard() {
     setBDropName(`シークレットカード_${Math.floor(Math.random() * 100)}`);
     setBDropRarity(['Rare', 'Epic', 'Legendary'][Math.floor(Math.random() * 3)]);
     setBCustomDesign('{"frameColor": "gold"}');
-    setBEffect(['sparkle', 'fire', 'hologram'][Math.floor(Math.random() * 3)]); // ランダムエフェクト
+    setBEffect(['sparkle', 'fire', 'hologram'][Math.floor(Math.random() * 3)]); 
   };
 
   const handleImageUpload = (setter: React.Dispatch<React.SetStateAction<string>>) => {
+    // 実際の運用ではここで ImagePicker を起動して Supabase Storage に送る
     Alert.alert('画像アップロード', 'ファイル選択UIを展開し、Storageに保存します。');
     setter('https://example.com/uploaded_image.png');
   };
@@ -121,7 +124,6 @@ export default function AdminDashboard() {
       return Alert.alert('エラー', '必須項目を入力してください');
     }
     
-    // JSONとエフェクトの結合
     let finalDesign = {};
     try { if (bCustomDesign) finalDesign = JSON.parse(bCustomDesign); } catch (e) {}
     if (bEffect !== 'none') finalDesign = { ...finalDesign, effect: bEffect };
@@ -154,31 +156,40 @@ export default function AdminDashboard() {
   };
 
   const handleSendSurvey = async () => {
-    if (!surveyTarget || !surveyUrl) return Alert.alert('エラー', 'ターゲット条件とURLは必須です');
-    Alert.alert('配信完了', `条件「${surveyTarget}」へサーベイをプッシュ配信しました。`);
-    setSurveyTitle(''); setSurveyTarget(''); setSurveyUrl('');
+    // 💡【修正】複数選択配列のチェック
+    if (surveyTargets.length === 0 || !surveyUrl) return Alert.alert('エラー', 'ターゲット条件とURLは必須です');
+    
+    // バックエンド等に送信する処理（ここではモックアップとしてアラート）
+    Alert.alert('配信完了', `条件「${surveyTargets.join(', ')}」へサーベイをプッシュ配信しました。`);
+    
+    // 送信後に状態をリセット
+    setSurveyTitle(''); 
+    setSurveyTargets([]); 
+    setSurveyUrl('');
   };
 
   // --- 🛒 ショップ関連ロジック ---
   const handleAddShopItem = async () => {
     if (!sName || !sPrice) return Alert.alert('エラー', '商品名と価格を入力してください');
 
-    // JSONでエフェクトデータを構成
-    let customDesign = null;
-    if (sEffect !== 'none') {
-      customDesign = JSON.stringify({ effect: sEffect });
-    }
+    // 💡【修正】カードデザイン画像（frameUrl）とエフェクト（effect）を統合してJSON化
+    let customDesignObj: any = {};
+    if (sEffect !== 'none') customDesignObj.effect = sEffect;
+    if (sCardImage) customDesignObj.frameUrl = sCardImage;
+
+    const finalDesignJson = Object.keys(customDesignObj).length > 0 ? JSON.stringify(customDesignObj) : null;
 
     const { error } = await supabase.from('shop_items').insert([{ 
       name: sName, price: parseInt(sPrice), item_type: sType, 
-      banner_url: sImage || null, // データベース側のカラム対応を想定
-      drop_rates: customDesign,   // 一旦デザイン情報を流用（DB設計により調整）
+      banner_url: sImage || null, 
+      drop_rates: finalDesignJson, // アプリ側で読み取れるようにデザインJSONを保存
       is_active: true 
     }]);
 
     if (!error) {
       Alert.alert('成功', '新コンセプトパックをショップに追加陳列しました');
-      setSName(''); setSPrice(''); setSImage(''); setSEffect('none');
+      // フォームをリセット
+      setSName(''); setSPrice(''); setSImage(''); setSCardImage(''); setSEffect('none');
       fetchAdminData();
     } else {
       Alert.alert('失敗', error.message);
@@ -281,7 +292,6 @@ export default function AdminDashboard() {
                 <TextInput style={[styles.input, { flex: 1 }]} placeholder="レア (例: Rare)" value={bDropRarity} onChangeText={setBDropRarity} />
               </View>
               
-              {/* ✨ アプローチ3: ボスのリッチエフェクト選択 */}
               <Text style={styles.label}>✨ リッチエフェクト (アニメーション/VFX)</Text>
               <View style={{ flexDirection: 'row', flexWrap: 'wrap', gap: 6, marginBottom: 12 }}>
                 {[{id:'none', label:'なし'}, {id:'sparkle', label:'✨ キラキラ'}, {id:'fire', label:'🔥 炎属性'}, {id:'hologram', label:'💿 ホログラム'}, {id:'sakura', label:'🌸 桜舞う'}].map(eff => (
@@ -345,11 +355,19 @@ export default function AdminDashboard() {
                 ))}
               </View>
 
-              {/* ✨ アプローチ3: パックのパッケージ画像とエフェクト */}
               <Text style={styles.label}>パッケージ画像 / コラボバナー</Text>
               <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
-                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="画像URL" value={sImage} onChangeText={setSImage} />
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="パッケージ画像URL" value={sImage} onChangeText={setSImage} />
                 <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={() => handleImageUpload(setSImage)}>
+                  <Text style={styles.outlineBtnText}>⬆️ 画像選択</Text>
+                </TouchableOpacity>
+              </View>
+
+              {/* 💡【追加】排出カードの枠やデザイン画像をアップロードできる領域 */}
+              <Text style={styles.label}>排出カードの特別デザイン / 枠画像</Text>
+              <View style={{ flexDirection: 'row', gap: 8, marginBottom: 10 }}>
+                <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="カードデザイン画像URL" value={sCardImage} onChangeText={setSCardImage} />
+                <TouchableOpacity style={[styles.outlineBtn, { marginBottom: 0, justifyContent: 'center' }]} onPress={() => handleImageUpload(setSCardImage)}>
                   <Text style={styles.outlineBtnText}>⬆️ 画像選択</Text>
                 </TouchableOpacity>
               </View>
@@ -424,22 +442,43 @@ export default function AdminDashboard() {
           <View style={styles.formContainer}>
             <Text style={styles.formSectionTitle}>デモグラフィック・割付サーベイ配信</Text>
             <TextInput style={styles.input} placeholder="お知らせタイトル" value={surveyTitle} onChangeText={setSurveyTitle} />
-            <Text style={styles.label}>割付・ターゲット条件指定</Text>
+            <Text style={styles.label}>割付・ターゲット条件指定 (複数選択可)</Text>
             <TouchableOpacity style={styles.dropdownHeader} onPress={() => setIsSegmentDropdownOpen(!isSegmentDropdownOpen)}>
-              <Text style={styles.dropdownHeaderText}>{surveyTarget || 'デモグラフィック・セグメントを選択'}</Text>
+              {/* 💡【修正】選択済みのターゲットをカンマ区切りで表示 */}
+              <Text style={styles.dropdownHeaderText} numberOfLines={1}>
+                {surveyTargets.length > 0 ? surveyTargets.join(', ') : 'デモグラフィック・セグメントを選択'}
+              </Text>
               <Text style={styles.dropdownIcon}>{isSegmentDropdownOpen ? '▲' : '▼'}</Text>
             </TouchableOpacity>
+            
             {isSegmentDropdownOpen && (
               <View style={styles.dropdownList}>
                 <ScrollView nestedScrollEnabled={true}>
-                  {availableSegments.map((segment) => (
-                    <TouchableOpacity key={segment} style={styles.dropdownItem} onPress={() => { setSurveyTarget(segment); setIsSegmentDropdownOpen(false); }}>
-                      <Text style={styles.dropdownItemText}>{segment}</Text>
-                    </TouchableOpacity>
-                  ))}
+                  {availableSegments.map((segment) => {
+                    const isSelected = surveyTargets.includes(segment);
+                    return (
+                      <TouchableOpacity 
+                        key={segment} 
+                        style={[styles.dropdownItem, isSelected && { backgroundColor: '#EFF6FF' }]} 
+                        onPress={() => {
+                          // 💡【修正】配列への追加と削除（ドロップダウンは閉じない）
+                          if (isSelected) {
+                            setSurveyTargets(surveyTargets.filter(t => t !== segment));
+                          } else {
+                            setSurveyTargets([...surveyTargets, segment]);
+                          }
+                        }}
+                      >
+                        <Text style={[styles.dropdownItemText, isSelected && { color: '#2563EB', fontWeight: 'bold' }]}>
+                          {isSelected ? '☑ ' : '☐ '}{segment}
+                        </Text>
+                      </TouchableOpacity>
+                    );
+                  })}
                 </ScrollView>
               </View>
             )}
+            
             <TextInput style={styles.input} placeholder="サーベイURL" value={surveyUrl} onChangeText={setSurveyUrl} />
             <TouchableOpacity style={[styles.addBtn, { backgroundColor: '#10B981', marginTop: 10 }]} onPress={handleSendSurvey}>
               <Text style={styles.addBtnText}>対象ユーザーへ配信を実行</Text>
@@ -516,7 +555,7 @@ const styles = StyleSheet.create({
   toggleTextOff: { color: '#64748B', fontWeight: '800', fontSize: 13 },
 
   dropdownHeader: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', padding: 14, borderRadius: 10, marginBottom: 10, flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
-  dropdownHeaderText: { color: '#0F172A', fontSize: 14 },
+  dropdownHeaderText: { color: '#0F172A', fontSize: 14, flex: 1, marginRight: 10 },
   dropdownIcon: { color: '#64748B', fontSize: 12, fontWeight: 'bold' },
   dropdownList: { backgroundColor: '#FFFFFF', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 10, marginBottom: 16, maxHeight: 180 },
   dropdownItem: { padding: 14, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
