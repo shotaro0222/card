@@ -9,16 +9,15 @@ import { Camera } from 'lucide-react-native';
 
 export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
+  const [loadingStep, setLoadingSubText] = useState(''); // 💡 現在の工程を表示
   const [customName, setCustomName] = useState<string>('');
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
   
   const [forgedCardResult, setForgedCardResult] = useState<any | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
 
-  // 演出用アニメーション
   const cardScale = useRef(new Animated.Value(0.3)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
-  const effectFlashOp = useRef(new Animated.Value(0)).current;
   const shakeX = useRef(new Animated.Value(0)).current;
   
   const router = useRouter();
@@ -54,11 +53,8 @@ export default function ForgeScreen() {
   const startResultEffect = (rarity: string) => {
     cardScale.setValue(0.3);
     cardOpacity.setValue(0);
-    effectFlashOp.setValue(0);
     shakeX.setValue(0);
-
     const config = getRarityConfig(rarity);
-
     Animated.parallel([
       Animated.timing(cardScale, { toValue: 1, duration: 350, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
       Animated.timing(cardOpacity, { toValue: 1, duration: 300, useNativeDriver: true })
@@ -73,45 +69,25 @@ export default function ForgeScreen() {
     });
   };
 
-  // 💡 カメラ / アルバムの選択ダイアログを復活
   const handleLaunchCamera = async () => {
     Alert.alert(
       '素材の抽出',
-      'カード化する画像のソースを選択してください',
+      '画像ソースを選択してください',
       [
         {
           text: '📸 カメラで撮影',
           onPress: async () => {
             const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
-            if (!cameraPerm.granted) {
-              Alert.alert('権限エラー', 'カメラへのアクセスを許可してください。');
-              return;
-            }
-            const result = await ImagePicker.launchCameraAsync({
-              mediaTypes: ImagePicker.MediaTypeOptions.Images,
-              allowsEditing: true,
-              aspect: [3, 4],
-              quality: 0.5,
-              base64: true,
-            });
-            if (!result.canceled && result.assets[0].base64) {
-              forgeCard(result.assets[0].base64);
-            }
+            if (!cameraPerm.granted) return Alert.alert('エラー', 'カメラ許可が必要です');
+            const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
+            if (!result.canceled && result.assets[0].base64) forgeCard(result.assets[0].base64);
           }
         },
         {
           text: '🖼️ アルバムから選択',
           onPress: async () => {
-             const result = await ImagePicker.launchImageLibraryAsync({
-               mediaTypes: ImagePicker.MediaTypeOptions.Images,
-               allowsEditing: true,
-               aspect: [3, 4],
-               quality: 0.5,
-               base64: true,
-             });
-             if (!result.canceled && result.assets[0].base64) {
-               forgeCard(result.assets[0].base64);
-             }
+             const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
+             if (!result.canceled && result.assets[0].base64) forgeCard(result.assets[0].base64);
           }
         },
         { text: 'キャンセル', style: 'cancel' }
@@ -121,42 +97,43 @@ export default function ForgeScreen() {
 
   const forgeCard = async (base64Img: string) => {
     setLoading(true);
+    setLoadingSubText('位置情報を確認中...'); // ここで止まりやすい
+    
     try {
       const { data: { user } } = await supabase.auth.getUser();
-      if (!user) throw new Error('ユーザー認証エラー：ログインし直してください。');
+      if (!user) throw new Error('ログインが必要です');
 
-      // 1. 位置情報の取得
+      // 💡 位置情報の取得（5秒でタイムアウトさせる）
       let userLat = null, userLng = null;
-      const locationPerm = await Location.requestForegroundPermissionsAsync();
-      if (locationPerm.granted) {
-        try {
-          const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-          userLat = location.coords.latitude;
-          userLng = location.coords.longitude;
-        } catch (e) { console.warn("位置情報取得スキップ"); }
+      try {
+        const locationPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
+        const location: any = await Promise.race([locationPromise, timeoutPromise]);
+        userLat = location.coords.latitude;
+        userLng = location.coords.longitude;
+      } catch (e) {
+        console.warn("位置情報の取得をスキップしました (タイムアウトまたは拒否)");
       }
 
-      // 2. 画像のアップロード
+      setLoadingSubText('画像をサーバーへ転送中...');
       const fileName = `${user.id}/${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage.from('card_images').upload(fileName, decode(base64Img), { contentType: 'image/jpeg' });
-      if (uploadError) throw new Error(`画像保存エラー: ${uploadError.message}`);
-      
+      if (uploadError) throw new Error(`画像保存失敗: ${uploadError.message}`);
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
-      // 3. AIによる解析
+      setLoadingSubText('AIが画像を解析中...');
       let aiResultData;
       try {
         const { data: aiData, error: aiError } = await supabase.functions.invoke('super-task', {
           body: { base64Image: base64Img, mimeType: 'image/jpeg', isPremium: true, customName: customName, activeCampaigns, userLat, userLng }
         });
-        if (aiError || !aiData) throw new Error("AI通信に失敗しました。");
+        if (aiError || !aiData) throw new Error("AI応答なし");
         aiResultData = aiData;
       } catch (e) {
-        console.warn("AI機能エラー、ダストカード化:", e);
-        aiResultData = { card_name: "UNKNOWN_ENTITY", skill_name: "システム・クラッシュ", status_hp: 404, status_atk: 404, status_def: 404, status_spd: 404, rarity: "DUST", element: "虚無" };
+        aiResultData = { card_name: "ERROR_ENTITY", rarity: "DUST", element: "虚無", skill_name: "ノイズ・バースト", status_hp: 404, status_atk: 404, status_def: 404, status_spd: 404 };
       }
 
-      // 4. データベースへの保存
+      setLoadingSubText('データベースに登録中...');
       const { error: insertError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: aiResultData.card_name || customName || '名称不明',
@@ -169,88 +146,60 @@ export default function ForgeScreen() {
         status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10),
         rarity: aiResultData.rarity || 'N',
         element: aiResultData.element || '無',
-        is_fixed: aiResultData.is_fixed || false,
         is_active: false
       }]);
 
-      if (insertError) throw new Error(`DB保存エラー: ${insertError.message}`);
+      if (insertError) throw new Error(`DB保存失敗: ${insertError.message}`);
 
-      // 5. 成功時のUI更新
-      setForgedCardResult({ 
-        ...aiResultData, 
-        image_url: publicUrl, 
-        status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10) 
-      });
+      setForgedCardResult({ ...aiResultData, image_url: publicUrl, status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10) });
       setShowResultModal(true);
       setCustomName('');
       
     } catch (error: any) {
-      console.error("生成フローエラー:", error);
-      // 💡 エラー内容を画面にポップアップ表示して無言落ちを防ぐ
-      Alert.alert(
-        'カード化失敗',
-        `エラーが発生しました。\n${error.message}\n\n※「element」カラム追加のSQLを実行していない場合、DB保存エラーになります。`
-      );
+      Alert.alert('生成エラー', error.message);
     } finally {
       setLoading(false);
+      setLoadingSubText('');
     }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <View style={styles.devBadge}>
-          <Text style={styles.devText}>🛠️ 開発モード: 無制限</Text>
-        </View>
+        <View style={styles.devBadge}><Text style={styles.devText}>🛠️ 開発モード: 無制限</Text></View>
 
         {loading ? (
           <View style={styles.loadingArea}>
             <ActivityIndicator size="large" color="#3B82F6" />
             <Text style={styles.loadingText}>次元からデータを抽出中...</Text>
-            <Text style={styles.loadingSubText}>AIが画像を解析しています</Text>
+            <Text style={styles.loadingSubText}>{loadingStep}</Text>
           </View>
         ) : (
           <View style={styles.mainBox}>
             <Text style={styles.instruction}>好きな名前を指定（任意）</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="カードの名称を入力..."
-              value={customName}
-              onChangeText={setCustomName}
-              maxLength={15}
-            />
-            
+            <TextInput style={styles.input} placeholder="カードの名称を入力..." value={customName} onChangeText={setCustomName} maxLength={15} />
             <TouchableOpacity style={styles.actionButton} onPress={handleLaunchCamera} activeOpacity={0.8}>
               <Camera color="#FFFFFF" size={24} style={{ marginRight: 10 }} />
               <Text style={styles.actionButtonText}>生成を開始する</Text>
             </TouchableOpacity>
-            
             <Text style={styles.subInfo}>現実の風景や商品を撮影してカード生成</Text>
           </View>
         )}
       </View>
 
-      {/* 生成結果モーダル */}
       <Modal visible={showResultModal} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
           <Animated.View style={[styles.modalContent, forgedCardResult?.rarity === 'DUST' && styles.dustContent, { transform: [{ translateX: shakeX }] }]}>
-            <Text style={[styles.resultTitle, { color: getRarityConfig(forgedCardResult?.rarity).color }]}>
-              {getRarityConfig(forgedCardResult?.rarity).effectTitle}
-            </Text>
+            <Text style={[styles.resultTitle, { color: getRarityConfig(forgedCardResult?.rarity).color }]}>{getRarityConfig(forgedCardResult?.rarity).effectTitle}</Text>
             <Animated.View style={[styles.cardPreview, { transform: [{ scale: cardScale }], opacity: cardOpacity }]}>
               <Image source={{ uri: forgedCardResult?.image_url }} style={styles.resultImage} />
             </Animated.View>
             <Text style={styles.resultName}>{forgedCardResult?.card_name}</Text>
-            
-            {/* 属性とステータスの表示 */}
             <View style={styles.resultStatsRow}>
               <Text style={styles.resultPower}>属性: {forgedCardResult?.element}</Text>
-              <Text style={styles.resultPower}>総合力: {forgedCardResult?.status_total}</Text>
+              <Text style={styles.resultPower}>合計: {forgedCardResult?.status_total}</Text>
             </View>
-
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)}>
-              <Text style={styles.closeBtnText}>図鑑に格納</Text>
-            </TouchableOpacity>
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)}><Text style={styles.closeBtnText}>図鑑に格納</Text></TouchableOpacity>
           </Animated.View>
         </View>
       </Modal>
@@ -272,8 +221,6 @@ const styles = StyleSheet.create({
   actionButton: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 60, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   actionButtonText: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
   subInfo: { color: '#94A3B8', fontSize: 12, marginTop: 15, fontWeight: '500' },
-  
-  // モーダル
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 30, padding: 30, alignItems: 'center' },
   dustContent: { backgroundColor: '#18181B' },
