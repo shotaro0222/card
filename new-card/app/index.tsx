@@ -10,6 +10,11 @@ import { Camera, MapPin, ShoppingBag } from 'lucide-react-native';
 
 let MapView: any = null;
 let Marker: any = null;
+if (Platform.OS !== 'web') {
+  const Maps = require('react-native-maps');
+  MapView = Maps.default;
+  Marker = Maps.Marker;
+}
 
 export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
