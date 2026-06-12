@@ -222,7 +222,7 @@ export default function ForgeScreen() {
             
             <TouchableOpacity style={styles.actionButton} onPress={handleLaunchCamera} activeOpacity={0.8}>
               <Camera color="#FFFFFF" size={24} style={{ marginRight: 10 }} />
-              <Text style={styles.actionButtonText}>抽出を開始する</Text>
+              <Text style={styles.actionButtonText}>生成を開始する</Text>
             </TouchableOpacity>
             
             <Text style={styles.subInfo}>現実の風景や商品を撮影してカード生成</Text>
