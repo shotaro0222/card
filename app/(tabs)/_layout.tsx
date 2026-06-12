@@ -8,30 +8,20 @@ export default function TabLayout() {
         backgroundColor: '#FFFFFF', 
         borderTopWidth: 1,
         borderTopColor: '#E2E8F0',
-        elevation: 0,
-        height: 60,
+        height: 65, // 高さを少し確保
         paddingBottom: 10,
+        position: 'absolute', // コンテンツに押し出されないよう固定
       },
       tabBarActiveTintColor: '#3B82F6',
       tabBarInactiveTintColor: '#94A3B8',
-      headerStyle: { 
-        backgroundColor: '#FFFFFF',
-        elevation: 0,
-        shadowOpacity: 0,
-        borderBottomWidth: 1,
-        borderBottomColor: '#F1F5F9',
-      },
-      headerTitleStyle: {
-        fontWeight: '800',
-        color: '#0F172A',
-        letterSpacing: 1,
-      },
+      headerShown: true, // ヘッダーを出すことで枠組みを安定させる
       headerTitleAlign: 'center',
+      headerStyle: { backgroundColor: '#FFFFFF' },
+      headerTitleStyle: { fontWeight: '800', color: '#0F172A' },
     }}>
-      <Tabs.Screen name="index" options={{ title: 'カード化', tabBarIcon: ({ color }) => <Camera color={color} size={24} /> }} />
+      <Tabs.Screen name="index" options={{ title: 'カード生成', tabBarIcon: ({ color }) => <Camera color={color} size={24} /> }} />
       <Tabs.Screen name="deck" options={{ title: '図鑑', tabBarIcon: ({ color }) => <Layers color={color} size={24} /> }} />
       <Tabs.Screen name="battle" options={{ title: '冒険', tabBarIcon: ({ color }) => <MapPin color={color} size={24} /> }} />
-      {/* 💡 ここにアリーナタブを追加しました */}
       <Tabs.Screen name="arena" options={{ title: '闘技場', tabBarIcon: ({ color }) => <Swords color={color} size={24} /> }} />
       <Tabs.Screen name="events" options={{ title: 'お知らせ', tabBarIcon: ({ color }) => <Bell color={color} size={24} /> }} />
       <Tabs.Screen name="shop" options={{ title: 'ストア', tabBarIcon: ({ color }) => <ShoppingBag color={color} size={24} /> }} />
