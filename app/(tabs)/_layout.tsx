@@ -28,7 +28,6 @@ export default function TabLayout() {
       },
       headerTitleAlign: 'center',
     }}>
-      {/* 誰もが分かる直感的なアイコンと名前に変更 */}
       <Tabs.Screen name="index" options={{ title: 'カード化', tabBarIcon: ({ color }) => <Camera color={color} size={24} /> }} />
       <Tabs.Screen name="deck" options={{ title: '図鑑', tabBarIcon: ({ color }) => <Layers color={color} size={24} /> }} />
       <Tabs.Screen name="battle" options={{ title: '冒険', tabBarIcon: ({ color }) => <MapPin color={color} size={24} /> }} />
