@@ -2,12 +2,12 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, ScrollView, Modal, Animated, Easing, Image, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
-import { supabase } from '../../lib/supabase';
+// 💡【修正】階層パスを ../../ から ../ に変更
+import { supabase } from '../lib/supabase';
 import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Camera, MapPin, ShoppingBag } from 'lucide-react-native';
 
-// 💡【修正】Webプレビュー環境でのクラッシュを防ぐため、実機(iOS/Android)の時だけ動的にインポートする
 let MapView: any = null;
 let Marker: any = null;
 if (Platform.OS !== 'web') {
@@ -322,7 +322,6 @@ export default function ForgeScreen() {
         </View>
         <View style={styles.mapContainer}>
           {Platform.OS === 'web' ? (
-            // 💡【追加】Webプレビュー時は地図の代わりに案内を表示する
             <View style={styles.mapWebFallback}>
               <MapPin color="#94A3B8" size={32} style={{ marginBottom: 8 }} />
               <Text style={styles.mapWebFallbackText}>Webプレビューでは地図は非表示です</Text>
@@ -433,7 +432,6 @@ const styles = StyleSheet.create({
   mapLoading: { width: '100%', height: 220, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F1F5F9' },
   mapLoadingText: { marginTop: 10, color: '#64748B', fontWeight: '600' },
   
-  // 💡【追加】Webプレビュー用スタイル
   mapWebFallback: { width: '100%', height: 220, justifyContent: 'center', alignItems: 'center', backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderStyle: 'dashed' },
   mapWebFallbackText: { color: '#475569', fontWeight: '800', fontSize: 14, marginBottom: 4 },
   mapWebFallbackSub: { color: '#94A3B8', fontSize: 11, fontWeight: '600' },
