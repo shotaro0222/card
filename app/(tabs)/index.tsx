@@ -132,7 +132,7 @@ export default function ForgeScreen() {
       setLoadingSubText('画像をサーバーへ転送中...');
       const fileName = `${user.id}/${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage.from('card_images').upload(fileName, decode(base64Img), { contentType: 'image/jpeg' });
-      if (uploadError) throw new Error(`画像保存失敗: ${uploadError.message}\nストレージの設定を確認してください。`);
+      if (uploadError) throw new Error(`画像保存失敗: ${uploadError.message}`);
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
       setLoadingSubText('AIが画像を解析中...');
@@ -149,12 +149,11 @@ export default function ForgeScreen() {
 
       setLoadingSubText('データベースに登録中...');
       
-      // 💡 ここで feature カラムの保存をしっかり追加しました！
       const { error: insertError } = await supabase.from('cards').insert([{
         player_id: user.id,
         card_name: aiResultData.card_name || customName || '名称不明',
         image_url: publicUrl,
-        feature: aiResultData.feature || '解析不能な対象物', // ← ココが抜けていました
+        feature: aiResultData.feature || '解析不能な対象物',
         skill_name: aiResultData.skill_name || '通常攻撃',
         status_hp: aiResultData.status_hp || 100,
         status_atk: aiResultData.status_atk || 10,
@@ -215,17 +214,30 @@ export default function ForgeScreen() {
 
       <Modal visible={showResultModal} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
+          {/* 💡 画面からはみ出さないようレスポンシブ対応に修正 */}
           <Animated.View style={[styles.modalContent, forgedCardResult?.rarity === 'DUST' && styles.dustContent, { transform: [{ translateX: shakeX }] }]}>
-            <Text style={[styles.resultTitle, { color: getRarityConfig(forgedCardResult?.rarity).color }]}>{getRarityConfig(forgedCardResult?.rarity).effectTitle}</Text>
+            
+            <Text style={[styles.resultTitle, { color: getRarityConfig(forgedCardResult?.rarity).color }]} adjustsFontSizeToFit numberOfLines={1}>
+              {getRarityConfig(forgedCardResult?.rarity).effectTitle}
+            </Text>
+            
             <Animated.View style={[styles.cardPreview, { transform: [{ scale: cardScale }], opacity: cardOpacity }]}>
-              <Image source={{ uri: forgedCardResult?.image_url }} style={styles.resultImage} />
+              <Image source={{ uri: forgedCardResult?.image_url }} style={styles.resultImage} resizeMode="cover" />
             </Animated.View>
-            <Text style={styles.resultName}>{forgedCardResult?.card_name}</Text>
+            
+            <Text style={styles.resultName} adjustsFontSizeToFit numberOfLines={1}>
+              {forgedCardResult?.card_name}
+            </Text>
+            
             <View style={styles.resultStatsRow}>
               <Text style={styles.resultPower}>属性: {forgedCardResult?.element}</Text>
               <Text style={styles.resultPower}>合計: {forgedCardResult?.status_total}</Text>
             </View>
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)}><Text style={styles.closeBtnText}>図鑑に格納</Text></TouchableOpacity>
+
+            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)}>
+              <Text style={styles.closeBtnText}>図鑑に格納</Text>
+            </TouchableOpacity>
+
           </Animated.View>
         </View>
       </Modal>
@@ -249,15 +261,33 @@ const styles = StyleSheet.create({
   actionButtonLibrary: { backgroundColor: '#0F172A' },
   actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', marginLeft: 8 },
   subInfo: { color: '#94A3B8', fontSize: 12, marginTop: 15, fontWeight: '500' },
+  
+  // 💡 レスポンシブに修正したモーダル
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 30, padding: 30, alignItems: 'center' },
+  modalContent: { 
+    width: '85%', 
+    maxHeight: '90%', // 画面サイズが小さい場合、画面外への押し出しを防止
+    backgroundColor: '#FFF', 
+    borderRadius: 24, 
+    padding: 20, 
+    alignItems: 'center',
+    justifyContent: 'center'
+  },
   dustContent: { backgroundColor: '#18181B' },
-  resultTitle: { fontSize: 20, fontWeight: '900', marginBottom: 20 },
-  cardPreview: { width: 200, height: 280, borderRadius: 15, overflow: 'hidden', marginBottom: 20, borderWidth: 3, borderColor: '#DDD' },
+  resultTitle: { fontSize: 18, fontWeight: '900', marginBottom: 15, textAlign: 'center' },
+  cardPreview: { 
+    width: '75%', // 固定サイズから可変サイズに変更
+    aspectRatio: 3 / 4, // 縦横比を固定
+    borderRadius: 15, 
+    overflow: 'hidden', 
+    marginBottom: 15, 
+    borderWidth: 3, 
+    borderColor: '#DDD' 
+  },
   resultImage: { width: '100%', height: '100%' },
-  resultName: { fontSize: 22, fontWeight: '900', color: '#0F172A' },
+  resultName: { fontSize: 22, fontWeight: '900', color: '#0F172A', textAlign: 'center' },
   resultStatsRow: { flexDirection: 'row', gap: 15, marginTop: 8 },
   resultPower: { fontSize: 14, color: '#64748B', fontWeight: '700' },
-  closeBtn: { marginTop: 30, backgroundColor: '#0F172A', paddingVertical: 15, paddingHorizontal: 40, borderRadius: 15 },
+  closeBtn: { marginTop: 20, backgroundColor: '#0F172A', paddingVertical: 14, paddingHorizontal: 40, borderRadius: 15 },
   closeBtnText: { color: '#FFF', fontWeight: '800' }
 });
