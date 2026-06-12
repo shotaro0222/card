@@ -30,7 +30,7 @@ export default function ForgeScreen() {
             <Camera color="#FFFFFF" size={28} style={{ marginRight: 10 }} />
             <Text style={styles.primaryButtonText}>カメラを起動</Text>
           </TouchableOpacity>
-          <Text style={styles.subText}>現実の風景や商品を撮影してカード化</Text>
+          <Text style={styles.subText}>現実の風景や商品を撮影してカード生成</Text>
         </View>
       </View>
     </SafeAreaView>
