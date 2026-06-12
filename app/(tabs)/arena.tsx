@@ -3,6 +3,32 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, Image, SafeAreaView
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 
+// 💡【爆速処理：属性相性定義テーブル】
+const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = {
+  '火': { strong: ['木', 'サイバー', 'プラスチック'], weak: ['水', '黄金', '虚無'] },
+  '水': { strong: ['火', '黄金', '資本'], weak: ['雷', 'プラスチック', '大気汚染'] },
+  '雷': { strong: ['水', 'サイバー', '機械'], weak: ['木', '虚無', '時間'] },
+  'サイバー': { strong: ['資本', 'プラスチック', '時間'], weak: ['火', '雷', '混沌'] },
+  '資本': { strong: ['社畜', '黄金', '火'], weak: ['サイバー', '光', '虚無'] },
+  'カフェイン': { strong: ['社畜', 'サイバー', '雷'], weak: ['水', '虚無', '時間'] },
+  '社畜': { strong: ['資本', 'プラスチック', '火'], weak: ['カフェイン', '混沌', '光'] },
+  '虚無': { strong: ['火', '雷', '資本'], weak: ['光', '量子', '時間'] },
+};
+
+// 💡【爆速処理：相性倍率を計算する関数】
+function getDamageMultiplier(attackerEl: string, defenderEl: string): { multiplier: number, label: string } {
+  const relation = ELEMENT_RELATIONS[attackerEl];
+  if (!relation) return { multiplier: 1.0, label: '' }; 
+  
+  if (relation.strong.includes(defenderEl)) {
+    return { multiplier: 1.5, label: '💥【有利属性】' }; 
+  }
+  if (relation.weak.includes(defenderEl)) {
+    return { multiplier: 0.5, label: '🛡️【不利属性】' }; 
+  }
+  return { multiplier: 1.0, label: '' };
+}
+
 export default function ArenaScreen() {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('opponents'); // opponents, defense_logs
@@ -29,21 +55,18 @@ export default function ArenaScreen() {
     setUserId(user.id);
 
     if (activeTab === 'opponents') {
-      // 1. 全国のライバル（自分以外のユーザーの、出撃中のカード代表1枚）を取得
       const { data } = await supabase
         .from('cards')
-        .select('player_id, card_name, image_url, rarity, status_total, profiles!inner(player_name)')
+        .select('player_id, card_name, image_url, rarity, status_total, element, profiles!inner(player_name)')
         .neq('player_id', user.id)
         .eq('is_active', true)
         .order('status_total', { ascending: false })
         .limit(20);
       
-      // 同じプレイヤーが複数出ないように一意にする
       const uniqueOpponents = Array.from(new Map(data?.map(item => [item.player_id, item])).values());
       setOpponents(uniqueOpponents);
 
     } else if (activeTab === 'defense_logs') {
-      // 2. 自分が「防衛側（defender_id）」になった戦闘履歴を取得
       const { data } = await supabase
         .from('arena_battles')
         .select('*, challenger:profiles!challenger_id(player_name)')
@@ -52,42 +75,51 @@ export default function ArenaScreen() {
       
       setDefenseLogs(data || []);
       
-      // 未読ログを既読にする
       await supabase.from('arena_battles').update({ is_read: true }).eq('defender_id', user.id).eq('is_read', false);
     }
 
     setLoading(false);
   };
 
-  // 💡【非同期PvPの自動戦闘シミュレーションロジック】
   const initiateBattle = async (opponentId: string, opponentName: string) => {
     setLoading(true);
     try {
-      // 自分のデッキを取得
       const { data: myDeck } = await supabase.from('cards').select('*').eq('player_id', userId).eq('is_active', true);
-      // 相手のデッキを取得
       const { data: opDeck } = await supabase.from('cards').select('*').eq('player_id', opponentId).eq('is_active', true);
 
       if (!myDeck || myDeck.length === 0) throw new Error('あなたのデッキが編成されていません。');
       if (!opDeck || opDeck.length === 0) throw new Error('相手のデッキ情報が取得できませんでした。');
 
+      // 💡 部隊の総ステータスを合算
       let myHp = myDeck.reduce((sum, c) => sum + (c.status_hp || 100), 0);
       let opHp = opDeck.reduce((sum, c) => sum + (c.status_hp || 100), 0);
       const myAtk = myDeck.reduce((sum, c) => sum + (c.status_atk || 50), 0);
       const opAtk = opDeck.reduce((sum, c) => sum + (c.status_atk || 50), 0);
 
-      const logs: string[] = [`⚔️ アリーナバトル開始：あなた vs ${opponentName}`];
+      // 💡 エース（先頭のカード）の属性を部隊の属性とする
+      const myElement = myDeck[0].element || '無';
+      const opElement = opDeck[0].element || '無';
+
+      // 💡 お互いの属性相性を計算
+      const myAttackRes = getDamageMultiplier(myElement, opElement);
+      const opAttackRes = getDamageMultiplier(opElement, myElement);
+
+      const logs: string[] = [`⚔️ アリーナバトル開始：あなた[${myElement}属性] vs ${opponentName}[${opElement}属性]`];
       let turn = 1;
       let winnerId = null;
 
-      // 高速シミュレーション（最大10ターン）
       while (myHp > 0 && opHp > 0 && turn <= 10) {
         logs.push(`\n--- 第${turn}ターン ---`);
         
-        // 自分の攻撃
-        const myDmg = Math.floor(myAtk * (0.8 + Math.random() * 0.4));
-        opHp = Math.max(0, opHp - myDmg);
-        logs.push(`💥 あなたの総攻撃！ 相手に ${myDmg} のダメージ！ (相手残りHP: ${opHp})`);
+        // あなたの攻撃
+        const myBaseDmg = Math.floor(myAtk * (0.8 + Math.random() * 0.4));
+        const myFinalDmg = Math.floor(myBaseDmg * myAttackRes.multiplier);
+        opHp = Math.max(0, opHp - myFinalDmg);
+        
+        let myLog = `💥 あなたの部隊の総攻撃！`;
+        if (myAttackRes.label) myLog += `\n${myAttackRes.label}効果が発動！`;
+        myLog += `\n相手に ${myFinalDmg} のダメージ！ (相手残りHP: ${opHp})`;
+        logs.push(myLog);
 
         if (opHp <= 0) {
           winnerId = userId;
@@ -96,9 +128,14 @@ export default function ArenaScreen() {
         }
 
         // 相手の反撃
-        const opDmg = Math.floor(opAtk * (0.8 + Math.random() * 0.4));
-        myHp = Math.max(0, myHp - opDmg);
-        logs.push(`🛡️ ${opponentName}の防衛システムが反撃！ あなたに ${opDmg} のダメージ！ (あなたの残りHP: ${myHp})`);
+        const opBaseDmg = Math.floor(opAtk * (0.8 + Math.random() * 0.4));
+        const opFinalDmg = Math.floor(opBaseDmg * opAttackRes.multiplier);
+        myHp = Math.max(0, myHp - opFinalDmg);
+        
+        let opLog = `🛡️ ${opponentName}の防衛システムが反撃！`;
+        if (opAttackRes.label) opLog += `\n${opAttackRes.label}効果が発動！`;
+        opLog += `\nあなたに ${opFinalDmg} のダメージ！ (あなたの残りHP: ${myHp})`;
+        logs.push(opLog);
 
         if (myHp <= 0) {
           winnerId = opponentId;
@@ -108,7 +145,6 @@ export default function ArenaScreen() {
         turn++;
       }
 
-      // 引き分けの場合は防衛側（相手）の勝ちとする
       if (!winnerId) {
         winnerId = opponentId;
         logs.push(`⏱️ タイムアップ！ 防衛側（${opponentName}）が耐え切りました。`);
@@ -118,7 +154,6 @@ export default function ArenaScreen() {
       setBattleResultTitle(isWin ? '🏆 VICTORY' : '💀 DEFEAT');
       setCurrentBattleLog(logs);
 
-      // 結果をデータベースに保存（相手への通知用）
       await supabase.from('arena_battles').insert([{
         challenger_id: userId,
         defender_id: opponentId,
@@ -173,7 +208,7 @@ export default function ArenaScreen() {
                   <Image source={{ uri: item.image_url }} style={styles.opPreview} />
                   <View style={styles.opInfo}>
                     <Text style={styles.opName}>{item.profiles?.player_name || '謎のプレイヤー'}</Text>
-                    <Text style={styles.opStats}>エース: {item.card_name} ({item.rarity})</Text>
+                    <Text style={styles.opStats}>エース: {item.card_name} ({item.element}属性)</Text>
                     <Text style={styles.opPower}>推定戦力: {item.status_total}</Text>
                   </View>
                   <TouchableOpacity style={styles.attackBtn} onPress={() => initiateBattle(item.player_id, item.profiles?.player_name)}>
