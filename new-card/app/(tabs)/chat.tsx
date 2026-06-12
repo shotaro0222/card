@@ -1,5 +1,5 @@
-import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator, Modal, SafeAreaView, ScrollView } from 'react-native';
+import React, { useEffect, useState, useCallback, useRef } from 'react';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator, Modal, SafeAreaView, ScrollView, KeyboardAvoidingView, Platform } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { Send, RefreshCcw, X } from 'lucide-react-native';
@@ -13,12 +13,24 @@ export default function ChatTradeScreen() {
   const [isModalVisible, setModalVisible] = useState(false);
   const [selectedOfferCard, setSelectedOfferCard] = useState<any>(null);
   const [requestedCardId, setRequestedCardId] = useState<string>('');
+  
+  const flatListRef = useRef<FlatList>(null);
 
   useFocusEffect(
     useCallback(() => {
       initChat();
-      const interval = setInterval(fetchMessages, 3000);
-      return () => clearInterval(interval);
+
+      // リアルタイムリスナーの登録（メッセージが追加されたら即時取得）
+      const messageSubscription = supabase
+        .channel('public:messages')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, (payload) => {
+          fetchMessages();
+        })
+        .subscribe();
+
+      return () => {
+        supabase.removeChannel(messageSubscription);
+      };
     }, [])
   );
 
@@ -33,17 +45,29 @@ export default function ChatTradeScreen() {
   };
 
   const fetchMessages = async () => {
-    const { data } = await supabase.from('messages').select('*, profiles(player_name), cards(*)').order('created_at', { ascending: true }).limit(50);
-    if (data) setMessages(data);
+    const { data } = await supabase
+      .from('messages')
+      .select('*, profiles(player_name), cards(*)')
+      .order('created_at', { ascending: true })
+      .limit(50);
+    if (data) {
+      setMessages(data);
+      // メッセージ取得時に一番下へスクロール
+      setTimeout(() => flatListRef.current?.scrollToEnd({ animated: true }), 100);
+    }
   };
 
   const sendMessage = async () => {
     if (!inputText.trim()) return;
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    await supabase.from('messages').insert([{ sender_id: user.id, text: inputText }]);
+    
+    // UIを即座にクリアして体感速度を上げる
+    const textToSend = inputText;
     setInputText('');
-    fetchMessages();
+    
+    await supabase.from('messages').insert([{ sender_id: user.id, text: textToSend }]);
+    // リアルタイムリスナーが反応して自動でfetchMessagesが走ります
   };
 
   const sendTradeOffer = async () => {
@@ -60,7 +84,6 @@ export default function ChatTradeScreen() {
     setModalVisible(false);
     setSelectedOfferCard(null);
     setRequestedCardId('');
-    fetchMessages();
   };
 
   const acceptTrade = async (message: any) => {
@@ -69,9 +92,19 @@ export default function ChatTradeScreen() {
       { text: "キャンセル", style: "cancel" },
       { text: "交換する", onPress: async () => {
           setLoading(true);
-          const { data: success, error } = await supabase.rpc('execute_card_trade', { target_message_id: message.id, buyer_user_id: myId, offered_card_id: message.card_offer_id, requested_card_id: myCards[0]?.id });
-          if (error || !success) Alert.alert('失敗', '条件が一致しないか、すでに取引済みです。');
-          else { Alert.alert('成立！', 'カードを交換しました。図鑑を確認してください。'); initChat(); }
+          const { data: success, error } = await supabase.rpc('execute_card_trade', { 
+            target_message_id: message.id, 
+            buyer_user_id: myId, 
+            offered_card_id: message.card_offer_id, 
+            requested_card_id: myCards[0]?.id // 必要に応じてロジックを調整
+          });
+          
+          if (error || !success) {
+            Alert.alert('失敗', '条件が一致しないか、すでに取引済みです。');
+          } else { 
+            Alert.alert('成立！', 'カードを交換しました。図鑑を確認してください。'); 
+            initChat(); 
+          }
           setLoading(false);
       }}
     ]);
@@ -96,35 +129,45 @@ export default function ChatTradeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>TRADE MARKET</Text>
-        <Text style={styles.headerSub}>ユーザー同士の交換広場</Text>
-      </View>
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoid} 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      >
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>TRADE MARKET</Text>
+          <Text style={styles.headerSub}>ユーザー同士の交換広場</Text>
+        </View>
 
-      <FlatList
-        data={messages}
-        keyExtractor={(item) => item.id}
-        renderItem={renderMessage}
-        contentContainerStyle={{ padding: 16 }}
-      />
-      {loading && <ActivityIndicator size="large" color="#3B82F6" style={styles.loader} />}
-
-      {/* 入力エリア */}
-      <View style={styles.inputArea}>
-        <TouchableOpacity style={styles.offerBtn} onPress={() => setModalVisible(true)}>
-          <RefreshCcw color="#3B82F6" size={20} />
-        </TouchableOpacity>
-        <TextInput
-          style={styles.input}
-          placeholder="メッセージを入力..."
-          placeholderTextColor="#94A3B8"
-          value={inputText}
-          onChangeText={setInputText}
+        <FlatList
+          ref={flatListRef}
+          data={messages}
+          keyExtractor={(item) => item.id}
+          renderItem={renderMessage}
+          contentContainerStyle={{ padding: 16, flexGrow: 1, justifyContent: 'flex-end' }}
+          onContentSizeChange={() => flatListRef.current?.scrollToEnd({ animated: true })}
+          onLayout={() => flatListRef.current?.scrollToEnd({ animated: true })}
         />
-        <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
-          <Send color={inputText.trim() ? "#3B82F6" : "#CBD5E1"} size={24} />
-        </TouchableOpacity>
-      </View>
+        {loading && <ActivityIndicator size="large" color="#3B82F6" style={styles.loader} />}
+
+        {/* 入力エリア */}
+        <View style={styles.inputArea}>
+          <TouchableOpacity style={styles.offerBtn} onPress={() => setModalVisible(true)}>
+            <RefreshCcw color="#3B82F6" size={20} />
+          </TouchableOpacity>
+          <TextInput
+            style={styles.input}
+            placeholder="メッセージを入力..."
+            placeholderTextColor="#94A3B8"
+            value={inputText}
+            onChangeText={setInputText}
+            multiline
+            maxLength={200}
+          />
+          <TouchableOpacity style={styles.sendBtn} onPress={sendMessage}>
+            <Send color={inputText.trim() ? "#3B82F6" : "#CBD5E1"} size={24} />
+          </TouchableOpacity>
+        </View>
+      </KeyboardAvoidingView>
 
       {/* トレード提案モーダル */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
@@ -169,6 +212,7 @@ export default function ChatTradeScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
+  keyboardAvoid: { flex: 1 },
   header: { padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: '#FFFFFF' },
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
   headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '600' },
@@ -186,10 +230,10 @@ const styles = StyleSheet.create({
   msgText: { fontSize: 15, lineHeight: 22, color: '#0F172A' },
   myMsgText: { color: '#FFFFFF' },
   
-  inputArea: { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF', alignItems: 'center' },
-  input: { flex: 1, backgroundColor: '#F1F5F9', color: '#0F172A', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 24, fontSize: 15, marginHorizontal: 10 },
-  offerBtn: { padding: 10, backgroundColor: '#EFF6FF', borderRadius: 20 },
-  sendBtn: { padding: 10 },
+  inputArea: { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF', alignItems: 'flex-end' },
+  input: { flex: 1, backgroundColor: '#F1F5F9', color: '#0F172A', paddingTop: 12, paddingBottom: 12, paddingHorizontal: 16, borderRadius: 24, fontSize: 15, marginHorizontal: 10, maxHeight: 100 },
+  offerBtn: { padding: 10, backgroundColor: '#EFF6FF', borderRadius: 20, marginBottom: 4 },
+  sendBtn: { padding: 10, marginBottom: 4 },
   
   acceptBtn: { backgroundColor: '#F59E0B', paddingVertical: 10, paddingHorizontal: 16, borderRadius: 12, marginTop: 12, alignItems: 'center' },
   acceptBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 13 },
