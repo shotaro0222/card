@@ -1,15 +1,24 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Camera } from 'lucide-react-native';
+import { Camera, Image as ImageIcon } from 'lucide-react-native';
+
+// 💡 Web環境でも確実にアラートを出すための安全な関数
+const safeAlert = (title: string, msg: string) => {
+  if (Platform.OS === 'web') {
+    window.alert(`${title}\n${msg}`);
+  } else {
+    Alert.alert(title, msg);
+  }
+};
 
 export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
-  const [loadingStep, setLoadingSubText] = useState(''); // 💡 現在の工程を表示
+  const [loadingStep, setLoadingSubText] = useState('');
   const [customName, setCustomName] = useState<string>('');
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
   
@@ -69,56 +78,65 @@ export default function ForgeScreen() {
     });
   };
 
-  const handleLaunchCamera = async () => {
-    Alert.alert(
-      '素材の抽出',
-      '画像ソースを選択してください',
-      [
-        {
-          text: '📸 カメラで撮影',
-          onPress: async () => {
-            const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
-            if (!cameraPerm.granted) return Alert.alert('エラー', 'カメラ許可が必要です');
-            const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
-            if (!result.canceled && result.assets[0].base64) forgeCard(result.assets[0].base64);
-          }
-        },
-        {
-          text: '🖼️ アルバムから選択',
-          onPress: async () => {
-             const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
-             if (!result.canceled && result.assets[0].base64) forgeCard(result.assets[0].base64);
-          }
-        },
-        { text: 'キャンセル', style: 'cancel' }
-      ]
-    );
+  // 💡 ポップアップを廃止し、直接カメラを起動する関数
+  const launchCamera = async () => {
+    try {
+      const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
+      if (!cameraPerm.granted) {
+        safeAlert('権限エラー', 'カメラへのアクセスを許可してください。');
+        return;
+      }
+      const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
+      if (!result.canceled && result.assets && result.assets[0].base64) {
+        forgeCard(result.assets[0].base64);
+      }
+    } catch (error: any) {
+      safeAlert('カメラエラー', error.message);
+    }
+  };
+
+  // 💡 直接アルバムを開く関数
+  const launchLibrary = async () => {
+    try {
+      const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
+      if (!result.canceled && result.assets && result.assets[0].base64) {
+        forgeCard(result.assets[0].base64);
+      }
+    } catch (error: any) {
+      safeAlert('アルバムエラー', error.message);
+    }
   };
 
   const forgeCard = async (base64Img: string) => {
     setLoading(true);
-    setLoadingSubText('位置情報を確認中...'); // ここで止まりやすい
+    setLoadingSubText('位置情報を確認中...');
     
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('ログインが必要です');
 
-      // 💡 位置情報の取得（5秒でタイムアウトさせる）
+      // 💡 位置情報でフリーズしないよう「3秒ルール（タイムアウト）」を設定
       let userLat = null, userLng = null;
       try {
-        const locationPromise = Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
-        const timeoutPromise = new Promise((_, reject) => setTimeout(() => reject(new Error('timeout')), 5000));
-        const location: any = await Promise.race([locationPromise, timeoutPromise]);
-        userLat = location.coords.latitude;
-        userLng = location.coords.longitude;
+        const locResult: any = await Promise.race([
+          Location.requestForegroundPermissionsAsync().then(async (perm) => {
+            if (perm.granted) return await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.Balanced });
+            return null;
+          }),
+          new Promise(resolve => setTimeout(() => resolve(null), 3000))
+        ]);
+        if (locResult) {
+          userLat = locResult.coords.latitude;
+          userLng = locResult.coords.longitude;
+        }
       } catch (e) {
-        console.warn("位置情報の取得をスキップしました (タイムアウトまたは拒否)");
+        console.log("位置情報スキップ");
       }
 
       setLoadingSubText('画像をサーバーへ転送中...');
       const fileName = `${user.id}/${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage.from('card_images').upload(fileName, decode(base64Img), { contentType: 'image/jpeg' });
-      if (uploadError) throw new Error(`画像保存失敗: ${uploadError.message}`);
+      if (uploadError) throw new Error(`画像保存失敗: ${uploadError.message}\nストレージの設定を確認してください。`);
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
       setLoadingSubText('AIが画像を解析中...');
@@ -149,14 +167,14 @@ export default function ForgeScreen() {
         is_active: false
       }]);
 
-      if (insertError) throw new Error(`DB保存失敗: ${insertError.message}`);
+      if (insertError) throw new Error(`DB保存失敗: ${insertError.message}\n属性(element)カラムは追加しましたか？`);
 
       setForgedCardResult({ ...aiResultData, image_url: publicUrl, status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10) });
       setShowResultModal(true);
       setCustomName('');
       
     } catch (error: any) {
-      Alert.alert('生成エラー', error.message);
+      safeAlert('生成エラー', error.message);
     } finally {
       setLoading(false);
       setLoadingSubText('');
@@ -178,10 +196,20 @@ export default function ForgeScreen() {
           <View style={styles.mainBox}>
             <Text style={styles.instruction}>好きな名前を指定（任意）</Text>
             <TextInput style={styles.input} placeholder="カードの名称を入力..." value={customName} onChangeText={setCustomName} maxLength={15} />
-            <TouchableOpacity style={styles.actionButton} onPress={handleLaunchCamera} activeOpacity={0.8}>
-              <Camera color="#FFFFFF" size={24} style={{ marginRight: 10 }} />
-              <Text style={styles.actionButtonText}>生成を開始する</Text>
-            </TouchableOpacity>
+            
+            {/* 💡 ポップアップを廃止し、2つのボタンを直接配置 */}
+            <View style={styles.buttonRow}>
+              <TouchableOpacity style={styles.actionButtonHalf} onPress={launchCamera} activeOpacity={0.8}>
+                <Camera color="#FFFFFF" size={20} />
+                <Text style={styles.actionButtonText}>カメラ</Text>
+              </TouchableOpacity>
+              
+              <TouchableOpacity style={[styles.actionButtonHalf, styles.actionButtonLibrary]} onPress={launchLibrary} activeOpacity={0.8}>
+                <ImageIcon color="#FFFFFF" size={20} />
+                <Text style={styles.actionButtonText}>アルバム</Text>
+              </TouchableOpacity>
+            </View>
+            
             <Text style={styles.subInfo}>現実の風景や商品を撮影してカード生成</Text>
           </View>
         )}
@@ -218,8 +246,13 @@ const styles = StyleSheet.create({
   mainBox: { width: '85%', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 30, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
   instruction: { fontSize: 14, color: '#64748B', marginBottom: 15, fontWeight: '600' },
   input: { width: '100%', backgroundColor: '#F1F5F9', padding: 15, borderRadius: 12, fontSize: 16, marginBottom: 20 },
-  actionButton: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 60, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  actionButtonText: { color: '#FFFFFF', fontSize: 18, fontWeight: '900' },
+  
+  // 💡 2つのボタンを横並びにするスタイル
+  buttonRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 10 },
+  actionButtonHalf: { flex: 1, flexDirection: 'row', backgroundColor: '#3B82F6', height: 60, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  actionButtonLibrary: { backgroundColor: '#0F172A' }, // アルバム用は黒っぽく
+  actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', marginLeft: 8 },
+  
   subInfo: { color: '#94A3B8', fontSize: 12, marginTop: 15, fontWeight: '500' },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
   modalContent: { width: '85%', backgroundColor: '#FFF', borderRadius: 30, padding: 30, alignItems: 'center' },
