@@ -48,17 +48,21 @@ export default function AdminDashboard() {
   const [sPrice, setSPrice] = useState('');
   const [sType, setSType] = useState('original_pack');
   const [sImage, setSImage] = useState(''); 
-  // 💡【修正】複数枚の枠デザイン画像を保持するための配列ステートに変更
   const [sCardImages, setSCardImages] = useState<string[]>([]); 
   const [sEffect, setSEffect] = useState('none'); 
   
-  // 🎊 フォーム状態（イベント）
+  // 🎊 フォーム状態（イベント構築 - 拡張機能）
   const [eTitle, setETitle] = useState('');
   const [eDesc, setEDesc] = useState('');
   const [eTime, setETime] = useState('12:00 - 20:00');
-  const [eLat, setELat] = useState('35.6983');
-  const [eLng, setELng] = useState('139.4130');
   const [eBossName, setEBossName] = useState('');
+  // 追加: 3つのロケーションモード
+  const [eLocType, setELocType] = useState('coords'); // coords, landmark, random
+  const [eCoords, setECoords] = useState<{lat: string, lng: string}[]>([{lat: '35.6983', lng: '139.4130'}]);
+  const [eLandmark, setELandmark] = useState('');
+  const [eRandomCount, setERandomCount] = useState('50');
+  const [eLat, setELat] = useState('35.6983'); // ランダム・ランドマーク用の基準座標
+  const [eLng, setELng] = useState('139.4130');
 
   // ⚖️ ゲーム内バランス調整用ステート
   const [expMultiplier, setExpMultiplier] = useState('1.0');
@@ -118,7 +122,6 @@ export default function AdminDashboard() {
     setBEffect(['sparkle', 'fire', 'hologram'][Math.floor(Math.random() * 3)]); 
   };
 
-  // 1枚用画像アップロード（ボス画像、パッケージ画像など）
   const handleImageUpload = async (setter: React.Dispatch<React.SetStateAction<string>>) => {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -156,7 +159,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 💡【追加】複数枚用画像アップロード（パック内の複数カード枠デザイン用）
   const handleMultipleImagesUpload = async (setter: React.Dispatch<React.SetStateAction<string[]>>) => {
     try {
       const permissionResult = await ImagePicker.requestMediaLibraryPermissionsAsync();
@@ -166,7 +168,7 @@ export default function AdminDashboard() {
 
       const result = await ImagePicker.launchImageLibraryAsync({
         mediaTypes: ImagePicker.MediaTypeOptions.Images,
-        allowsMultipleSelection: true, // 複数選択を許可
+        allowsMultipleSelection: true,
         quality: 0.8,
         base64: true,
       });
@@ -175,7 +177,6 @@ export default function AdminDashboard() {
         setIsUploading(true);
         const uploadedUrls: string[] = [];
 
-        // 選択された全画像をループで順次アップロード
         for (const asset of result.assets) {
           if (!asset.base64) continue;
           
@@ -191,7 +192,6 @@ export default function AdminDashboard() {
         }
 
         if (uploadedUrls.length > 0) {
-          // 既存の配列に新しいURLを追加する
           setter(prev => [...prev, ...uploadedUrls]);
           Alert.alert('成功', `${uploadedUrls.length}枚の画像のアップロードが完了しました。`);
         } else {
@@ -256,7 +256,6 @@ export default function AdminDashboard() {
     let customDesignObj: any = {};
     if (sEffect !== 'none') customDesignObj.effect = sEffect;
     
-    // 💡【修正】複数枚の画像URL配列を frameUrls としてJSONに格納
     if (sCardImages.length > 0) {
       customDesignObj.frameUrls = sCardImages;
     }
@@ -282,11 +281,75 @@ export default function AdminDashboard() {
   // --- 🎊 イベント & ⚖️ 設定 ---
   const handleAddEvent = async () => {
     if (!eTitle || !eDesc) return Alert.alert('エラー', 'タイトルと詳細説明を入力してください');
-    const { error } = await supabase.from('events').insert([{ 
-      title: eTitle, description: eDesc, event_time_range: eTime,
-      lat: parseFloat(eLat), lng: parseFloat(eLng), attached_boss_name: eBossName || null, is_active: true 
-    }]);
-    if (!error) { Alert.alert('成功', 'イベントを構築・公開しました'); fetchAdminData(); }
+
+    let insertPayload: any[] = [];
+
+    // 1. 複数座標モード
+    if (eLocType === 'coords') {
+      const validCoords = eCoords.filter(c => c.lat && c.lng);
+      if (validCoords.length === 0) return Alert.alert('エラー', '有効な座標を1つ以上入力してください');
+      
+      insertPayload = validCoords.map(c => ({
+        title: eTitle, 
+        description: eDesc, 
+        event_time_range: eTime,
+        lat: parseFloat(c.lat) || 0, 
+        lng: parseFloat(c.lng) || 0, 
+        attached_boss_name: eBossName || null, 
+        is_active: true
+      }));
+    } 
+    // 2. ランドマークモード
+    else if (eLocType === 'landmark') {
+      if (!eLandmark) return Alert.alert('エラー', 'ランドマーク名を入力してください');
+      
+      insertPayload = [{
+        title: eTitle, 
+        description: `【📍${eLandmark}近辺】\n${eDesc}`, 
+        event_time_range: eTime,
+        lat: parseFloat(eLat) || 35.6983, 
+        lng: parseFloat(eLng) || 139.4130, 
+        attached_boss_name: eBossName || null, 
+        is_active: true,
+        landmark_name: eLandmark // 将来的な拡張に対応
+      }];
+    } 
+    // 3. ランダム大量発生モード
+    else if (eLocType === 'random') {
+      const count = parseInt(eRandomCount);
+      if (!count || count <= 0) return Alert.alert('エラー', '正しい発生数を入力してください');
+      
+      const baseLatNum = parseFloat(eLat) || 35.6983;
+      const baseLngNum = parseFloat(eLng) || 139.4130;
+      
+      for (let i = 0; i < count; i++) {
+        // 基準座標から ±約5kmの範囲にばら撒く (0.05度程度)
+        const rLat = baseLatNum + (Math.random() - 0.5) * 0.05;
+        const rLng = baseLngNum + (Math.random() - 0.5) * 0.05;
+        
+        insertPayload.push({
+          title: `${eTitle} (No.${i+1})`, 
+          description: eDesc, 
+          event_time_range: eTime,
+          lat: rLat, 
+          lng: rLng, 
+          attached_boss_name: eBossName || null, 
+          is_active: true
+        });
+      }
+    }
+
+    const { error } = await supabase.from('events').insert(insertPayload);
+    
+    if (!error) { 
+      Alert.alert('成功', `合計 ${insertPayload.length} 件のイベントスポットを発令しました`); 
+      setETitle(''); setEDesc(''); setEBossName('');
+      setECoords([{lat: '35.6983', lng: '139.4130'}]);
+      setELandmark('');
+      fetchAdminData(); 
+    } else {
+      Alert.alert('失敗', error.message);
+    }
   };
 
   const handleAdjustCard = async (cardId: string, currentFixed: boolean, currentAtk: number) => {
@@ -454,7 +517,6 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               </View>
 
-              {/* 💡【修正】複数枚の画像をアップロード・一覧表示できるUI */}
               <Text style={styles.label}>排出カードの特別デザイン / 枠画像 (複数枚登録可能)</Text>
               <View style={styles.multiImageContainer}>
                 {sCardImages.map((url, index) => (
@@ -597,6 +659,70 @@ export default function AdminDashboard() {
             <TextInput style={styles.input} placeholder="概要・告知説明文" value={eDesc} onChangeText={setEDesc} />
             <Text style={styles.label}>時間・日時指示</Text>
             <TextInput style={styles.input} placeholder="例: 12:00 - 18:00 (毎日開催)" value={eTime} onChangeText={setETime} />
+
+            {/* 💡【追加】ロケーションモード選択UI */}
+            <Text style={styles.label}>開催対象ロケーション設定</Text>
+            <View style={{ flexDirection: 'row', gap: 6, marginBottom: 12 }}>
+              {[
+                { id: 'coords', label: '📍 複数座標' },
+                { id: 'landmark', label: '🏛️ ランドマーク' },
+                { id: 'random', label: '🌪️ ランダム発生' }
+              ].map((locType) => (
+                <TouchableOpacity 
+                  key={locType.id} 
+                  style={[styles.miniChip, eLocType === locType.id && styles.activeMiniChip]} 
+                  onPress={() => setELocType(locType.id)}
+                >
+                  <Text style={styles.miniChipText}>{locType.label}</Text>
+                </TouchableOpacity>
+              ))}
+            </View>
+
+            {/* 📍 モード1: 複数座標 */}
+            {eLocType === 'coords' && (
+              <View>
+                {eCoords.map((coord, index) => (
+                  <View key={index} style={{ flexDirection: 'row', gap: 8, marginBottom: 8, alignItems: 'center' }}>
+                    <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="緯度 (Lat)" value={coord.lat} onChangeText={(v) => { const newC = [...eCoords]; newC[index].lat = v; setECoords(newC); }} />
+                    <TextInput style={[styles.input, { flex: 1, marginBottom: 0 }]} placeholder="経度 (Lng)" value={coord.lng} onChangeText={(v) => { const newC = [...eCoords]; newC[index].lng = v; setECoords(newC); }} />
+                    {eCoords.length > 1 && (
+                      <TouchableOpacity onPress={() => setECoords(eCoords.filter((_, i) => i !== index))} style={styles.removeLocBtn}>
+                        <Text style={styles.removeLocText}>×</Text>
+                      </TouchableOpacity>
+                    )}
+                  </View>
+                ))}
+                <TouchableOpacity style={styles.outlineBtn} onPress={() => setECoords([...eCoords, { lat: '', lng: '' }])}>
+                  <Text style={styles.outlineBtnText}>➕ 座標を追加</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+
+            {/* 🏛️ モード2: ランドマーク */}
+            {eLocType === 'landmark' && (
+              <View>
+                <TextInput style={styles.input} placeholder="目印となる建物・施設名 (例: 東京タワー)" value={eLandmark} onChangeText={setELandmark} />
+                <Text style={styles.infoText}>※施設付近のスポットに自動的にイベントを配置します。</Text>
+              </View>
+            )}
+
+            {/* 🌪️ モード3: ランダム発生 */}
+            {eLocType === 'random' && (
+              <View>
+                <Text style={styles.label}>ばら撒きの基準となる中心座標</Text>
+                <View style={{ flexDirection: 'row', gap: 8, marginBottom: 8 }}>
+                  <TextInput style={[styles.input, { flex: 1 }]} placeholder="基準緯度" value={eLat} onChangeText={setELat} />
+                  <TextInput style={[styles.input, { flex: 1 }]} placeholder="基準経度" value={eLng} onChangeText={setELng} />
+                </View>
+                <Text style={styles.label}>ランダム発生数</Text>
+                <TextInput style={styles.input} placeholder="発生させる数 (例: 100)" keyboardType="numeric" value={eRandomCount} onChangeText={setERandomCount} />
+                <Text style={styles.infoText}>※基準座標の周辺に指定した数のイベントを完全にランダムでばら撒きます。</Text>
+              </View>
+            )}
+
+            <Text style={styles.label}>出現連動ボス指定 (任意)</Text>
+            <TextInput style={styles.input} placeholder="出現させるボスキャラ名を入力" value={eBossName} onChangeText={setEBossName} />
+
             <TouchableOpacity style={styles.addBtn} onPress={handleAddEvent}>
               <Text style={styles.addBtnText}>イベントスケジュールを発令</Text>
             </TouchableOpacity>
@@ -682,12 +808,14 @@ const styles = StyleSheet.create({
   activeMiniChip: { backgroundColor: '#EFF6FF', borderColor: '#3B82F6', borderWidth: 1 },
   miniChipText: { fontSize: 12, fontWeight: '700', color: '#475569' },
 
-  // 💡【追加】複数枚画像アップロード用のUIスタイル
   multiImageContainer: { flexDirection: 'row', flexWrap: 'wrap', gap: 10, marginBottom: 16 },
   thumbnailWrapper: { position: 'relative', width: 75, height: 75, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0' },
   thumbnailImage: { width: '100%', height: '100%', borderRadius: 8 },
   removeImgBtn: { position: 'absolute', top: -5, right: -5, backgroundColor: '#EF4444', width: 20, height: 20, borderRadius: 10, alignItems: 'center', justifyContent: 'center' },
   removeImgText: { color: '#FFFFFF', fontSize: 12, fontWeight: 'bold' },
   addImgBtn: { width: 75, height: 75, borderRadius: 8, borderWidth: 1, borderColor: '#3B82F6', borderStyle: 'dashed', alignItems: 'center', justifyContent: 'center', backgroundColor: '#EFF6FF' },
-  addImgText: { color: '#2563EB', fontSize: 12, fontWeight: '700' }
+  addImgText: { color: '#2563EB', fontSize: 12, fontWeight: '700' },
+
+  removeLocBtn: { backgroundColor: '#EF4444', width: 34, height: 34, borderRadius: 8, alignItems: 'center', justifyContent: 'center' },
+  removeLocText: { color: '#FFFFFF', fontWeight: 'bold', fontSize: 16 }
 });
