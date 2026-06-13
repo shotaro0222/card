@@ -182,7 +182,9 @@ export default function ForgeScreen() {
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <View style={styles.devBadge}><Text style={styles.devText}>🛠️ 開発モード: 無制限</Text></View>
+        <View style={styles.devBadge}>
+          <Text style={styles.devText} numberOfLines={1} adjustsFontSizeToFit>🛠️ 開発モード: 無制限</Text>
+        </View>
 
         {loading ? (
           <View style={styles.loadingArea}>
@@ -192,18 +194,24 @@ export default function ForgeScreen() {
           </View>
         ) : (
           <View style={styles.mainBox}>
-            <Text style={styles.instruction}>好きな名前を指定（任意）</Text>
-            <TextInput style={styles.input} placeholder="カードの名称を入力..." value={customName} onChangeText={setCustomName} maxLength={15} />
+            <Text style={styles.instruction} numberOfLines={1} adjustsFontSizeToFit>好きな名前を指定（任意）</Text>
+            <TextInput 
+              style={styles.input} 
+              placeholder="カードの名称を入力..." 
+              value={customName} 
+              onChangeText={setCustomName} 
+              maxLength={15} 
+            />
             
             <View style={styles.buttonRow}>
               <TouchableOpacity style={styles.actionButtonHalf} onPress={launchCamera} activeOpacity={0.8}>
                 <Camera color="#FFFFFF" size={20} />
-                <Text style={styles.actionButtonText}>カメラ</Text>
+                <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit>カメラ</Text>
               </TouchableOpacity>
               
               <TouchableOpacity style={[styles.actionButtonHalf, styles.actionButtonLibrary]} onPress={launchLibrary} activeOpacity={0.8}>
                 <ImageIcon color="#FFFFFF" size={20} />
-                <Text style={styles.actionButtonText}>アルバム</Text>
+                <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit>アルバム</Text>
               </TouchableOpacity>
             </View>
             
@@ -220,11 +228,9 @@ export default function ForgeScreen() {
               {getRarityConfig(forgedCardResult?.rarity).effectTitle}
             </Text>
             
-            {/* 💡 カードのプレビュー領域 */}
             <Animated.View style={[styles.cardPreview, { transform: [{ scale: cardScale }], opacity: cardOpacity }]}>
               <Image source={{ uri: forgedCardResult?.image_url }} style={styles.resultImage} resizeMode="cover" />
               
-              {/* 💡 画像の上に重なる「カード名」の帯を追加（本物のTCGっぽさを演出） */}
               <View style={styles.cardOverlay}>
                 <Text style={styles.cardOverlayText} adjustsFontSizeToFit numberOfLines={1}>
                   {forgedCardResult?.card_name}
@@ -232,18 +238,17 @@ export default function ForgeScreen() {
               </View>
             </Animated.View>
             
-            {/* 💡 DUSTモードの時に文字色を「白」に変えて闇に溶けないように修正 */}
             <Text style={[styles.resultName, forgedCardResult?.rarity === 'DUST' && styles.dustTextWhite]} adjustsFontSizeToFit numberOfLines={1}>
               {forgedCardResult?.card_name}
             </Text>
             
             <View style={styles.resultStatsRow}>
-              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]}>属性: {forgedCardResult?.element}</Text>
-              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]}>合計: {forgedCardResult?.status_total}</Text>
+              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]} numberOfLines={1}>属性: {forgedCardResult?.element}</Text>
+              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]} numberOfLines={1}>合計: {forgedCardResult?.status_total}</Text>
             </View>
 
             <TouchableOpacity style={[styles.closeBtn, forgedCardResult?.rarity === 'DUST' && styles.dustCloseBtn]} onPress={() => setShowResultModal(false)}>
-              <Text style={[styles.closeBtnText, forgedCardResult?.rarity === 'DUST' && styles.dustTextWhite]}>図鑑に格納</Text>
+              <Text style={[styles.closeBtnText, forgedCardResult?.rarity === 'DUST' && styles.dustTextWhite]} numberOfLines={1}>図鑑に格納</Text>
             </TouchableOpacity>
 
           </Animated.View>
@@ -257,40 +262,53 @@ const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
   content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 100 },
   loadingArea: { alignItems: 'center' },
-  loadingText: { marginTop: 20, color: '#3B82F6', fontWeight: '800', fontSize: 16 },
-  loadingSubText: { marginTop: 8, color: '#94A3B8', fontWeight: '600', fontSize: 12 },
-  devBadge: { backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 6, borderRadius: 20, marginBottom: 40 },
-  devText: { color: '#2563EB', fontWeight: '700', fontSize: 12 },
-  mainBox: { width: '85%', alignItems: 'center', backgroundColor: '#FFFFFF', padding: 30, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
-  instruction: { fontSize: 14, color: '#64748B', marginBottom: 15, fontWeight: '600' },
-  input: { width: '100%', backgroundColor: '#F1F5F9', padding: 15, borderRadius: 12, fontSize: 16, marginBottom: 20 },
+  loadingText: { marginTop: 20, color: '#3B82F6', fontWeight: '800', fontSize: 16, textAlign: 'center' },
+  loadingSubText: { marginTop: 8, color: '#94A3B8', fontWeight: '600', fontSize: 12, textAlign: 'center' },
+  
+  // 💡 バッジの左側が見切れるバグを防ぐため、flexDirection と alignSelf を追加
+  devBadge: { 
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EFF6FF', 
+    paddingHorizontal: 16, 
+    paddingVertical: 8, 
+    borderRadius: 20, 
+    marginBottom: 40,
+    alignSelf: 'center',
+    maxWidth: '90%'
+  },
+  devText: { color: '#2563EB', fontWeight: '700', fontSize: 13, flexShrink: 1 },
+  
+  mainBox: { width: '85%', maxWidth: 400, alignItems: 'center', backgroundColor: '#FFFFFF', padding: 25, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
+  instruction: { fontSize: 14, color: '#64748B', marginBottom: 15, fontWeight: '600', textAlign: 'center', flexShrink: 1 },
+  input: { width: '100%', backgroundColor: '#F1F5F9', paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12, fontSize: 15, marginBottom: 20 },
+  
   buttonRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 10 },
-  actionButtonHalf: { flex: 1, flexDirection: 'row', backgroundColor: '#3B82F6', height: 60, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
+  actionButtonHalf: { flex: 1, flexDirection: 'row', backgroundColor: '#3B82F6', height: 55, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   actionButtonLibrary: { backgroundColor: '#0F172A' },
-  actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', marginLeft: 8 },
-  subInfo: { color: '#94A3B8', fontSize: 12, marginTop: 15, fontWeight: '500' },
+  actionButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginLeft: 8, flexShrink: 1 },
   
-  // モーダル周り
+  // 💡 サブテキストの折り返しとはみ出し防止
+  subInfo: { color: '#94A3B8', fontSize: 11, marginTop: 15, fontWeight: '500', textAlign: 'center', flexShrink: 1, flexWrap: 'wrap' },
+  
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '85%', maxHeight: '90%', backgroundColor: '#FFF', borderRadius: 24, padding: 20, alignItems: 'center', justifyContent: 'center' },
-  dustContent: { backgroundColor: '#18181B' }, // 💡 DUST時は背景が黒
-  resultTitle: { fontSize: 18, fontWeight: '900', marginBottom: 15, textAlign: 'center' },
+  modalContent: { width: '85%', maxWidth: 350, maxHeight: '90%', backgroundColor: '#FFF', borderRadius: 24, padding: 20, alignItems: 'center', justifyContent: 'center' },
+  dustContent: { backgroundColor: '#18181B' },
+  resultTitle: { fontSize: 18, fontWeight: '900', marginBottom: 15, textAlign: 'center', flexShrink: 1 },
   
-  // 💡 画像表示の枠
   cardPreview: { width: '75%', aspectRatio: 3 / 4, borderRadius: 15, overflow: 'hidden', marginBottom: 15, borderWidth: 3, borderColor: '#DDD', position: 'relative' },
   resultImage: { width: '100%', height: '100%' },
   
-  // 💡 画像に被さる名前の黒帯
   cardOverlay: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'rgba(15, 23, 42, 0.75)', paddingVertical: 8, paddingHorizontal: 10 },
-  cardOverlayText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3 },
+  cardOverlayText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3, flexShrink: 1 },
   
-  resultName: { fontSize: 22, fontWeight: '900', color: '#0F172A', textAlign: 'center' },
+  resultName: { fontSize: 22, fontWeight: '900', color: '#0F172A', textAlign: 'center', flexShrink: 1 },
   resultStatsRow: { flexDirection: 'row', gap: 15, marginTop: 8 },
-  resultPower: { fontSize: 14, color: '#64748B', fontWeight: '700' },
+  resultPower: { fontSize: 14, color: '#64748B', fontWeight: '700', flexShrink: 1 },
   closeBtn: { marginTop: 20, backgroundColor: '#0F172A', paddingVertical: 14, paddingHorizontal: 40, borderRadius: 15 },
-  closeBtnText: { color: '#FFF', fontWeight: '800' },
+  closeBtnText: { color: '#FFF', fontWeight: '800', flexShrink: 1 },
 
-  // 💡 DUST専用の文字・ボタン色調整（闇に溶けないようにする）
   dustTextWhite: { color: '#F8FAFC' },
   dustTextLight: { color: '#94A3B8' },
   dustCloseBtn: { backgroundColor: '#334155', borderWidth: 1, borderColor: '#475569' }
