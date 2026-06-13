@@ -20,7 +20,6 @@ export default function ChatTradeScreen() {
     useCallback(() => {
       initChat();
 
-      // ⚡️ リアルタイム通信の確立（新しいメッセージが来たら即時反映）
       const messageSubscription = supabase
         .channel('public:messages')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
@@ -38,7 +37,6 @@ export default function ChatTradeScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       setMyId(user.id);
-      // 自分が現在アクティブに所持しているカードを取得
       const { data } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true);
       if (data) setMyCards(data);
     }
@@ -46,7 +44,6 @@ export default function ChatTradeScreen() {
   };
 
   const fetchMessages = async () => {
-    // invertedを使用するため、最新のものを一番上（配列の最初）に取得する
     const { data } = await supabase
       .from('messages')
       .select('*, profiles:sender_id(player_name), offered_card:card_offer_id(*)')
@@ -64,7 +61,7 @@ export default function ChatTradeScreen() {
     if (!user) return;
     
     const textToSend = inputText;
-    setInputText(''); // UIを即座にクリアして体感速度を上げる
+    setInputText(''); 
     
     const { error } = await supabase.from('messages').insert([{ sender_id: user.id, text: textToSend }]);
     if (error) Alert.alert('送信エラー', error.message);
@@ -91,12 +88,9 @@ export default function ChatTradeScreen() {
     setRequestedCardName('');
   };
 
-  // 相手のトレード提案を受け入れる処理
   const acceptTrade = async (message: any) => {
     if (!myId) return;
     
-    // 自分が相手が求めているカード（または代替カード）を持っているか選択させるUIが理想ですが、
-    // ここではシンプルに「自分の手持ちの先頭のカード」を差し出すロジックにしています。
     const myOfferCard = myCards[0]; 
     if (!myOfferCard) {
       Alert.alert('エラー', '交換に出せるカードを持っていません。');
@@ -110,15 +104,9 @@ export default function ChatTradeScreen() {
         { text: "キャンセル", style: "cancel" },
         { text: "交換を確定する", onPress: async () => {
             setLoading(true);
-            
-            // 💡【重要】本来はRPC（バックエンド関数）でトランザクション処理を行いますが、
-            // ここではフロントエンドから2つのカードの所有者を入れ替える処理を書きます。
             try {
-              // 1. 相手のカードを自分に
               await supabase.from('cards').update({ player_id: myId }).eq('id', message.card_offer_id);
-              // 2. 自分のカードを相手に
               await supabase.from('cards').update({ player_id: message.sender_id }).eq('id', myOfferCard.id);
-              // 3. トレード完了としてメッセージを削除（またはステータス更新）
               await supabase.from('messages').delete().eq('id', message.id);
 
               Alert.alert('🎉 トレード成立！', 'カードの交換が完了しました。図鑑を確認してください。'); 
@@ -143,7 +131,6 @@ export default function ChatTradeScreen() {
         <View style={[styles.msgBox, isMe ? styles.myMsgBox : styles.oppMsgBox, hasOffer && styles.offerBox]}>
           <Text style={[styles.msgText, isMe && styles.myMsgText, hasOffer && !isMe && {color: '#0F172A'}]}>{item.text}</Text>
           
-          {/* トレード提案カードの表示 */}
           {hasOffer && (
             <View style={styles.offerCardPreview}>
               {item.offered_card.image_url ? (
@@ -171,14 +158,17 @@ export default function ChatTradeScreen() {
 
   return (
     <SafeAreaView style={styles.container}>
-      <KeyboardAvoidingView style={styles.keyboardAvoid} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <KeyboardAvoidingView 
+        style={styles.keyboardAvoid} 
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
+      >
         
         <View style={styles.header}>
           <Text style={styles.headerTitle}>GLOBAL TRADE HUB</Text>
           <Text style={styles.headerSub}>世界中のエージェントとカードを交換</Text>
         </View>
 
-        {/* inverted={true} を使うことで、LINEのように下から上にメッセージが積み上がります */}
         <FlatList
           data={messages}
           keyExtractor={(item) => item.id}
@@ -195,7 +185,6 @@ export default function ChatTradeScreen() {
           </View>
         )}
 
-        {/* 入力エリア */}
         <View style={styles.inputArea}>
           <TouchableOpacity style={styles.offerBtn} onPress={() => setModalVisible(true)}>
             <RefreshCcw color="#3B82F6" size={22} />
@@ -215,7 +204,6 @@ export default function ChatTradeScreen() {
         </View>
       </KeyboardAvoidingView>
 
-      {/* トレード提案モーダル */}
       <Modal visible={isModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
@@ -245,7 +233,7 @@ export default function ChatTradeScreen() {
             <Text style={styles.label}>2. 欲しいカードの条件や名前</Text>
             <TextInput
               style={styles.modalInput}
-              placeholder="例: 火属性のアタッカー、〇〇というカード等"
+              placeholder="例: 火属性のアタッカー等"
               placeholderTextColor="#94A3B8"
               value={requestedCardName}
               onChangeText={setRequestedCardName}
@@ -262,7 +250,8 @@ export default function ChatTradeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
+  // 💡 ここが修正の肝です！タブバーに隠れないよう paddingBottom: 85 を追加しました
+  container: { flex: 1, backgroundColor: '#F8FAFC', paddingBottom: 85 },
   keyboardAvoid: { flex: 1 },
   header: { padding: 16, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#FFFFFF', paddingTop: Platform.OS === 'android' ? 40 : 16 },
   headerTitle: { fontSize: 16, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
@@ -288,7 +277,7 @@ const styles = StyleSheet.create({
   offerCardName: { fontSize: 14, fontWeight: '900', color: '#0F172A', marginBottom: 4 },
   offerCardStats: { fontSize: 11, color: '#64748B', fontWeight: '700' },
   
-  inputArea: { flexDirection: 'row', padding: 12, paddingBottom: Platform.OS === 'ios' ? 24 : 12, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF', alignItems: 'flex-end' },
+  inputArea: { flexDirection: 'row', padding: 12, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF', alignItems: 'flex-end' },
   input: { flex: 1, backgroundColor: '#F1F5F9', color: '#0F172A', paddingTop: 14, paddingBottom: 14, paddingHorizontal: 18, borderRadius: 24, fontSize: 15, marginHorizontal: 10, maxHeight: 120 },
   offerBtn: { padding: 12, backgroundColor: '#EFF6FF', borderRadius: 24, marginBottom: 4 },
   sendBtn: { padding: 10, marginBottom: 4 },
