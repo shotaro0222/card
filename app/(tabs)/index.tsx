@@ -53,7 +53,7 @@ export default function ForgeScreen() {
       case 'SSR': return { color: '#EF4444', shakeIntensity: 1.5, effectTitle: '🔥【SSR】超・実体化！！🔥' };
       case 'SR': return { color: '#A855F7', shakeIntensity: 0.8, effectTitle: '⚡【SR】強・実体化！⚡' };
       case 'R': return { color: '#3B82F6', shakeIntensity: 0, effectTitle: '✨【R】レア・実体化✨' };
-      case 'DUST': return { color: '#3F3F46', shakeIntensity: 0.5, effectTitle: '⚠️【ERROR】ノイズ・実体化⚠️' };
+      case 'DUST': return { color: '#EF4444', shakeIntensity: 0.5, effectTitle: '⚠️【ERROR】バグデータ実体化' };
       case 'N': default: return { color: '#FFFFFF', shakeIntensity: 0, effectTitle: '⚙️【N】通常・実体化' };
     }
   };
@@ -214,28 +214,36 @@ export default function ForgeScreen() {
 
       <Modal visible={showResultModal} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
-          {/* 💡 画面からはみ出さないようレスポンシブ対応に修正 */}
           <Animated.View style={[styles.modalContent, forgedCardResult?.rarity === 'DUST' && styles.dustContent, { transform: [{ translateX: shakeX }] }]}>
             
             <Text style={[styles.resultTitle, { color: getRarityConfig(forgedCardResult?.rarity).color }]} adjustsFontSizeToFit numberOfLines={1}>
               {getRarityConfig(forgedCardResult?.rarity).effectTitle}
             </Text>
             
+            {/* 💡 カードのプレビュー領域 */}
             <Animated.View style={[styles.cardPreview, { transform: [{ scale: cardScale }], opacity: cardOpacity }]}>
               <Image source={{ uri: forgedCardResult?.image_url }} style={styles.resultImage} resizeMode="cover" />
+              
+              {/* 💡 画像の上に重なる「カード名」の帯を追加（本物のTCGっぽさを演出） */}
+              <View style={styles.cardOverlay}>
+                <Text style={styles.cardOverlayText} adjustsFontSizeToFit numberOfLines={1}>
+                  {forgedCardResult?.card_name}
+                </Text>
+              </View>
             </Animated.View>
             
-            <Text style={styles.resultName} adjustsFontSizeToFit numberOfLines={1}>
+            {/* 💡 DUSTモードの時に文字色を「白」に変えて闇に溶けないように修正 */}
+            <Text style={[styles.resultName, forgedCardResult?.rarity === 'DUST' && styles.dustTextWhite]} adjustsFontSizeToFit numberOfLines={1}>
               {forgedCardResult?.card_name}
             </Text>
             
             <View style={styles.resultStatsRow}>
-              <Text style={styles.resultPower}>属性: {forgedCardResult?.element}</Text>
-              <Text style={styles.resultPower}>合計: {forgedCardResult?.status_total}</Text>
+              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]}>属性: {forgedCardResult?.element}</Text>
+              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]}>合計: {forgedCardResult?.status_total}</Text>
             </View>
 
-            <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)}>
-              <Text style={styles.closeBtnText}>図鑑に格納</Text>
+            <TouchableOpacity style={[styles.closeBtn, forgedCardResult?.rarity === 'DUST' && styles.dustCloseBtn]} onPress={() => setShowResultModal(false)}>
+              <Text style={[styles.closeBtnText, forgedCardResult?.rarity === 'DUST' && styles.dustTextWhite]}>図鑑に格納</Text>
             </TouchableOpacity>
 
           </Animated.View>
@@ -262,32 +270,28 @@ const styles = StyleSheet.create({
   actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '800', marginLeft: 8 },
   subInfo: { color: '#94A3B8', fontSize: 12, marginTop: 15, fontWeight: '500' },
   
-  // 💡 レスポンシブに修正したモーダル
+  // モーダル周り
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { 
-    width: '85%', 
-    maxHeight: '90%', // 画面サイズが小さい場合、画面外への押し出しを防止
-    backgroundColor: '#FFF', 
-    borderRadius: 24, 
-    padding: 20, 
-    alignItems: 'center',
-    justifyContent: 'center'
-  },
-  dustContent: { backgroundColor: '#18181B' },
+  modalContent: { width: '85%', maxHeight: '90%', backgroundColor: '#FFF', borderRadius: 24, padding: 20, alignItems: 'center', justifyContent: 'center' },
+  dustContent: { backgroundColor: '#18181B' }, // 💡 DUST時は背景が黒
   resultTitle: { fontSize: 18, fontWeight: '900', marginBottom: 15, textAlign: 'center' },
-  cardPreview: { 
-    width: '75%', // 固定サイズから可変サイズに変更
-    aspectRatio: 3 / 4, // 縦横比を固定
-    borderRadius: 15, 
-    overflow: 'hidden', 
-    marginBottom: 15, 
-    borderWidth: 3, 
-    borderColor: '#DDD' 
-  },
+  
+  // 💡 画像表示の枠
+  cardPreview: { width: '75%', aspectRatio: 3 / 4, borderRadius: 15, overflow: 'hidden', marginBottom: 15, borderWidth: 3, borderColor: '#DDD', position: 'relative' },
   resultImage: { width: '100%', height: '100%' },
+  
+  // 💡 画像に被さる名前の黒帯
+  cardOverlay: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'rgba(15, 23, 42, 0.75)', paddingVertical: 8, paddingHorizontal: 10 },
+  cardOverlayText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3 },
+  
   resultName: { fontSize: 22, fontWeight: '900', color: '#0F172A', textAlign: 'center' },
   resultStatsRow: { flexDirection: 'row', gap: 15, marginTop: 8 },
   resultPower: { fontSize: 14, color: '#64748B', fontWeight: '700' },
   closeBtn: { marginTop: 20, backgroundColor: '#0F172A', paddingVertical: 14, paddingHorizontal: 40, borderRadius: 15 },
-  closeBtnText: { color: '#FFF', fontWeight: '800' }
+  closeBtnText: { color: '#FFF', fontWeight: '800' },
+
+  // 💡 DUST専用の文字・ボタン色調整（闇に溶けないようにする）
+  dustTextWhite: { color: '#F8FAFC' },
+  dustTextLight: { color: '#94A3B8' },
+  dustCloseBtn: { backgroundColor: '#334155', borderWidth: 1, borderColor: '#475569' }
 });
