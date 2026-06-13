@@ -117,22 +117,14 @@ export default function AdminDashboard() {
     if (data) setUsers(data);
   };
 
-  cconst fetchUgcCards = async () => {
-    // 結合なしでまずデータを取得（JOINエラーによる全件非表示を防ぐ）
+  const fetchUgcCards = async () => {
     const { data, error } = await supabase
       .from('cards')
-      .select('id, card_name, image_url, is_hidden, created_at, author_id') // author_id を取得
+      .select(`id, card_name, image_url, is_hidden, created_at, profiles!cards_author_id_fkey(player_name)`)
       .order('created_at', { ascending: false })
       .limit(50);
-    
-    if (error) {
-      console.log('UGC Fetch Error:', error);
-      return;
-    }
-
-    // 取得したカードの author_id を元に、必要であれば別途プロフィールを取得する処理を挟むか、
-    // ここで一旦 data をセットして表示確認してください
-    setUgcCards(data || []);
+    if (data) setUgcCards(data);
+    if (error) console.log('UGC Fetch Error:', error);
   };
 
   const fetchBosses = async () => {
@@ -404,21 +396,15 @@ export default function AdminDashboard() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>ユーザー生成カード (UGC) 管理</Text>
             <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>不適切なカード（公序良俗に反する画像やテキスト）を非表示にできます。</Text>
-            {/* UGC管理の表示部分 */}
-{ugcCards.map(c => (
-  <View key={c.id} style={styles.ugcItem}>
-    {/* ...画像表示部分はそのまま... */}
-    <View style={{flex: 1, marginLeft: 12}}>
-      <View style={styles.row}>
-        <Text style={styles.listItemTitle} numberOfLines={1}>{c.card_name || '名称不明'}</Text>
-        {c.is_hidden && <Text style={styles.bannedBadge}>非表示</Text>}
-      </View>
-      <Text style={styles.listItemSub}>作成者 ID: {c.author_id?.substring(0, 8) || '不明'}</Text>
-      <Text style={styles.listItemSub}>作成日: {c.created_at ? new Date(c.created_at).toLocaleDateString() : '-'}</Text>
-    </View>
-    {/* ...ボタン部分はそのまま... */}
-  </View>
-))}
+            {ugcCards.map(c => (
+              <View key={c.id} style={styles.ugcItem}>
+                {c.image_url ? (
+                  <Image source={{ uri: c.image_url }} style={styles.ugcThumb} />
+                ) : (
+                  <View style={[styles.ugcThumb, { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' }]}>
+                    <ImageIcon color="#94A3B8" size={24} />
+                  </View>
+                )}
                 <View style={{flex: 1, marginLeft: 12}}>
                   <View style={styles.row}>
                     <Text style={styles.listItemTitle} numberOfLines={1}>{c.card_name}</Text>
