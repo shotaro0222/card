@@ -4,24 +4,27 @@ import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
 import { decode } from 'base64-arraybuffer';
-import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon } from 'lucide-react-native';
+import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database } from 'lucide-react-native';
 
 export default function AdminDashboard() {
   const router = useRouter();
   const [activeTab, setActiveTab] = useState('analytics');
   const [loading, setLoading] = useState(false);
 
-  // 1. 分析用データ（本番同期）
+  // 1. 分析用データ
   const [analyticsData, setAnalyticsData] = useState<any>({
     dau: 0, mau: 0, total_posts: 0, total_battles: 0, demographics: { males: 0, females: 0, teens: 0, twenties: 0, thirties: 0 }
   });
 
-  // 2. ユーザー管理（本番同期）
+  // 2. ユーザー管理
   const [users, setUsers] = useState<any[]>([]);
 
   // 3. 特権MINT ＆ ショップ統合
   const [mintDest, setMintDest] = useState<'direct' | 'shop'>('direct');
+  const [shopItemType, setShopItemType] = useState<'single' | 'pack'>('single'); // 追加：単体かパックか
   const [cardGenMode, setCardGenMode] = useState<'manual' | 'ai'>('manual');
+  
+  // 共通・単体カード用
   const [cName, setCName] = useState('');
   const [cImage, setCImage] = useState('');
   const [cPackageImage, setCPackageImage] = useState('');
@@ -33,8 +36,12 @@ export default function AdminDashboard() {
   const [cSpd, setCSpd] = useState('');
   const [cSkillName, setCSkillName] = useState('');
   const [cAiPrompt, setCAiPrompt] = useState('');
+  
+  // ショップ共通・パック専用
   const [cStock, setCStock] = useState('100');
   const [cPrice, setCPrice] = useState('500');
+  const [packCardCount, setPackCardCount] = useState('5');
+  const [packDesc, setPackDesc] = useState('ランダムなカードが排出されるパックです。');
 
   // 4. ボス / マップ配置
   const [bosses, setBosses] = useState<any[]>([]);
@@ -47,7 +54,14 @@ export default function AdminDashboard() {
   const [bRadius, setBRadius] = useState('1000');
   const [bSponsorName, setBSponsorName] = useState('');
   const [bElement, setBElement] = useState('闇');
-  const [dropCardMode, setDropCardMode] = useState<'manual' | 'ai'>('ai');
+  // 追加：ボスのデザイン
+  const [bossImageMode, setBossImageMode] = useState<'upload' | 'ai'>('upload');
+  const [bossImageUrl, setBossImageUrl] = useState('');
+  const [bossAiPrompt, setBossAiPrompt] = useState('');
+
+  // 追加：ドロップのデザイン
+  const [dropCardMode, setDropCardMode] = useState<'upload' | 'ai'>('ai');
+  const [dropCardUrl, setDropCardUrl] = useState('');
   const [dropCardName, setDropCardName] = useState('');
   const [dropCardPrompt, setDropCardPrompt] = useState('');
   const [dropCardRarity, setDropCardRarity] = useState('UR');
@@ -57,11 +71,18 @@ export default function AdminDashboard() {
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
 
+  // 6. マスタ拡張用 (レアリティ/属性 DB拡張)
+  const [elementsList, setElementsList] = useState<string[]>([]);
+  const [raritiesList, setRaritiesList] = useState<string[]>([]);
+  const [newElement, setNewElement] = useState('');
+  const [newRarity, setNewRarity] = useState('');
+
   useFocusEffect(
     useCallback(() => {
       fetchAnalytics();
       fetchUsers();
       fetchBosses();
+      fetchMasterData();
     }, [])
   );
 
@@ -70,10 +91,7 @@ export default function AdminDashboard() {
     try {
       const { count: totalCards } = await supabase.from('cards').select('*', { count: 'exact', head: true });
       const { data: profiles } = await supabase.from('profiles').select('last_sign_in_at, total_wins, boss_defeats');
-      
-      let dau = 0; let mau = 0; let totalBattles = 0;
-      const now = new Date();
-
+      let dau = 0; let mau = 0; let totalBattles = 0; const now = new Date();
       profiles?.forEach((p: any) => {
         if (p.last_sign_in_at) {
           const lastSignIn = new Date(p.last_sign_in_at);
@@ -83,7 +101,6 @@ export default function AdminDashboard() {
         }
         totalBattles += (p.total_wins || 0) + (p.boss_defeats || 0);
       });
-
       setAnalyticsData({
         dau, mau, total_posts: totalCards || 0, total_battles: totalBattles,
         demographics: { males: Math.floor(mau * 0.6), females: Math.floor(mau * 0.4), teens: Math.floor(mau * 0.2), twenties: Math.floor(mau * 0.5), thirties: Math.floor(mau * 0.3) }
@@ -101,17 +118,32 @@ export default function AdminDashboard() {
     if (data) setBosses(data);
   };
 
-  const pickImage = async (setter: any) => {
-    let result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ImagePicker.MediaTypeOptions.Images,
-      allowsEditing: true,
-      aspect: [3, 4],
-      quality: 0.5,
-      base64: true,
+  const fetchMasterData = async () => {
+    // system_configから最新の属性とレアリティを取得
+    const { data } = await supabase.from('system_config').select('*').in('id', ['elements', 'rarities']);
+    let els = ['火', '水', '雷', '風', '木', '土', '光', '闇'];
+    let rars = ['N', 'R', 'SR', 'SSR', 'UR', 'DUST'];
+    data?.forEach(d => {
+      if (d.id === 'elements' && d.config_data.list) els = d.config_data.list;
+      if (d.id === 'rarities' && d.config_data.list) rars = d.config_data.list;
     });
+    setElementsList(els);
+    setRaritiesList(rars);
+  };
+
+  const pickImage = async (setter: any) => {
+    let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.5, base64: true });
     if (!result.canceled && result.assets[0].base64) {
       setter(`data:image/jpeg;base64,${result.assets[0].base64}`);
     }
+  };
+
+  const uploadBase64Image = async (base64String: string, pathPrefix: string) => {
+    if (!base64String.startsWith('data:image')) return base64String;
+    const fileName = `${pathPrefix}/${Date.now()}.jpg`;
+    const base64Str = base64String.split(',')[1] || base64String;
+    await supabase.storage.from('card_images').upload(fileName, decode(base64Str), { contentType: 'image/jpeg' });
+    return supabase.storage.from('card_images').getPublicUrl(fileName).data.publicUrl;
   };
 
   // ===================== 特権MINT / ショップ出品 =====================
@@ -122,61 +154,46 @@ export default function AdminDashboard() {
       let finalPackageUrl = cPackageImage;
       
       const cardDataToInsert: any = {
-        card_name: cName || '名もなき特権カード',
-        element: cAttr || '火',
-        rarity: cRarity || 'SR',
-        status_hp: parseInt(cHp) || 100,
-        status_atk: parseInt(cAtk) || 50,
-        status_def: parseInt(cDef) || 50,
-        status_spd: parseInt(cSpd) || 50,
+        card_name: cName || '名もなき特権カード', element: cAttr || '火', rarity: cRarity || 'SR',
+        status_hp: parseInt(cHp) || 100, status_atk: parseInt(cAtk) || 50, status_def: parseInt(cDef) || 50, status_spd: parseInt(cSpd) || 50,
         status_total: (parseInt(cHp)||100)+(parseInt(cAtk)||50)+(parseInt(cDef)||50)+(parseInt(cSpd)||50),
         skill_name: cSkillName || '通常攻撃',
       };
 
-      if (cardGenMode === 'ai' && cAiPrompt) {
-        // AIでの画像自動生成を想定（EdgeFunctionに投げる）
-        const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: cAiPrompt } });
+      // ショップ・単体カードのAI生成処理
+      if (shopItemType === 'single' && cardGenMode === 'ai' && cAiPrompt) {
+        const { data } = await supabase.functions.invoke('generate-card-image', { body: { prompt: cAiPrompt } });
         finalCardImageUrl = data?.imageUrl || 'https://via.placeholder.com/300x400.png?text=AI+Generated';
-      } else if (cImage.startsWith('data:image')) {
-        const fileName = `mint/${Date.now()}.jpg`;
-        const base64Str = cImage.split(',')[1] || cImage;
-        await supabase.storage.from('card_images').upload(fileName, decode(base64Str), { contentType: 'image/jpeg' });
-        finalCardImageUrl = supabase.storage.from('card_images').getPublicUrl(fileName).data.publicUrl;
+      } else if (shopItemType === 'single' && cImage) {
+        finalCardImageUrl = await uploadBase64Image(cImage, 'mint');
       }
 
       if (mintDest === 'shop') {
-        // ショップ出品
-        if (cPackageImage.startsWith('data:image')) {
-          const pFileName = `packages/${Date.now()}.jpg`;
-          const pBase64Str = cPackageImage.split(',')[1] || cPackageImage;
-          await supabase.storage.from('card_images').upload(pFileName, decode(pBase64Str), { contentType: 'image/jpeg' });
-          finalPackageUrl = supabase.storage.from('card_images').getPublicUrl(pFileName).data.publicUrl;
-        }
+        if (cPackageImage) finalPackageUrl = await uploadBase64Image(cPackageImage, 'packages');
+
+        const itemStats = shopItemType === 'pack' 
+          ? { item_type: 'pack', count: parseInt(packCardCount) || 5 } 
+          : { item_type: 'single', ...cardDataToInsert };
 
         const { error: shopError } = await supabase.from('shop_items').insert([{
           name: cName,
-          description: `属性: ${cAttr} / レアリティ: ${cRarity}`,
+          description: shopItemType === 'pack' ? packDesc : `属性: ${cAttr} / レアリティ: ${cRarity}`,
           price: parseInt(cPrice) || 500,
           stock: parseInt(cStock) || 100,
           package_image_url: finalPackageUrl || finalCardImageUrl,
-          card_image_url: finalCardImageUrl,
-          stats: cardDataToInsert
+          card_image_url: shopItemType === 'single' ? finalCardImageUrl : null,
+          stats: itemStats
         }]);
         if (shopError) throw shopError;
-        Alert.alert('成功', 'ショップに商品を出品しました！');
+        Alert.alert('成功', `ショップに${shopItemType === 'pack' ? 'パック商品' : '単体カード'}を出品しました！`);
       } else {
-        // 特権配布（固定カードとして登録）
         const { error: fixError } = await supabase.from('fixed_cards').insert([{
-          card_name: cName,
-          trigger_type: 'admin_mint',
-          image_url: finalCardImageUrl,
-          stats: cardDataToInsert
+          card_name: cName, trigger_type: 'admin_mint', image_url: finalCardImageUrl, stats: cardDataToInsert
         }]);
         if (fixError) throw fixError;
         Alert.alert('成功', '特権カードを生成・登録しました！');
       }
-      
-      setCName(''); setCImage(''); setCPackageImage(''); setCAiPrompt('');
+      setCName(''); setCImage(''); setCPackageImage(''); setCAiPrompt(''); setPackDesc('');
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
@@ -184,40 +201,40 @@ export default function AdminDashboard() {
   const handleCreateBoss = async () => {
     setLoading(true);
     try {
-      let finalDropCardUrl = 'https://via.placeholder.com/300x400.png?text=Drop+Card';
+      let finalBossImageUrl = bossImageUrl;
+      let finalDropCardUrl = dropCardUrl;
       
+      // ボス画像生成/アップロード
+      if (bossImageMode === 'ai' && bossAiPrompt) {
+        const { data } = await supabase.functions.invoke('generate-card-image', { body: { prompt: bossAiPrompt } });
+        if (data?.imageUrl) finalBossImageUrl = data.imageUrl;
+      } else if (bossImageUrl) {
+        finalBossImageUrl = await uploadBase64Image(bossImageUrl, 'bosses');
+      }
+
+      // ドロップカード生成/アップロード
       if (dropCardMode === 'ai' && dropCardPrompt) {
-        // AIでドロップ専用カードを生成
         const { data } = await supabase.functions.invoke('generate-card-image', { body: { prompt: dropCardPrompt } });
         if (data?.imageUrl) finalDropCardUrl = data.imageUrl;
+      } else if (dropCardUrl) {
+        finalDropCardUrl = await uploadBase64Image(dropCardUrl, 'boss_drops');
       }
 
       const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
-        title: `ボス出現: ${bName}`,
-        sponsor_name: bSponsorName || '運営',
-        target_lat: parseFloat(bLat),
-        target_lng: parseFloat(bLng),
-        radius_meters: parseInt(bRadius),
-        is_active: true
+        title: `ボス出現: ${bName}`, sponsor_name: bSponsorName || '運営',
+        target_lat: parseFloat(bLat), target_lng: parseFloat(bLng), radius_meters: parseInt(bRadius), is_active: true
       }]).select().single();
       if (campError) throw campError;
 
       const { error: dropError } = await supabase.from('fixed_cards').insert([{
-        card_name: dropCardName || `【撃破報酬】${bName}`,
-        trigger_type: 'boss_drop',
-        image_url: finalDropCardUrl,
-        sponsor_id: campData.id,
+        card_name: dropCardName || `【撃破報酬】${bName}`, trigger_type: 'boss_drop', image_url: finalDropCardUrl, sponsor_id: campData.id,
         stats: { element: dropCardAttr, rarity: dropCardRarity, hp: 100, atk: 50, def: 50, spd: 50 }
       }]);
       if (dropError) throw dropError;
 
       const { error: bossError } = await supabase.from('bosses').insert([{
-        name: bName,
-        hp: parseInt(bHp) || 1500,
-        atk: parseInt(bAtk) || 100,
-        def: parseInt(bDef) || 50,
-        element: bElement,
-        trigger_campaign_id: campData.id
+        name: bName, hp: parseInt(bHp) || 1500, atk: parseInt(bAtk) || 100, def: parseInt(bDef) || 50,
+        element: bElement, image_url: finalBossImageUrl, trigger_campaign_id: campData.id
       }]);
       if (bossError) throw bossError;
 
@@ -231,18 +248,33 @@ export default function AdminDashboard() {
     if (!annTitle || !annBody) return Alert.alert('エラー', 'タイトルと本文を入力してください');
     setLoading(true);
     try {
-      // 運営からの公式メッセージとして全体チャットへ投下、またはお知らせテーブルへ登録
-      const { error } = await supabase.from('messages').insert([{
-        sender_id: 'SYSTEM',
-        text: `📢【運営よりお知らせ】\n${annTitle}\n\n${annBody}`
-      }]);
+      const { error } = await supabase.from('messages').insert([{ sender_id: 'SYSTEM', text: `📢【運営よりお知らせ】\n${annTitle}\n\n${annBody}` }]);
       if (error) console.warn(error);
       Alert.alert('配信完了', '全ユーザーにお知らせを配信しました！');
       setAnnTitle(''); setAnnBody('');
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // ===================== レンダリング =====================
+  // ===================== マスタ追加 (DB拡張) =====================
+  const handleAddMaster = async (type: 'element' | 'rarity') => {
+    setLoading(true);
+    try {
+      if (type === 'element') {
+        if (!newElement) return;
+        const updated = [...elementsList, newElement];
+        await supabase.from('system_config').upsert({ id: 'elements', config_data: { list: updated } });
+        setElementsList(updated); setNewElement('');
+        Alert.alert('追加完了', `「${newElement}」を属性に追加しました！`);
+      } else {
+        if (!newRarity) return;
+        const updated = [...raritiesList, newRarity];
+        await supabase.from('system_config').upsert({ id: 'rarities', config_data: { list: updated } });
+        setRaritiesList(updated); setNewRarity('');
+        Alert.alert('追加完了', `「${newRarity}」をレアリティに追加しました！`);
+      }
+    } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -270,10 +302,13 @@ export default function AdminDashboard() {
           <Bell color={activeTab === 'announcements' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'announcements' && styles.activeTabText]}>お知らせ</Text>
         </TouchableOpacity>
+        <TouchableOpacity style={[styles.tabBtn, activeTab === 'master' && styles.activeTabBtn]} onPress={() => setActiveTab('master')}>
+          <Database color={activeTab === 'master' ? '#FFF' : '#64748B'} size={18} />
+          <Text style={[styles.tabText, activeTab === 'master' && styles.activeTabText]}>マスタ拡張</Text>
+        </TouchableOpacity>
       </ScrollView>
 
       <ScrollView style={styles.content}>
-
         {/* ===================== 1. 分析 ===================== */}
         {activeTab === 'analytics' && (
           <View style={styles.card}>
@@ -306,7 +341,7 @@ export default function AdminDashboard() {
             <Text style={styles.cardTitle}>カード生成 ＆ ショップ出品設定</Text>
             
             <View style={styles.radioGroup}>
-              <TouchableOpacity style={[styles.radioBtn, mintDest === 'direct' && styles.activeRadio]} onPress={() => setMintDest('direct')}>
+              <TouchableOpacity style={[styles.radioBtn, mintDest === 'direct' && styles.activeRadio]} onPress={() => {setMintDest('direct'); setShopItemType('single');}}>
                 <Text style={[styles.radioText, mintDest === 'direct' && styles.activeRadioText]}>特権MINT(直接配布)</Text>
               </TouchableOpacity>
               <TouchableOpacity style={[styles.radioBtn, mintDest === 'shop' && styles.activeRadio]} onPress={() => setMintDest('shop')}>
@@ -314,135 +349,208 @@ export default function AdminDashboard() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.label}>カード名</Text>
-            <TextInput style={styles.input} value={cName} onChangeText={setCName} placeholder="カードの名称" />
-
-            <Text style={styles.label}>レアリティ / 属性</Text>
-            <View style={styles.row}>
-              <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={cRarity} onChangeText={setCRarity} placeholder="レアリティ (例: UR)" />
-              <TextInput style={[styles.input, {flex: 1}]} value={cAttr} onChangeText={setCAttr} placeholder="属性 (例: 火)" />
-            </View>
-
-            <Text style={styles.label}>ステータス (HP/ATK/DEF/SPD)</Text>
-            <View style={styles.row}>
-              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cHp} onChangeText={setCHp} placeholder="HP" keyboardType="numeric" />
-              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cAtk} onChangeText={setCAtk} placeholder="ATK" keyboardType="numeric" />
-              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cDef} onChangeText={setCDef} placeholder="DEF" keyboardType="numeric" />
-              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cSpd} onChangeText={setCSpd} placeholder="SPD" keyboardType="numeric" />
-            </View>
-
-            <Text style={styles.label}>スキル名</Text>
-            <TextInput style={styles.input} value={cSkillName} onChangeText={setCSkillName} placeholder="必殺技の名前" />
-
             {mintDest === 'shop' && (
               <>
-                <View style={styles.divider} />
-                <Text style={styles.label}>販売価格 / 在庫枚数</Text>
-                <View style={styles.row}>
-                  <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={cPrice} onChangeText={setCPrice} placeholder="価格" keyboardType="numeric" />
-                  <TextInput style={[styles.input, {flex: 1}]} value={cStock} onChangeText={setCStock} placeholder="在庫数" keyboardType="numeric" />
+                <Text style={styles.label}>出品タイプ</Text>
+                <View style={styles.radioGroup}>
+                  <TouchableOpacity style={[styles.radioBtn, shopItemType === 'single' && styles.activeRadio]} onPress={() => setShopItemType('single')}>
+                    <Text style={[styles.radioText, shopItemType === 'single' && styles.activeRadioText]}>単体カード</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.radioBtn, shopItemType === 'pack' && styles.activeRadio]} onPress={() => setShopItemType('pack')}>
+                    <Text style={[styles.radioText, shopItemType === 'pack' && styles.activeRadioText]}>カードパック (複数枚)</Text>
+                  </TouchableOpacity>
                 </View>
-                <Text style={styles.label}>パッケージデザイン (パック画像)</Text>
-                <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setCPackageImage)}>
-                  {cPackageImage ? <Image source={{uri: cPackageImage}} style={styles.previewImg} /> : <ImageIcon color="#94A3B8" size={32} />}
-                </TouchableOpacity>
-                <View style={styles.divider} />
               </>
             )}
 
-            <Text style={styles.label}>カードデザインの作成方法</Text>
-            <View style={styles.radioGroup}>
-              <TouchableOpacity style={[styles.radioBtn, cardGenMode === 'manual' && styles.activeRadio]} onPress={() => setCardGenMode('manual')}>
-                <Text style={[styles.radioText, cardGenMode === 'manual' && styles.activeRadioText]}>画像アップロード</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, cardGenMode === 'ai' && styles.activeRadio]} onPress={() => setCardGenMode('ai')}>
-                <Text style={[styles.radioText, cardGenMode === 'ai' && styles.activeRadioText]}>AIに描かせる</Text>
-              </TouchableOpacity>
-            </View>
+            <Text style={styles.label}>{shopItemType === 'pack' ? 'パック名' : 'カード名'}</Text>
+            <TextInput style={styles.input} value={cName} onChangeText={setCName} placeholder="名称を入力" />
 
-            {cardGenMode === 'manual' ? (
-              <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setCImage)}>
-                {cImage ? <Image source={{uri: cImage}} style={styles.previewImg} /> : <Upload color="#94A3B8" size={32} />}
-              </TouchableOpacity>
-            ) : (
-              <TextInput style={[styles.input, {height: 80}]} value={cAiPrompt} onChangeText={setCAiPrompt} placeholder="AIプロンプトを入力..." multiline />
+            {shopItemType === 'single' && (
+              <>
+                <Text style={styles.label}>レアリティ / 属性</Text>
+                <View style={styles.row}>
+                  <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={cRarity} onChangeText={setCRarity} placeholder="例: UR" />
+                  <TextInput style={[styles.input, {flex: 1}]} value={cAttr} onChangeText={setCAttr} placeholder="例: 火" />
+                </View>
+                <Text style={styles.label}>ステータス (HP/ATK/DEF/SPD)</Text>
+                <View style={styles.row}>
+                  <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cHp} onChangeText={setCHp} placeholder="HP" keyboardType="numeric" />
+                  <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cAtk} onChangeText={setCAtk} placeholder="ATK" keyboardType="numeric" />
+                  <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cDef} onChangeText={setCDef} placeholder="DEF" keyboardType="numeric" />
+                  <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={cSpd} onChangeText={setCSpd} placeholder="SPD" keyboardType="numeric" />
+                </View>
+                <Text style={styles.label}>スキル名</Text>
+                <TextInput style={styles.input} value={cSkillName} onChangeText={setCSkillName} placeholder="必殺技の名前" />
+              </>
+            )}
+
+            {shopItemType === 'pack' && (
+              <>
+                <Text style={styles.label}>パック封入枚数 / パック説明文</Text>
+                <TextInput style={[styles.input, {marginBottom: 8}]} value={packCardCount} onChangeText={setPackCardCount} placeholder="例: 5" keyboardType="numeric" />
+                <TextInput style={[styles.input, {height: 80}]} value={packDesc} onChangeText={setPackDesc} placeholder="例: SR以上1枚確定パック！" multiline />
+              </>
+            )}
+
+            {mintDest === 'shop' && (
+              <>
+                <Text style={styles.label}>販売価格 / 在庫数</Text>
+                <View style={styles.row}>
+                  <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={cPrice} onChangeText={setCPrice} placeholder="価格" keyboardType="numeric" />
+                  <TextInput style={[styles.input, {flex: 1}]} value={cStock} onChangeText={setCStock} placeholder="在庫" keyboardType="numeric" />
+                </View>
+                <Text style={styles.label}>パッケージ画像 (ショップ陳列用)</Text>
+                <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setCPackageImage)}>
+                  {cPackageImage ? <Image source={{uri: cPackageImage}} style={styles.previewImg} /> : <ImageIcon color="#94A3B8" size={32} />}
+                </TouchableOpacity>
+              </>
+            )}
+
+            {shopItemType === 'single' && (
+              <>
+                <View style={styles.divider} />
+                <Text style={styles.label}>カードデザイン (AI生成 or アップロード)</Text>
+                <View style={styles.radioGroup}>
+                  <TouchableOpacity style={[styles.radioBtn, cardGenMode === 'manual' && styles.activeRadio]} onPress={() => setCardGenMode('manual')}>
+                    <Text style={[styles.radioText, cardGenMode === 'manual' && styles.activeRadioText]}>アップロード</Text>
+                  </TouchableOpacity>
+                  <TouchableOpacity style={[styles.radioBtn, cardGenMode === 'ai' && styles.activeRadio]} onPress={() => setCardGenMode('ai')}>
+                    <Text style={[styles.radioText, cardGenMode === 'ai' && styles.activeRadioText]}>AI生成</Text>
+                  </TouchableOpacity>
+                </View>
+
+                {cardGenMode === 'manual' ? (
+                  <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setCImage)}>
+                    {cImage ? <Image source={{uri: cImage}} style={styles.previewImg} /> : <Upload color="#94A3B8" size={32} />}
+                  </TouchableOpacity>
+                ) : (
+                  <TextInput style={[styles.input, {height: 80}]} value={cAiPrompt} onChangeText={setCAiPrompt} placeholder="AI画像生成プロンプトを入力..." multiline />
+                )}
+              </>
             )}
 
             <TouchableOpacity style={styles.primaryBtn} onPress={handleMintAction} disabled={loading}>
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{mintDest === 'shop' ? 'ショップに陳列する' : '特権カードを配布する'}</Text>}
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{mintDest === 'shop' ? 'ショップに出品する' : '特権カードを配布する'}</Text>}
             </TouchableOpacity>
           </View>
         )}
 
         {/* ===================== 4. BOSS & MAP ===================== */}
         {activeTab === 'bosses' && (
-          <>
-            <View style={styles.card}>
-              <Text style={styles.cardTitle}>マップ・ボス配置</Text>
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>マップ・ボス配置</Text>
 
-              <Text style={styles.label}>ボス名 / 協賛名</Text>
-              <View style={styles.row}>
-                <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={bName} onChangeText={setBName} placeholder="ボス名" />
-                <TextInput style={[styles.input, {flex: 1}]} value={bSponsorName} onChangeText={setBSponsorName} placeholder="協賛名 (例: 駅前デパート)" />
-              </View>
-
-              <Text style={styles.label}>ボス属性 / ステータス(HP/ATK/DEF)</Text>
-              <View style={styles.row}>
-                <TextInput style={[styles.input, {flex: 1.2, marginHorizontal: 2}]} value={bElement} onChangeText={setBElement} placeholder="属性 (例: 闇)" />
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bHp} onChangeText={setBHp} placeholder="HP" keyboardType="numeric" />
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bAtk} onChangeText={setBAtk} placeholder="ATK" keyboardType="numeric" />
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bDef} onChangeText={setBDef} placeholder="DEF" keyboardType="numeric" />
-              </View>
-
-              <Text style={styles.label}>出現地点 (緯度/経度) & 半径(m)</Text>
-              <View style={styles.row}>
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bLat} onChangeText={setBLat} placeholder="緯度" />
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bLng} onChangeText={setBLng} placeholder="経度" />
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bRadius} onChangeText={setBRadius} placeholder="半径" keyboardType="numeric" />
-              </View>
-
-              <View style={styles.divider} />
-              <Text style={styles.cardTitle}>討伐ドロップカードの設定</Text>
-              
-              <Text style={styles.label}>ドロップカード名 / レアリティ / 属性</Text>
-              <View style={styles.row}>
-                <TextInput style={[styles.input, {flex: 2, marginHorizontal: 2}]} value={dropCardName} onChangeText={setDropCardName} placeholder="カード名" />
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={dropCardRarity} onChangeText={setDropCardRarity} placeholder="レア" />
-                <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={dropCardAttr} onChangeText={setDropCardAttr} placeholder="属性" />
-              </View>
-
-              <Text style={styles.label}>AI画像生成プロンプト</Text>
-              <TextInput style={[styles.input, {height: 80}]} value={dropCardPrompt} onChangeText={setDropCardPrompt} placeholder="例: 巨大なドラゴンの鱗が輝くカード..." multiline />
-
-              <TouchableOpacity style={styles.primaryBtn} onPress={handleCreateBoss} disabled={loading}>
-                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>ボスと報酬カードを配置</Text>}
-              </TouchableOpacity>
+            <Text style={styles.label}>ボス名 / 協賛名</Text>
+            <View style={styles.row}>
+              <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={bName} onChangeText={setBName} placeholder="ボス名" />
+              <TextInput style={[styles.input, {flex: 1}]} value={bSponsorName} onChangeText={setBSponsorName} placeholder="協賛名" />
             </View>
 
-            <Text style={styles.sectionHeading}>配置済みボス一覧</Text>
-            {bosses.map((boss) => (
-              <View key={boss.id} style={styles.listItem}>
-                <Text style={styles.listItemTitle}>{boss.name} (HP: {boss.hp} / ATK: {boss.atk})</Text>
-                <Text style={styles.listItemSub}>属性: {boss.element} | キャンペーンID: {boss.trigger_campaign_id}</Text>
-              </View>
-            ))}
-          </>
+            <Text style={styles.label}>ボス属性 / ステータス(HP/ATK/DEF)</Text>
+            <View style={styles.row}>
+              <TextInput style={[styles.input, {flex: 1.2, marginHorizontal: 2}]} value={bElement} onChangeText={setBElement} placeholder="属性" />
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bHp} onChangeText={setBHp} placeholder="HP" keyboardType="numeric" />
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bAtk} onChangeText={setBAtk} placeholder="ATK" keyboardType="numeric" />
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bDef} onChangeText={setBDef} placeholder="DEF" keyboardType="numeric" />
+            </View>
+
+            <Text style={styles.label}>出現地点 (緯度/経度) & 半径(m)</Text>
+            <View style={styles.row}>
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bLat} onChangeText={setBLat} placeholder="緯度" />
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bLng} onChangeText={setBLng} placeholder="経度" />
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={bRadius} onChangeText={setBRadius} placeholder="半径" keyboardType="numeric" />
+            </View>
+
+            <Text style={styles.label}>ボスのデザイン</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, bossImageMode === 'upload' && styles.activeRadio]} onPress={() => setBossImageMode('upload')}>
+                <Text style={[styles.radioText, bossImageMode === 'upload' && styles.activeRadioText]}>アップロード</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, bossImageMode === 'ai' && styles.activeRadio]} onPress={() => setBossImageMode('ai')}>
+                <Text style={[styles.radioText, bossImageMode === 'ai' && styles.activeRadioText]}>AI生成</Text>
+              </TouchableOpacity>
+            </View>
+            {bossImageMode === 'upload' ? (
+              <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setBossImageUrl)}>
+                {bossImageUrl ? <Image source={{uri: bossImageUrl}} style={styles.previewImg} /> : <ImageIcon color="#94A3B8" size={32} />}
+              </TouchableOpacity>
+            ) : (
+              <TextInput style={[styles.input, {height: 80}]} value={bossAiPrompt} onChangeText={setBossAiPrompt} placeholder="AI用プロンプト (巨大なドラゴン...)" multiline />
+            )}
+
+            <View style={styles.divider} />
+            <Text style={styles.cardTitle}>討伐ドロップカードの設定</Text>
+            
+            <Text style={styles.label}>ドロップカード名 / レアリティ / 属性</Text>
+            <View style={styles.row}>
+              <TextInput style={[styles.input, {flex: 2, marginHorizontal: 2}]} value={dropCardName} onChangeText={setDropCardName} placeholder="カード名" />
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={dropCardRarity} onChangeText={setDropCardRarity} placeholder="レア" />
+              <TextInput style={[styles.input, {flex: 1, marginHorizontal: 2}]} value={dropCardAttr} onChangeText={setDropCardAttr} placeholder="属性" />
+            </View>
+
+            <Text style={styles.label}>ドロップカードデザイン</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, dropCardMode === 'upload' && styles.activeRadio]} onPress={() => setDropCardMode('upload')}>
+                <Text style={[styles.radioText, dropCardMode === 'upload' && styles.activeRadioText]}>アップロード</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, dropCardMode === 'ai' && styles.activeRadio]} onPress={() => setDropCardMode('ai')}>
+                <Text style={[styles.radioText, dropCardMode === 'ai' && styles.activeRadioText]}>AI生成</Text>
+              </TouchableOpacity>
+            </View>
+            {dropCardMode === 'upload' ? (
+              <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setDropCardUrl)}>
+                {dropCardUrl ? <Image source={{uri: dropCardUrl}} style={styles.previewImg} /> : <ImageIcon color="#94A3B8" size={32} />}
+              </TouchableOpacity>
+            ) : (
+              <TextInput style={[styles.input, {height: 80}]} value={dropCardPrompt} onChangeText={setDropCardPrompt} placeholder="AI画像生成プロンプト" multiline />
+            )}
+
+            <TouchableOpacity style={styles.primaryBtn} onPress={handleCreateBoss} disabled={loading}>
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>ボスと報酬カードを配置</Text>}
+            </TouchableOpacity>
+          </View>
         )}
 
         {/* ===================== 5. お知らせ ===================== */}
         {activeTab === 'announcements' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>お知らせ配信 (Push通知/全体メッセージ)</Text>
-            
+            <Text style={styles.cardTitle}>お知らせ配信 (全体メッセージ)</Text>
             <Text style={styles.label}>お知らせタイトル</Text>
             <TextInput style={styles.input} value={annTitle} onChangeText={setAnnTitle} placeholder="例: 新しいボスが出現しました！" />
-
             <Text style={styles.label}>お知らせ本文</Text>
             <TextInput style={[styles.input, {height: 120}]} value={annBody} onChangeText={setAnnBody} placeholder="お知らせの詳細内容を記述..." multiline />
-
             <TouchableOpacity style={styles.primaryBtn} onPress={handleSendAnnouncement} disabled={loading}>
               {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>全ユーザーに配信する</Text>}
             </TouchableOpacity>
+          </View>
+        )}
+
+        {/* ===================== 6. マスタ拡張 ===================== */}
+        {activeTab === 'master' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>データベース拡張 (属性 / レアリティ)</Text>
+            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>システムに新しい属性やレアリティを追加します。追加した内容はガチャやボス配置で選択可能になります。</Text>
+            
+            <Text style={styles.label}>現在の属性一覧</Text>
+            <Text style={styles.listItemSub}>{elementsList.join(' / ')}</Text>
+            <View style={[styles.row, {marginTop: 8, marginBottom: 24}]}>
+              <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={newElement} onChangeText={setNewElement} placeholder="新しい属性を追加 (例: 毒)" />
+              <TouchableOpacity style={[styles.primaryBtn, {marginTop: 0, paddingVertical: 14}]} onPress={() => handleAddMaster('element')}>
+                <Text style={styles.primaryBtnText}>追加</Text>
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.divider} />
+
+            <Text style={styles.label}>現在のレアリティ一覧</Text>
+            <Text style={styles.listItemSub}>{raritiesList.join(' / ')}</Text>
+            <View style={[styles.row, {marginTop: 8}]}>
+              <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={newRarity} onChangeText={setNewRarity} placeholder="新しいレアを追加 (例: EX)" />
+              <TouchableOpacity style={[styles.primaryBtn, {marginTop: 0, paddingVertical: 14}]} onPress={() => handleAddMaster('rarity')}>
+                <Text style={styles.primaryBtnText}>追加</Text>
+              </TouchableOpacity>
+            </View>
           </View>
         )}
 
