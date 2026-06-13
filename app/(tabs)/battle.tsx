@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView, Platform } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
@@ -19,16 +19,15 @@ const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = 
   '虚無': { strong: ['火', '雷', '資本'], weak: ['光', '量子', '時間'] },
 };
 
-// 💡【爆速処理：相性倍率を計算する関数】
 function getDamageMultiplier(attackerEl: string, defenderEl: string): { multiplier: number, label: string } {
   const relation = ELEMENT_RELATIONS[attackerEl];
   if (!relation) return { multiplier: 1.0, label: '' }; 
   
   if (relation.strong.includes(defenderEl)) {
-    return { multiplier: 1.5, label: '💥【有利属性】' }; // 1.5倍
+    return { multiplier: 1.5, label: '💥【有利属性】' }; 
   }
   if (relation.weak.includes(defenderEl)) {
-    return { multiplier: 0.5, label: '🛡️【不利属性】' }; // 0.5倍
+    return { multiplier: 0.5, label: '🛡️【不利属性】' };
   }
   return { multiplier: 1.0, label: '' };
 }
@@ -93,7 +92,7 @@ export default function BattleScreen() {
             sponsor_name: nearbyCampaign.sponsor_name,
             lat: nearbyCampaign.target_lat,
             lng: nearbyCampaign.target_lng,
-            element: boss.element || '火' // ボスに属性が未設定ならデフォルト割り振る
+            element: boss.element || '火' 
           });
         }
       } else { setDetectedBoss(null); }
@@ -165,7 +164,6 @@ export default function BattleScreen() {
     else if (attacker.status_atk >= 100 || attacker.level >= 5) { prefix = '⚡ '; suffix = ' !'; }
     if (attacker.rarity === 'CP' || attacker.rarity === 'P' || attacker.rarity === '★★★★') { prefix = `✨🌟 ${prefix}`; suffix = `${suffix} 🌟✨\n(タイアップ特別演出が発動！)`; isSpecialStyle = true; }
     
-    // 💡 実況テキストに属性相性の効果を追加
     const attributeNotice = elementLabel ? `\n${elementLabel}効果発動！` : '';
 
     return { 
@@ -184,7 +182,6 @@ export default function BattleScreen() {
     let p1Hp = p1.status_hp; let p2Hp = p2.status_hp;
 
     for (let turn = 1; turn <= 5; turn++) {
-      // 💡 1本目の攻撃（先攻 → 後攻）の属性倍率計算
       const res1 = getDamageMultiplier(first.element || '無', second.element || '無');
       let dmg1 = Math.floor((Math.max(1, first.status_atk - Math.floor(second.status_def / 2)) + Math.floor(Math.random() * 10)) * res1.multiplier);
       
@@ -194,7 +191,6 @@ export default function BattleScreen() {
       if (p1Hp <= 0) { winner = p2; break; }
       if (p2Hp <= 0) { winner = p1; break; }
 
-      // 💡 2本目の攻撃（後攻 → 先攻）の属性倍率計算
       const res2 = getDamageMultiplier(second.element || '無', first.element || '無');
       let dmg2 = Math.floor((Math.max(1, second.status_atk - Math.floor(first.status_def / 2)) + Math.floor(Math.random() * 10)) * res2.multiplier);
       
@@ -269,7 +265,7 @@ export default function BattleScreen() {
         </View>
       </View>
 
-      <ScrollView style={styles.scrollArea}>
+      <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 100 }}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📍 周辺のスポット限定ボス</Text>
           {loadingBoss ? (
