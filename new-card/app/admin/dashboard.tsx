@@ -3,8 +3,10 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Ale
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as FileSystem from 'expo-file-system';
+import * as Sharing from 'expo-sharing';
 import { decode } from 'base64-arraybuffer';
-import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers } from 'lucide-react-native';
+import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download } from 'lucide-react-native';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -13,7 +15,8 @@ export default function AdminDashboard() {
 
   // ==================== 1. 分析用データ ====================
   const [analyticsData, setAnalyticsData] = useState<any>({
-    dau: 0, mau: 0, total_posts: 0, total_battles: 0, demographics: { males: 0, females: 0, teens: 0, twenties: 0, thirties: 0 }
+    dau: 0, mau: 0, total_posts: 0, total_battles: 0, 
+    demographics: { males: 0, females: 0, teens: 0, twenties: 0, thirties: 0, overForties: 0, locations: {} }
   });
 
   // ==================== 2. ユーザー管理 ====================
@@ -67,9 +70,12 @@ export default function AdminDashboard() {
   const [dropCardRarity, setDropCardRarity] = useState('UR');
   const [dropCardAttr, setDropCardAttr] = useState('闇');
 
-  // ==================== 6. お知らせ配信 ====================
+  // ==================== 6. お知らせ配信 (デモグラフィック対応) ====================
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
+  const [targetGender, setTargetGender] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
+  const [targetAge, setTargetAge] = useState<'ALL' | 'TEENS' | 'TWENTIES' | 'THIRTIES'>('ALL');
+  const [targetLocation, setTargetLocation] = useState('');
 
   // ==================== 7. マスタ拡張用 ====================
   const [elementsList, setElementsList] = useState<string[]>([]);
@@ -94,9 +100,15 @@ export default function AdminDashboard() {
   const fetchAnalytics = async () => {
     try {
       const { count: totalCards } = await supabase.from('cards').select('*', { count: 'exact', head: true });
-      const { data: profiles } = await supabase.from('profiles').select('last_sign_in_at, total_wins, boss_defeats');
+      const { data: profiles } = await supabase.from('profiles').select('*'); // デモグラフィック用に全カラム取得
+      
       let dau = 0; let mau = 0; let totalBattles = 0; const now = new Date();
+      let males = 0; let females = 0; 
+      let teens = 0; let twenties = 0; let thirties = 0; let overForties = 0;
+      let locations: Record<string, number> = {};
+
       profiles?.forEach((p: any) => {
+        // アクティブユーザー計算
         if (p.last_sign_in_at) {
           const lastSignIn = new Date(p.last_sign_in_at);
           const diffDays = (now.getTime() - lastSignIn.getTime()) / (1000 * 3600 * 24);
@@ -104,10 +116,25 @@ export default function AdminDashboard() {
           if (diffDays <= 30) mau++;
         }
         totalBattles += (p.total_wins || 0) + (p.boss_defeats || 0);
+
+        // デモグラフィック計算
+        if (p.gender === 'male' || p.gender === '男性') males++;
+        else if (p.gender === 'female' || p.gender === '女性') females++;
+
+        const age = parseInt(p.age) || 0;
+        if (age > 0 && age < 20) teens++;
+        else if (age >= 20 && age < 30) twenties++;
+        else if (age >= 30 && age < 40) thirties++;
+        else if (age >= 40) overForties++;
+
+        if (p.location) {
+          locations[p.location] = (locations[p.location] || 0) + 1;
+        }
       });
+
       setAnalyticsData({
         dau, mau, total_posts: totalCards || 0, total_battles: totalBattles,
-        demographics: { males: Math.floor(mau * 0.6), females: Math.floor(mau * 0.4), teens: Math.floor(mau * 0.2), twenties: Math.floor(mau * 0.5), thirties: Math.floor(mau * 0.3) }
+        demographics: { males, females, teens, twenties, thirties, overForties, locations }
       });
     } catch (e) { console.log(e); }
   };
@@ -118,13 +145,28 @@ export default function AdminDashboard() {
   };
 
   const fetchUgcCards = async () => {
-    const { data, error } = await supabase
-      .from('cards')
-      .select(`id, card_name, image_url, is_hidden, created_at, profiles!cards_author_id_fkey(player_name)`)
-      .order('created_at', { ascending: false })
-      .limit(50);
-    if (data) setUgcCards(data);
-    if (error) console.log('UGC Fetch Error:', error);
+    try {
+      // 💡【修正】JOINエラーによる全件非表示を防ぐため、安全に取得するフォールバック処理を実装
+      let { data, error } = await supabase
+        .from('cards')
+        .select(`id, card_name, image_url, is_hidden, created_at, player_id, profiles(player_name)`)
+        .order('created_at', { ascending: false })
+        .limit(50);
+      
+      // profilesとのJOINに失敗した場合（外部キー名が異なる等）は結合なしで再取得
+      if (error) {
+        console.warn('JOIN failed, fallback to raw fetch:', error);
+        const fallback = await supabase
+          .from('cards')
+          .select('id, card_name, image_url, is_hidden, created_at, player_id')
+          .order('created_at', { ascending: false })
+          .limit(50);
+        data = fallback.data;
+      }
+      if (data) setUgcCards(data);
+    } catch (err) {
+      console.log('UGC Fetch Exception:', err);
+    }
   };
 
   const fetchBosses = async () => {
@@ -160,6 +202,28 @@ export default function AdminDashboard() {
     const base64Str = base64String.split(',')[1] || base64String;
     await supabase.storage.from('card_images').upload(fileName, decode(base64Str), { contentType: 'image/jpeg' });
     return supabase.storage.from('card_images').getPublicUrl(fileName).data.publicUrl;
+  };
+
+  // ==========================================
+  // 分析データ CSVエクスポート
+  // ==========================================
+  const exportAnalyticsCSV = async () => {
+    try {
+      const header = "Date,DAU,MAU,Total_Cards,Total_Battles,Males,Females,Teens,Twenties,Thirties,OverForties\n";
+      const row = `${new Date().toLocaleDateString()},${analyticsData.dau},${analyticsData.mau},${analyticsData.total_posts},${analyticsData.total_battles},${analyticsData.demographics.males},${analyticsData.demographics.females},${analyticsData.demographics.teens},${analyticsData.demographics.twenties},${analyticsData.demographics.thirties},${analyticsData.demographics.overForties}\n`;
+      const csvString = header + row;
+
+      const fileUri = FileSystem.documentDirectory + `analytics_${Date.now()}.csv`;
+      await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: FileSystem.EncodingType.UTF8 });
+
+      if (await Sharing.isAvailableAsync()) {
+        await Sharing.shareAsync(fileUri);
+      } else {
+        Alert.alert("エラー", "このデバイスでは共有機能がサポートされていません");
+      }
+    } catch (e: any) {
+      Alert.alert("エクスポート失敗", e.message);
+    }
   };
 
   // ==========================================
@@ -291,10 +355,17 @@ export default function AdminDashboard() {
     if (!annTitle || !annBody) return Alert.alert('エラー', 'タイトルと本文を入力してください');
     setLoading(true);
     try {
-      const { error } = await supabase.from('messages').insert([{ sender_id: 'SYSTEM', text: `📢【運営よりお知らせ】\n${annTitle}\n\n${annBody}` }]);
+      // JSONでターゲット情報を付与してデータベースに保存（受信側のアプリでフィルタリングする仕組みを想定）
+      const targetCriteria = { gender: targetGender, age: targetAge, location: targetLocation };
+      const { error } = await supabase.from('messages').insert([{ 
+        sender_id: 'SYSTEM', 
+        text: `📢【運営よりお知らせ】\n${annTitle}\n\n${annBody}\n\n(※対象: ${targetGender}/${targetAge}${targetLocation ? '/'+targetLocation : ''})`,
+        metadata: targetCriteria // メタデータにセグメント情報を付与
+      }]);
+      
       if (error) console.warn(error);
-      Alert.alert('配信完了', '全ユーザーにお知らせを配信しました！');
-      setAnnTitle(''); setAnnBody('');
+      Alert.alert('配信完了', '条件に合致するユーザーにお知らせを配信しました！');
+      setAnnTitle(''); setAnnBody(''); setTargetLocation('');
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
@@ -359,13 +430,37 @@ export default function AdminDashboard() {
         {/* ===================== 1. 分析 ===================== */}
         {activeTab === 'analytics' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>リアルタイム統計 (本番データ)</Text>
+            <Text style={styles.cardTitle}>リアルタイム統計</Text>
             <View style={styles.statsGrid}>
               <View style={styles.statBox}><Text style={styles.statLabel}>DAU (日間)</Text><Text style={styles.statValue}>{analyticsData.dau}</Text></View>
               <View style={styles.statBox}><Text style={styles.statLabel}>MAU (月間)</Text><Text style={styles.statValue}>{analyticsData.mau}</Text></View>
               <View style={styles.statBox}><Text style={styles.statLabel}>累計発行カード</Text><Text style={styles.statValue}>{analyticsData.total_posts}</Text></View>
               <View style={styles.statBox}><Text style={styles.statLabel}>累計バトル数</Text><Text style={styles.statValue}>{analyticsData.total_battles}</Text></View>
             </View>
+
+            <View style={styles.divider} />
+
+            <Text style={styles.cardTitle}>ユーザー属性 (デモグラフィック)</Text>
+            <View style={styles.statsGrid}>
+              <View style={styles.statBox}>
+                <Text style={styles.statLabel}>男女比</Text>
+                <Text style={{fontSize: 13, color: '#334155', marginTop: 4, fontWeight: '700'}}>男性: {analyticsData.demographics.males}人</Text>
+                <Text style={{fontSize: 13, color: '#334155', marginTop: 4, fontWeight: '700'}}>女性: {analyticsData.demographics.females}人</Text>
+              </View>
+              <View style={styles.statBox}>
+                <Text style={styles.statLabel}>年代分布</Text>
+                <Text style={{fontSize: 13, color: '#334155', marginTop: 4, fontWeight: '700'}}>10代以下: {analyticsData.demographics.teens}人</Text>
+                <Text style={{fontSize: 13, color: '#334155', marginTop: 4, fontWeight: '700'}}>20代: {analyticsData.demographics.twenties}人</Text>
+                <Text style={{fontSize: 13, color: '#334155', marginTop: 4, fontWeight: '700'}}>30代: {analyticsData.demographics.thirties}人</Text>
+                <Text style={{fontSize: 13, color: '#334155', marginTop: 4, fontWeight: '700'}}>40代以上: {analyticsData.demographics.overForties}人</Text>
+              </View>
+            </View>
+
+            {/* CSV出力ボタン */}
+            <TouchableOpacity style={[styles.primaryBtn, {flexDirection: 'row', justifyContent: 'center'}]} onPress={exportAnalyticsCSV}>
+              <Download color="#FFF" size={20} style={{marginRight: 8}} />
+              <Text style={styles.primaryBtnText}>全データをCSVでエクスポート</Text>
+            </TouchableOpacity>
           </View>
         )}
 
@@ -396,28 +491,32 @@ export default function AdminDashboard() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>ユーザー生成カード (UGC) 管理</Text>
             <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>不適切なカード（公序良俗に反する画像やテキスト）を非表示にできます。</Text>
-            {ugcCards.map(c => (
-              <View key={c.id} style={styles.ugcItem}>
-                {c.image_url ? (
-                  <Image source={{ uri: c.image_url }} style={styles.ugcThumb} />
-                ) : (
-                  <View style={[styles.ugcThumb, { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' }]}>
-                    <ImageIcon color="#94A3B8" size={24} />
+            {ugcCards.length === 0 ? (
+              <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>UGCカードがありません</Text>
+            ) : (
+              ugcCards.map(c => (
+                <View key={c.id} style={styles.ugcItem}>
+                  {c.image_url ? (
+                    <Image source={{ uri: c.image_url }} style={styles.ugcThumb} />
+                  ) : (
+                    <View style={[styles.ugcThumb, { backgroundColor: '#E2E8F0', justifyContent: 'center', alignItems: 'center' }]}>
+                      <ImageIcon color="#94A3B8" size={24} />
+                    </View>
+                  )}
+                  <View style={{flex: 1, marginLeft: 12}}>
+                    <View style={styles.row}>
+                      <Text style={styles.listItemTitle} numberOfLines={1}>{c.card_name || '名称不明'}</Text>
+                      {c.is_hidden && <Text style={styles.bannedBadge}>非表示</Text>}
+                    </View>
+                    <Text style={styles.listItemSub}>作成者: {c.profiles?.player_name || c.player_id?.substring(0,8) || '不明'}</Text>
+                    <Text style={styles.listItemSub}>作成日: {c.created_at ? new Date(c.created_at).toLocaleDateString() : '-'}</Text>
                   </View>
-                )}
-                <View style={{flex: 1, marginLeft: 12}}>
-                  <View style={styles.row}>
-                    <Text style={styles.listItemTitle} numberOfLines={1}>{c.card_name}</Text>
-                    {c.is_hidden && <Text style={styles.bannedBadge}>非表示</Text>}
-                  </View>
-                  <Text style={styles.listItemSub}>作成者: {c.profiles?.player_name || '不明'}</Text>
-                  <Text style={styles.listItemSub}>作成日: {new Date(c.created_at).toLocaleDateString()}</Text>
+                  <TouchableOpacity style={[styles.actionBtn, c.is_hidden ? styles.unbanBtn : styles.hideBtn]} onPress={() => handleToggleHideCard(c.id, c.is_hidden)} disabled={loading}>
+                    <Text style={styles.actionBtnText}>{c.is_hidden ? '表示' : '非表示'}</Text>
+                  </TouchableOpacity>
                 </View>
-                <TouchableOpacity style={[styles.actionBtn, c.is_hidden ? styles.unbanBtn : styles.hideBtn]} onPress={() => handleToggleHideCard(c.id, c.is_hidden)} disabled={loading}>
-                  <Text style={styles.actionBtnText}>{c.is_hidden ? '表示' : '非表示'}</Text>
-                </TouchableOpacity>
-              </View>
-            ))}
+              ))
+            )}
           </View>
         )}
 
@@ -598,16 +697,37 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 6. お知らせ ===================== */}
+        {/* ===================== 6. お知らせ (セグメント配信) ===================== */}
         {activeTab === 'announcements' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>お知らせ配信 (全体メッセージ)</Text>
+            <Text style={styles.cardTitle}>お知らせ配信 (セグメント指定)</Text>
+            
+            <Text style={styles.label}>配信ターゲット: 性別</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, targetGender === 'ALL' && styles.activeRadio]} onPress={() => setTargetGender('ALL')}><Text style={[styles.radioText, targetGender === 'ALL' && styles.activeRadioText]}>全員</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, targetGender === 'MALE' && styles.activeRadio]} onPress={() => setTargetGender('MALE')}><Text style={[styles.radioText, targetGender === 'MALE' && styles.activeRadioText]}>男性のみ</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, targetGender === 'FEMALE' && styles.activeRadio]} onPress={() => setTargetGender('FEMALE')}><Text style={[styles.radioText, targetGender === 'FEMALE' && styles.activeRadioText]}>女性のみ</Text></TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>配信ターゲット: 年代</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, targetAge === 'ALL' && styles.activeRadio]} onPress={() => setTargetAge('ALL')}><Text style={[styles.radioText, targetAge === 'ALL' && styles.activeRadioText]}>全年代</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, targetAge === 'TEENS' && styles.activeRadio]} onPress={() => setTargetAge('TEENS')}><Text style={[styles.radioText, targetAge === 'TEENS' && styles.activeRadioText]}>10代</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, targetAge === 'TWENTIES' && styles.activeRadio]} onPress={() => setTargetAge('TWENTIES')}><Text style={[styles.radioText, targetAge === 'TWENTIES' && styles.activeRadioText]}>20代</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, targetAge === 'THIRTIES' && styles.activeRadio]} onPress={() => setTargetAge('THIRTIES')}><Text style={[styles.radioText, targetAge === 'THIRTIES' && styles.activeRadioText]}>30代以上</Text></TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>配信ターゲット: エリア (空白で全エリア)</Text>
+            <TextInput style={[styles.input, {marginBottom: 16}]} value={targetLocation} onChangeText={setTargetLocation} placeholder="例: 東京" />
+
+            <View style={styles.divider} />
+
             <Text style={styles.label}>お知らせタイトル</Text>
             <TextInput style={styles.input} value={annTitle} onChangeText={setAnnTitle} placeholder="例: 新しいボスが出現しました！" />
             <Text style={styles.label}>お知らせ本文</Text>
             <TextInput style={[styles.input, {height: 120}]} value={annBody} onChangeText={setAnnBody} placeholder="お知らせの詳細内容を記述..." multiline />
             <TouchableOpacity style={styles.primaryBtn} onPress={handleSendAnnouncement} disabled={loading}>
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>全ユーザーに配信する</Text>}
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>この条件で配信する</Text>}
             </TouchableOpacity>
           </View>
         )}
