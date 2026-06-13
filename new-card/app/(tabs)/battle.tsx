@@ -3,9 +3,38 @@ import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIn
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
-import MapView, { Marker, PROVIDER_GOOGLE } from 'react-native-maps';
-import { WebView } from 'react-native-webview';
 import { ShieldAlert, Trophy, Activity, Swords } from 'lucide-react-native';
+
+// 👇 修正箇所：Web環境でのクラッシュを防ぐため、静的 import から動的 require に変更
+let MapView: any;
+let Marker: any;
+let PROVIDER_GOOGLE: any;
+let WebView: any;
+
+if (Platform.OS !== 'web') {
+  const Maps = require('react-native-maps');
+  MapView = Maps.default;
+  Marker = Maps.Marker;
+  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+  WebView = require('react-native-webview').WebView;
+} else {
+  // Web版起動時はエラーを回避するためダミーコンポーネントを描画する
+  MapView = ({ children }: any) => (
+    <View style={{ flex: 1, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 24 }}>
+      <ShieldAlert color="#64748B" size={32} style={{ marginBottom: 8 }} />
+      <Text style={{ color: '#64748B', fontWeight: 'bold' }}>Webブラウザではマップを表示できません</Text>
+      <Text style={{ color: '#94A3B8', fontSize: 12, marginTop: 4 }}>実機またはシミュレータをご利用ください</Text>
+      <View style={{ display: 'none' }}>{children}</View>
+    </View>
+  );
+  Marker = ({ children }: any) => <View>{children}</View>;
+  WebView = () => (
+    <View style={{ flex: 1, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' }}>
+      <Text style={{ color: '#FFFFFF', fontWeight: 'bold' }}>WebブラウザではARを表示できません</Text>
+    </View>
+  );
+}
+// 👆 修正箇所ここまで
 
 // 💡【爆速処理：属性相性定義テーブル】
 const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = {
