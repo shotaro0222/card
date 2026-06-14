@@ -8,16 +8,14 @@ export default function LoginScreen() {
   const [password, setPassword] = useState('');
   const [playerName, setPlayerName] = useState('');
   const [loading, setLoading] = useState(false);
-  const [isSignUp, setIsSignUp] = useState(false); // ログインと新規登録の切り替えトグル
+  const [isSignUp, setIsSignUp] = useState(false);
 
-  // デモグラフィック用のステート
   const [gender, setGender] = useState('');
   const [ageGroup, setAgeGroup] = useState('');
   const [region, setRegion] = useState('');
 
   const router = useRouter();
 
-  // 1. ログイン処理 ＆ ロール判定ルーティング
   async function signInWithEmail() {
     if (!email || !password) {
       Alert.alert('入力エラー', 'メールアドレスとパスワードを入力してください。');
@@ -33,18 +31,13 @@ export default function LoginScreen() {
       if (authError) throw authError;
 
       if (authData.user) {
-        // ユーザーのロール（一般 or 管理者）を profiles テーブルから取得
-        const { data: profile, error: profileError } = await supabase
+        const { data: profile } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', authData.user.id)
           .single();
 
-        if (profileError) throw profileError;
-
-        // ロールに応じて遷移先を自動的に振り分ける
         if (profile?.role === 'admin') {
-          Alert.alert('認証成功', '運営管理者アカウントでログインしました。');
           router.replace('/admin/dashboard');
         } else {
           router.replace('/(tabs)');
@@ -57,7 +50,6 @@ export default function LoginScreen() {
     }
   }
 
-  // 2. 新規登録 ＆ デモグラフィック情報紐付け処理
   async function signUpWithEmail() {
     if (!email || !password || !playerName || !gender || !ageGroup || !region) {
       Alert.alert('入力エラー', 'すべての項目（デモグラフィック情報を含む）を入力・選択してください。');
@@ -74,22 +66,18 @@ export default function LoginScreen() {
       if (authError) throw authError;
 
       if (authData.user) {
-        // 認証ユーザー作成と同時に、プロフィール情報とデモグラをデータベースへ登録
-        const { error: profileError } = await supabase.from('profiles').insert([
+        await supabase.from('profiles').insert([
           {
             id: authData.user.id,
             player_name: playerName,
             gender: gender,
             age_group: ageGroup,
             region: region,
-            role: 'user', // デフォルトは一般ユーザー
+            role: 'user', 
           },
         ]);
 
-        if (profileError) throw profileError;
-
-        Alert.alert('登録完了', '魂の登録が完了しました。作成したアカウントでログインしてください。');
-        setIsSignUp(false); // ログイン画面モードに戻す
+        router.replace('/(tabs)');
       }
     } catch (error: any) {
       Alert.alert('登録失敗', error.message);
@@ -100,12 +88,12 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-      <Text style={styles.title}>VOID CARD</Text>
+      {/* 修正箇所: Gitのコンフリクトマーカーを削除し、正しい表示に統合しました */}
+      <Text style={styles.title}>SnapCard</Text>
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
 
-      {/* 共通入力欄 */}
       <TextInput
         style={styles.input}
         placeholder="メールアドレス"
@@ -124,7 +112,6 @@ export default function LoginScreen() {
         value={password}
       />
 
-      {/* 新規登録時のみ表示されるデモグラフィックフォーム */}
       {isSignUp && (
         <View style={styles.demoSection}>
           <Text style={styles.sectionTitle}>司令官プロファイル（マーケティング割付用）</Text>
@@ -137,9 +124,8 @@ export default function LoginScreen() {
             value={playerName}
           />
 
-          {/* 性別選択 */}
           <Text style={styles.label}>性別</Text>
-          <div style={styles.selectRow}>
+          <View style={styles.selectRow}>
             {['male', 'female', 'other'].map((g) => (
               <TouchableOpacity
                 key={g}
@@ -151,11 +137,10 @@ export default function LoginScreen() {
                 </Text>
               </TouchableOpacity>
             ))}
-          </div>
+          </View>
 
-          {/* 年代選択 */}
           <Text style={styles.label}>年代</Text>
-          <div style={styles.selectRow}>
+          <View style={styles.selectRow}>
             {['10s', '20s', '30s', '40s', '50s+'].map((a) => (
               <TouchableOpacity
                 key={a}
@@ -165,11 +150,10 @@ export default function LoginScreen() {
                 <Text style={[styles.chipText, ageGroup === a && styles.activeChipText]}>{a}</Text>
               </TouchableOpacity>
             ))}
-          </div>
+          </View>
 
-          {/* 地域選択 */}
           <Text style={styles.label}>所属地域</Text>
-          <div style={styles.selectRow}>
+          <View style={styles.selectRow}>
             {['関東', '関西', '中部', '九州', '北海道・東北', 'その他'].map((r) => (
               <TouchableOpacity
                 key={r}
@@ -179,7 +163,7 @@ export default function LoginScreen() {
                 <Text style={[styles.chipText, region === r && styles.activeChipText]}>{r}</Text>
               </TouchableOpacity>
             ))}
-          </div>
+          </View>
         </View>
       )}
 
@@ -187,18 +171,16 @@ export default function LoginScreen() {
         <ActivityIndicator size="large" color="#f43f5e" style={{ marginVertical: 20 }} />
       ) : (
         <>
-          {/* メインアクションボタン */}
           {!isSignUp ? (
             <TouchableOpacity style={styles.button} onPress={signInWithEmail}>
               <Text style={styles.buttonText}>ゲートを開放してログイン</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[styles.button, { backgroundColor: '#10b981' }]} onPress={signUpWithEmail}>
-              <Text style={styles.buttonText}>デモグラ情報を登録して契約</Text>
+              <Text style={styles.buttonText}>登録完了</Text>
             </TouchableOpacity>
           )}
 
-          {/* モード切り替えリンク */}
           <TouchableOpacity style={styles.toggleLink} onPress={() => setIsSignUp(!isSignUp)}>
             <Text style={styles.toggleLinkText}>
               {isSignUp ? 'すでにアカウントをお持ちの方（ログインへ）' : '新しく軍勢を登録する（新規作成へ）'}

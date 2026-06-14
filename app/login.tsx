@@ -10,14 +10,12 @@ export default function LoginScreen() {
   const [loading, setLoading] = useState(false);
   const [isSignUp, setIsSignUp] = useState(false);
 
-  // デモグラフィック用のステート
   const [gender, setGender] = useState('');
   const [ageGroup, setAgeGroup] = useState('');
   const [region, setRegion] = useState('');
 
   const router = useRouter();
 
-  // 1. ログイン処理 ＆ ロール判定ルーティング
   async function signInWithEmail() {
     if (!email || !password) {
       Alert.alert('入力エラー', 'メールアドレスとパスワードを入力してください。');
@@ -33,18 +31,16 @@ export default function LoginScreen() {
       if (authError) throw authError;
 
       if (authData.user) {
-        // ユーザーのロールをprofilesテーブルから取得（失敗してもエラーで止めず一般ユーザーとして通す）
         const { data: profile } = await supabase
           .from('profiles')
           .select('role')
           .eq('id', authData.user.id)
           .single();
 
-        // ロールに応じて遷移先を自動的に振り分ける
         if (profile?.role === 'admin') {
           router.replace('/admin/dashboard');
         } else {
-          router.replace('/(tabs)'); // 一般ユーザーはアプリ本体へ
+          router.replace('/(tabs)');
         }
       }
     } catch (error: any) {
@@ -54,7 +50,6 @@ export default function LoginScreen() {
     }
   }
 
-  // 2. 新規登録 ＆ デモグラフィック情報紐付け処理
   async function signUpWithEmail() {
     if (!email || !password || !playerName || !gender || !ageGroup || !region) {
       Alert.alert('入力エラー', 'すべての項目（デモグラフィック情報を含む）を入力・選択してください。');
@@ -71,7 +66,6 @@ export default function LoginScreen() {
       if (authError) throw authError;
 
       if (authData.user) {
-        // プロフィール情報とデモグラをデータベースへ登録
         await supabase.from('profiles').insert([
           {
             id: authData.user.id,
@@ -83,7 +77,6 @@ export default function LoginScreen() {
           },
         ]);
 
-        // ⚠️ メール認証オフの場合、signUp直後にログイン状態になるため、再ログインさせずそのまま図鑑へ遷移させる！
         router.replace('/(tabs)');
       }
     } catch (error: any) {
@@ -95,13 +88,9 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-<<<<<<< HEAD
-      <Text style={styles.title}>YOUR APP NAME</Text>
-      <Text style={styles.subtitle}>REAL-PHOTO TCG</Text>
-=======
-<Text style={styles.title}>SnapCard</Text>
-<Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
->>>>>>> 6a029b66396faeb471ebfe9157b0f462538cb118
+      {/* 修正箇所: Gitのコンフリクトマーカーを削除し、正しい表示に統合しました */}
+      <Text style={styles.title}>SnapCard</Text>
+      <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
 
@@ -188,7 +177,7 @@ export default function LoginScreen() {
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[styles.button, { backgroundColor: '#10b981' }]} onPress={signUpWithEmail}>
-              <Text style={styles.buttonText}>デモグラ情報を登録して契約</Text>
+              <Text style={styles.buttonText}>登録完了</Text>
             </TouchableOpacity>
           )}
 
