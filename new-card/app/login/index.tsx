@@ -2,7 +2,7 @@
 
 import React, { useState } from 'react';
 import { supabase } from '../../lib/supabase';
-import { useRouter } from 'next/navigation';
+import { useRouter } from 'expo-router';
 
 export default function WebLogin() {
   const [email, setEmail] = useState('');
