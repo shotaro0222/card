@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
 import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ActivityIndicator } from 'react-native';
-import { supabase } from '../lib/supabase'; // 相対パスに修正
+import { supabase } from '../../lib/supabase'; // 相対パスに修正
 import { useRouter } from 'expo-router';
 
 export default function WebLogin() {
