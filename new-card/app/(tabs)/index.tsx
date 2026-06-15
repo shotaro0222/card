@@ -26,6 +26,7 @@ export default function ForgeScreen() {
   // ユーザーの生成権限制御ステート
   const [forgeCount, setForgeCount] = useState<number>(0);
   const [isInfinite, setIsInfinite] = useState<boolean>(false);
+  const [isAdmin, setIsAdmin] = useState<boolean>(false); // 💡 管理者フラグを追加
   
   const [forgedCardResult, setForgedCardResult] = useState<any | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
@@ -58,10 +59,12 @@ export default function ForgeScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('forge_count, is_infinite_forge').eq('id', user.id).single();
+        // 💡 is_admin も取得するように変更
+        const { data: profile } = await supabase.from('profiles').select('forge_count, is_infinite_forge, is_admin').eq('id', user.id).single();
         if (profile) {
           setForgeCount(profile.forge_count || 0);
           setIsInfinite(profile.is_infinite_forge || false);
+          setIsAdmin(profile.is_admin || false);
         }
       }
     } catch (e) {
@@ -101,7 +104,8 @@ export default function ForgeScreen() {
 
   // 実行前の制限チェック
   const checkLimit = () => {
-    if (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
+    // 💡 管理者 または 無制限ユーザー ならチェックをパス
+    if (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
       safeAlert('生成上限', `規定の生成回数（${MAX_FORGE_LIMIT}回）に達しました。`);
       return false;
     }
@@ -139,7 +143,7 @@ export default function ForgeScreen() {
 
   const forgeCard = async (base64Img: string) => {
     // 念のためここでもチェック
-    if (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
+    if (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
       safeAlert('生成上限', '生成回数の上限に達しています。');
       return;
     }
@@ -206,8 +210,8 @@ export default function ForgeScreen() {
 
       if (insertError) throw new Error(`DB保存失敗: ${insertError.message}`);
 
-      // 💡 成功したら生成回数を1増やす（無制限ユーザー以外）
-      if (!isInfinite) {
+      // 💡 管理者・無制限ユーザー以外なら生成回数を1増やす
+      if (!isAdmin && !isInfinite) {
         const newCount = forgeCount + 1;
         await supabase.from('profiles').update({ forge_count: newCount }).eq('id', user.id);
         setForgeCount(newCount);
@@ -227,16 +231,30 @@ export default function ForgeScreen() {
 
   // 表示用のバッジテキストを判定
   const renderBadgeText = () => {
+    if (isAdmin) return '👑 管理者モード: ゴッドモード';
     if (isInfinite) return '🛠️ 開発モード: 無制限';
     const remaining = Math.max(0, MAX_FORGE_LIMIT - forgeCount);
     return `⚡ 残り生成回数: ${remaining} / ${MAX_FORGE_LIMIT}`;
   };
 
+  // 💡 バッジのスタイルを判定
+  const getBadgeStyle = () => {
+    if (isAdmin) return styles.adminBadge;
+    if (isInfinite) return styles.devBadge;
+    return styles.limitBadge;
+  };
+
+  const getBadgeTextStyle = () => {
+    if (isAdmin) return styles.adminText;
+    if (isInfinite) return styles.devText;
+    return styles.limitText;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <View style={[styles.devBadge, !isInfinite && styles.limitBadge]}>
-          <Text style={[styles.devText, !isInfinite && styles.limitText]} numberOfLines={1} adjustsFontSizeToFit>
+        <View style={[styles.baseBadge, getBadgeStyle()]}>
+          <Text style={[styles.baseBadgeText, getBadgeTextStyle()]} numberOfLines={1} adjustsFontSizeToFit>
             {renderBadgeText()}
           </Text>
         </View>
@@ -260,7 +278,7 @@ export default function ForgeScreen() {
             
             <View style={styles.buttonRow}>
               <TouchableOpacity 
-                style={[styles.actionButtonHalf, (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
+                style={[styles.actionButtonHalf, (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
                 onPress={launchCamera} 
                 activeOpacity={0.8}
               >
@@ -269,7 +287,7 @@ export default function ForgeScreen() {
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={[styles.actionButtonHalf, styles.actionButtonLibrary, (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
+                style={[styles.actionButtonHalf, styles.actionButtonLibrary, (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
                 onPress={launchLibrary} 
                 activeOpacity={0.8}
               >
@@ -328,12 +346,20 @@ const styles = StyleSheet.create({
   loadingText: { marginTop: 20, color: '#3B82F6', fontWeight: '800', fontSize: 16, textAlign: 'center' },
   loadingSubText: { marginTop: 8, color: '#94A3B8', fontWeight: '600', fontSize: 12, textAlign: 'center' },
   
-  devBadge: { 
+  baseBadge: {
     flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 8, 
+    paddingHorizontal: 16, paddingVertical: 8, 
     borderRadius: 20, marginBottom: 40, alignSelf: 'center', maxWidth: '90%'
   },
-  devText: { color: '#2563EB', fontWeight: '700', fontSize: 13, flexShrink: 1 },
+  baseBadgeText: { fontWeight: '700', fontSize: 13, flexShrink: 1 },
+
+  // 管理者向けゴッドモードバッジ（ゴールド風）
+  adminBadge: { backgroundColor: '#FEF08A' },
+  adminText: { color: '#854D0E' },
+
+  // 開発無制限バッジ
+  devBadge: { backgroundColor: '#EFF6FF' },
+  devText: { color: '#2563EB' },
   
   // 一般ユーザー向けバッジスタイル
   limitBadge: { backgroundColor: '#FDF2F8' },
