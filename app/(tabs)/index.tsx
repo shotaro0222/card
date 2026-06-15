@@ -15,11 +15,17 @@ const safeAlert = (title: string, msg: string) => {
   }
 };
 
+const MAX_FORGE_LIMIT = 3; // デフォルトの最大生成回数
+
 export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
   const [loadingStep, setLoadingSubText] = useState('');
   const [customName, setCustomName] = useState<string>('');
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
+  
+  // ユーザーの生成権限制御ステート
+  const [forgeCount, setForgeCount] = useState<number>(0);
+  const [isInfinite, setIsInfinite] = useState<boolean>(false);
   
   const [forgedCardResult, setForgedCardResult] = useState<any | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
@@ -33,6 +39,7 @@ export default function ForgeScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchCampaigns();
+      fetchUserProfile(); // 画面フォーカス時にユーザーデータを取得
     }, [])
   );
 
@@ -45,6 +52,21 @@ export default function ForgeScreen() {
   const fetchCampaigns = async () => {
     const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true);
     if (campaigns) setActiveCampaigns(campaigns);
+  };
+
+  const fetchUserProfile = async () => {
+    try {
+      const { data: { user } } = await supabase.auth.getUser();
+      if (user) {
+        const { data: profile } = await supabase.from('profiles').select('forge_count, is_infinite_forge').eq('id', user.id).single();
+        if (profile) {
+          setForgeCount(profile.forge_count || 0);
+          setIsInfinite(profile.is_infinite_forge || false);
+        }
+      }
+    } catch (e) {
+      console.log("プロフィール取得エラー", e);
+    }
   };
 
   const getRarityConfig = (rarity: string) => {
@@ -77,7 +99,17 @@ export default function ForgeScreen() {
     });
   };
 
+  // 実行前の制限チェック
+  const checkLimit = () => {
+    if (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
+      safeAlert('生成上限', `規定の生成回数（${MAX_FORGE_LIMIT}回）に達しました。`);
+      return false;
+    }
+    return true;
+  };
+
   const launchCamera = async () => {
+    if (!checkLimit()) return;
     try {
       const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
       if (!cameraPerm.granted) {
@@ -94,6 +126,7 @@ export default function ForgeScreen() {
   };
 
   const launchLibrary = async () => {
+    if (!checkLimit()) return;
     try {
       const result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
       if (!result.canceled && result.assets && result.assets[0].base64) {
@@ -105,6 +138,12 @@ export default function ForgeScreen() {
   };
 
   const forgeCard = async (base64Img: string) => {
+    // 念のためここでもチェック
+    if (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
+      safeAlert('生成上限', '生成回数の上限に達しています。');
+      return;
+    }
+
     setLoading(true);
     setLoadingSubText('位置情報を確認中...');
     
@@ -167,6 +206,13 @@ export default function ForgeScreen() {
 
       if (insertError) throw new Error(`DB保存失敗: ${insertError.message}`);
 
+      // 💡 成功したら生成回数を1増やす（無制限ユーザー以外）
+      if (!isInfinite) {
+        const newCount = forgeCount + 1;
+        await supabase.from('profiles').update({ forge_count: newCount }).eq('id', user.id);
+        setForgeCount(newCount);
+      }
+
       setForgedCardResult({ ...aiResultData, image_url: publicUrl, status_total: (aiResultData.status_hp || 100) + (aiResultData.status_atk || 10) + (aiResultData.status_def || 10) + (aiResultData.status_spd || 10) });
       setShowResultModal(true);
       setCustomName('');
@@ -179,11 +225,20 @@ export default function ForgeScreen() {
     }
   };
 
+  // 表示用のバッジテキストを判定
+  const renderBadgeText = () => {
+    if (isInfinite) return '🛠️ 開発モード: 無制限';
+    const remaining = Math.max(0, MAX_FORGE_LIMIT - forgeCount);
+    return `⚡ 残り生成回数: ${remaining} / ${MAX_FORGE_LIMIT}`;
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.content}>
-        <View style={styles.devBadge}>
-          <Text style={styles.devText} numberOfLines={1} adjustsFontSizeToFit>🛠️ 開発モード: 無制限</Text>
+        <View style={[styles.devBadge, !isInfinite && styles.limitBadge]}>
+          <Text style={[styles.devText, !isInfinite && styles.limitText]} numberOfLines={1} adjustsFontSizeToFit>
+            {renderBadgeText()}
+          </Text>
         </View>
 
         {loading ? (
@@ -204,12 +259,20 @@ export default function ForgeScreen() {
             />
             
             <View style={styles.buttonRow}>
-              <TouchableOpacity style={styles.actionButtonHalf} onPress={launchCamera} activeOpacity={0.8}>
+              <TouchableOpacity 
+                style={[styles.actionButtonHalf, (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
+                onPress={launchCamera} 
+                activeOpacity={0.8}
+              >
                 <Camera color="#FFFFFF" size={20} />
                 <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit>カメラ</Text>
               </TouchableOpacity>
               
-              <TouchableOpacity style={[styles.actionButtonHalf, styles.actionButtonLibrary]} onPress={launchLibrary} activeOpacity={0.8}>
+              <TouchableOpacity 
+                style={[styles.actionButtonHalf, styles.actionButtonLibrary, (!isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
+                onPress={launchLibrary} 
+                activeOpacity={0.8}
+              >
                 <ImageIcon color="#FFFFFF" size={20} />
                 <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit>アルバム</Text>
               </TouchableOpacity>
@@ -265,21 +328,17 @@ const styles = StyleSheet.create({
   loadingText: { marginTop: 20, color: '#3B82F6', fontWeight: '800', fontSize: 16, textAlign: 'center' },
   loadingSubText: { marginTop: 8, color: '#94A3B8', fontWeight: '600', fontSize: 12, textAlign: 'center' },
   
-  // 💡 バッジの左側が見切れるバグを防ぐため、flexDirection と alignSelf を追加
   devBadge: { 
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'center',
-    backgroundColor: '#EFF6FF', 
-    paddingHorizontal: 16, 
-    paddingVertical: 8, 
-    borderRadius: 20, 
-    marginBottom: 40,
-    alignSelf: 'center',
-    maxWidth: '90%'
+    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
+    backgroundColor: '#EFF6FF', paddingHorizontal: 16, paddingVertical: 8, 
+    borderRadius: 20, marginBottom: 40, alignSelf: 'center', maxWidth: '90%'
   },
   devText: { color: '#2563EB', fontWeight: '700', fontSize: 13, flexShrink: 1 },
   
+  // 一般ユーザー向けバッジスタイル
+  limitBadge: { backgroundColor: '#FDF2F8' },
+  limitText: { color: '#DB2777' },
+
   mainBox: { width: '85%', maxWidth: 400, alignItems: 'center', backgroundColor: '#FFFFFF', padding: 25, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
   instruction: { fontSize: 14, color: '#64748B', marginBottom: 15, fontWeight: '600', textAlign: 'center', flexShrink: 1 },
   input: { width: '100%', backgroundColor: '#F1F5F9', paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12, fontSize: 15, marginBottom: 20 },
@@ -287,9 +346,9 @@ const styles = StyleSheet.create({
   buttonRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 10 },
   actionButtonHalf: { flex: 1, flexDirection: 'row', backgroundColor: '#3B82F6', height: 55, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
   actionButtonLibrary: { backgroundColor: '#0F172A' },
+  actionButtonDisabled: { opacity: 0.4 }, // 制限時のボタンスタイル
   actionButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginLeft: 8, flexShrink: 1 },
   
-  // 💡 サブテキストの折り返しとはみ出し防止
   subInfo: { color: '#94A3B8', fontSize: 11, marginTop: 15, fontWeight: '500', textAlign: 'center', flexShrink: 1, flexWrap: 'wrap' },
   
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
