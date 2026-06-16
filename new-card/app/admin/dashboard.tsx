@@ -3,7 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Ale
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
-import * as DocumentPicker from 'expo-document-picker'; // 💡 新規統合: 3Dモデル(.glb)等のアップロード用
+import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { decode } from 'base64-arraybuffer';
@@ -92,6 +92,7 @@ export default function AdminDashboard() {
   const [arTargetClientId, setArTargetClientId] = useState(''); // promo_linksテーブルの対象UUID
   const [arDisplayMode, setArDisplayMode] = useState<'3d_model' | 'card_frame' | 'hybrid'>('card_frame');
   const [arAssetCustomUrl, setArAssetCustomUrl] = useState(''); // .glb等アセットのURL
+  const [arMarkerCustomUrl, setArMarkerCustomUrl] = useState(''); // 💡 新規: マーカーファイルのURL
   const [arBtnPlacement, setArBtnPlacement] = useState<'bottom_center' | 'top_right' | 'hidden'>('bottom_center');
   const [arActionText, setArActionText] = useState('アプリにデータを同期');
 
@@ -239,20 +240,18 @@ export default function AdminDashboard() {
   };
 
   // ==========================================
-  // 💡 3Dオブジェクト(.glbなど)のファイルピッカー＆インサート関数
+  // 💡 3Dオブジェクト(.glb)のアップロード
   // ==========================================
   const handleUploadArAsset = async (promoId: string) => {
     if (!promoId || promoId === 'ALL') {
-      Alert.alert('エラー', 'アセットを個別指定するには、最初に対象のプロモID（クライアントUUID）を入力してください。');
+      Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
       return;
     }
-
     try {
       const result = await DocumentPicker.getDocumentAsync({
         type: ['application/octet-stream', 'model/gltf-binary', 'image/*'],
         copyToCacheDirectory: true
       });
-
       if (result.canceled || !result.assets || result.assets.length === 0) return;
       
       setLoading(true);
@@ -267,8 +266,7 @@ export default function AdminDashboard() {
         arrayBuffer = decode(base64);
       }
 
-      const fileName = `${promoId}/${Date.now()}_${asset.name}`;
-      
+      const fileName = `${promoId}/${Date.now()}_asset_${asset.name}`;
       const { error: uploadError } = await supabase.storage
         .from('ar_assets')
         .upload(fileName, arrayBuffer, { contentType: asset.mimeType || 'application/octet-stream', upsert: true });
@@ -277,16 +275,59 @@ export default function AdminDashboard() {
 
       const { data: { publicUrl } } = supabase.storage.from('ar_assets').getPublicUrl(fileName);
 
-      const { error: dbError } = await supabase
-        .from('promo_links')
-        .update({ ar_asset_url: publicUrl, ar_display_mode: arDisplayMode })
-        .eq('id', promoId);
-
+      const { error: dbError } = await supabase.from('promo_links').update({ ar_asset_url: publicUrl, ar_display_mode: arDisplayMode }).eq('id', promoId);
       if (dbError) throw dbError;
 
       setArAssetCustomUrl(publicUrl);
-      Alert.alert('アップロード成功', `アセット「${asset.name}」をクライアントレコードに直接紐付けました！`);
+      Alert.alert('アップロード成功', `3Dモデル/画像を紐付けました！`);
+    } catch (e: any) {
+      Alert.alert('アップロード失敗', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
 
+  // ==========================================
+  // 💡 ターゲットマーカー（.mind / 画像）のアップロード
+  // ==========================================
+  const handleUploadArMarker = async (promoId: string) => {
+    if (!promoId || promoId === 'ALL') {
+      Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
+      return;
+    }
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/octet-stream', 'image/*'], // .mindファイルや画像を想定
+        copyToCacheDirectory: true
+      });
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      
+      setLoading(true);
+      const asset = result.assets[0];
+
+      let arrayBuffer;
+      if (Platform.OS === 'web') {
+        const response = await fetch(asset.uri);
+        arrayBuffer = await response.arrayBuffer();
+      } else {
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+        arrayBuffer = decode(base64);
+      }
+
+      const fileName = `${promoId}/${Date.now()}_marker_${asset.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('ar_markers')
+        .upload(fileName, arrayBuffer, { contentType: asset.mimeType || 'application/octet-stream', upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from('ar_markers').getPublicUrl(fileName);
+
+      const { error: dbError } = await supabase.from('promo_links').update({ ar_marker_url: publicUrl }).eq('id', promoId);
+      if (dbError) throw dbError;
+
+      setArMarkerCustomUrl(publicUrl);
+      Alert.alert('アップロード成功', `トリガーマーカー「${asset.name}」を紐付けました！`);
     } catch (e: any) {
       Alert.alert('アップロード失敗', e.message);
     } finally {
@@ -922,12 +963,12 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 💡 8. WebAR制御（クライアント別 3Dオブジェクト直登録版） ===================== */}
+        {/* ===================== 💡 8. WebAR制御（クライアント別 オブジェクト＆マーカー直登録版） ===================== */}
         {activeTab === 'ar' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト管理パネル</Text>
             <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
-              特定の企業・キャンペーンURLごとに、空間へ配置する3Dモデルファイルや表示モードをリアルタイムに指示・上書きします。
+              特定の企業・キャンペーンURLごとに、空間へ配置する「3Dモデル」や「トリガーマーカー」を個別に設定・上書きします。
             </Text>
 
             <Text style={styles.label}>1. 配信制御範囲の指定</Text>
@@ -950,13 +991,30 @@ export default function AdminDashboard() {
               autoCapitalize="none"
             />
 
-            <Text style={styles.label}>3. ARオブジェクトの直接アップロード（.glb 3Dモデル または 画像）</Text>
+            {/* 💡 マーカーのアップロード UI を追加 */}
+            <Text style={styles.label}>3. トリガーマーカーのアップロード（.mind または 画像）</Text>
+            <TouchableOpacity 
+              style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#8B5CF6', marginTop: 8, marginBottom: 12 }]} 
+              onPress={() => handleUploadArMarker(arTargetClientId)}
+              disabled={loading || arClientType === 'global'}
+            >
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>🎯 マーカーファイルを選択して紐付け</Text>}
+            </TouchableOpacity>
+
+            {arMarkerCustomUrl ? (
+              <View style={{ backgroundColor: '#F5F3FF', padding: 12, borderRadius: 12, marginBottom: 10 }}>
+                <Text style={{ fontSize: 12, color: '#6D28D9', fontWeight: 'bold' }}>🔗 反映中のマーカーURL:</Text>
+                <Text style={{ fontSize: 11, color: '#4C1D95', marginTop: 4 }} numberOfLines={2}>{arMarkerCustomUrl}</Text>
+              </View>
+            ) : null}
+
+            <Text style={styles.label}>4. ARオブジェクトのアップロード（.glb 3Dモデル または 画像）</Text>
             <TouchableOpacity 
               style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#10B981', marginTop: 8, marginBottom: 12 }]} 
               onPress={() => handleUploadArAsset(arTargetClientId)}
               disabled={loading || arClientType === 'global'}
             >
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>📁 ファイルを選択して直接紐付け</Text>}
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>📁 表示オブジェクトを選択して紐付け</Text>}
             </TouchableOpacity>
 
             {arAssetCustomUrl ? (
@@ -968,7 +1026,7 @@ export default function AdminDashboard() {
 
             <View style={styles.divider} />
 
-            <Text style={styles.label}>4. レンダリング種別（表示形式）</Text>
+            <Text style={styles.label}>5. レンダリング種別（表示形式）</Text>
             <View style={styles.radioGroup}>
               <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'card_frame' && styles.activeRadio]} onPress={() => setArDisplayMode('card_frame')}>
                 <Text style={[styles.radioText, arDisplayMode === 'card_frame' && styles.activeRadioText]}>2Dカード枠浮遊</Text>
@@ -978,7 +1036,7 @@ export default function AdminDashboard() {
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.label}>5. アプリ誘導コンフィグ（画面上のボタン配置）</Text>
+            <Text style={styles.label}>6. アプリ誘導コンフィグ（画面上のボタン配置）</Text>
             <View style={styles.radioGroup}>
               <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'bottom_center' && styles.activeRadio]} onPress={() => setArBtnPlacement('bottom_center')}>
                 <Text style={[styles.radioText, arBtnPlacement === 'bottom_center' && styles.activeRadioText]}>下部中央固定</Text>
