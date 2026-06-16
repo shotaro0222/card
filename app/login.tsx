@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator, Image } from 'react-native'; // 💡 Imageを追加
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 
@@ -88,8 +88,13 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-      {/* 修正箇所: Gitのコンフリクトマーカーを削除し、正しい表示に統合しました */}
-      <Text style={styles.title}>SnapCard</Text>
+      
+      {/* 💡 テキストからロゴ画像へ変更 */}
+      <Image 
+        source={require('../assets/logo.png')} // ※ファイルの階層に合わせて '../assets/logo.png' や '../../assets/logo.png' に調整してください
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
@@ -195,7 +200,16 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   scrollContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   container: { padding: 24, justifyContent: 'center', paddingTop: 80, paddingBottom: 40 },
-  title: { fontSize: 40, fontWeight: '900', color: '#0F172A', textAlign: 'center', letterSpacing: 2, marginBottom: 5 },
+  
+  // 💡 タイトルの代わりにロゴ用のスタイルを追加
+  logo: { 
+    width: '80%',       // 横幅（親要素に対する比率）
+    maxWidth: 280,      // 最大横幅
+    height: 100,        // 高さ（画像の縦横比に合わせて調整してください）
+    alignSelf: 'center',
+    marginBottom: 10 
+  },
+  
   subtitle: { fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 40, fontWeight: '700' },
   formTitle: { color: '#475569', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 24 },
   
