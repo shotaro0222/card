@@ -3,8 +3,8 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 
-// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（app/ の直下の assets/ から読み込みます）
-import logoImg from './assets/images/logo.png';
+// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（require()を使用してExpoのバンドラーで正しく認識させます）
+const logoImg = require('./assets/images/logo.png');
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');

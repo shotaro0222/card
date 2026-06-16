@@ -7,8 +7,8 @@ import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Camera, Image as ImageIcon, Zap } from 'lucide-react-native';
 
-// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（さらに階層が1つ深いため '../../assets/...' になります）
-import logoImg from '../assets/images/logo.png';
+// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（require()を使用してExpoのバンドラーで正しく認識させます）
+const logoImg = require('../assets/images/logo.png');
 
 const { width, height } = Dimensions.get('window');
 
