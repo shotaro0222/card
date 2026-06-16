@@ -281,10 +281,12 @@ export default function ForgeScreen() {
           </View>
         ) : (
           <View style={styles.mainBox}>
-            <View style={styles.boxHeader}>
-              <Zap color="#3B82F6" size={24} />
-              <Text style={styles.boxTitle}>カード生成</Text>
-            </View>
+            {/* 💡 修正箇所: タイトルテキストヘッダーを排除し、ロゴ画像をメインビジュアルとして統合 */}
+            <Image 
+              source={require('../assets/images/logo.png')} 
+              style={styles.mainLogo}
+              resizeMode="contain"
+            />
             
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
             
@@ -368,7 +370,7 @@ export default function ForgeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#0F172A', position: 'relative' }, // ダークブルー背景に変更
+  container: { flex: 1, backgroundColor: '#0F172A', position: 'relative' }, 
   bgDecorCircle1: { position: 'absolute', top: -100, right: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: '#1E293B', opacity: 0.5 },
   bgDecorCircle2: { position: 'absolute', bottom: -50, left: -100, width: 250, height: 250, borderRadius: 125, backgroundColor: '#1E293B', opacity: 0.5 },
   
@@ -389,8 +391,15 @@ const styles = StyleSheet.create({
   limitText: { color: '#F472B6' },
 
   mainBox: { width: '85%', maxWidth: 400, alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.85)', padding: 30, borderRadius: 32, borderWidth: 1, borderColor: '#334155', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
-  boxHeader: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
-  boxTitle: { fontSize: 24, fontWeight: '900', color: '#FFFFFF', marginLeft: 8, letterSpacing: 2 },
+  
+  // 💡 修正箇所: メインビジュアルロゴ用のスタイルを追加
+  mainLogo: {
+    width: '85%',
+    height: 55,
+    alignSelf: 'center',
+    marginBottom: 15
+  },
+
   instruction: { fontSize: 13, color: '#94A3B8', marginBottom: 30, fontWeight: '600', textAlign: 'center' },
   
   inputContainer: { width: '100%', marginBottom: 25 },
@@ -404,9 +413,8 @@ const styles = StyleSheet.create({
   btnIcon: { marginRight: 10 },
   actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900', letterSpacing: 1 },
   
-  // モーダルとド派手演出
   modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
-  glowBackground: { position: 'absolute', width: height * 1.5, height: height * 1.5, borderRadius: height }, // 回転する巨大な後光
+  glowBackground: { position: 'absolute', width: height * 1.5, height: height * 1.5, borderRadius: height }, 
   modalContent: { width: '100%', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   
   resultTitle: { fontSize: 22, fontWeight: '900', marginBottom: 20, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10, letterSpacing: 2 },
@@ -417,7 +425,6 @@ const styles = StyleSheet.create({
   cardOverlay: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'rgba(0,0,0,0.8)', paddingVertical: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
   cardOverlayStats: { color: '#94A3B8', fontSize: 12, fontWeight: '800', textAlign: 'center', letterSpacing: 1 },
   
-  // ドーンと出る名前
   hugeResultName: { fontSize: 42, fontWeight: '900', textAlign: 'center', marginVertical: 30, textShadowColor: '#000', textShadowOffset: { width: 2, height: 4 }, textShadowRadius: 10, paddingHorizontal: 10, width: '100%' },
   
   closeBtn: { backgroundColor: '#FFFFFF', paddingVertical: 16, paddingHorizontal: 40, borderRadius: 30, shadowColor: '#FFFFFF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 10 },
