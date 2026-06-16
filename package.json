@@ -1,6 +1,7 @@
 {
   "dependencies": {
     "expo": "^56.0.12",
+    "expo-document-picker": "~56.0.4",
     "lucide-react": "^1.18.0"
   }
 }
