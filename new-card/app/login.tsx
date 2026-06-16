@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator, Image } from 'react-native'; // 💡 Imageを追加
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator, Image } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
+
+// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（階層が変わったため '../assets/...' になります）
+import logoImg from '../assets/images/logo.png';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -89,9 +92,9 @@ export default function LoginScreen() {
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
       
-      {/* 💡 テキストからロゴ画像へ変更 */}
+      {/* 💡 修正箇所2: importした画像変数を使用する */}
       <Image 
-        source={require('./assets/images/logo.png')} // ※ファイルの階層に合わせて '../assets/logo.png' や '../../assets/logo.png' に調整してください
+        source={logoImg} 
         style={styles.logo}
         resizeMode="contain"
       />
@@ -201,11 +204,10 @@ const styles = StyleSheet.create({
   scrollContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   container: { padding: 24, justifyContent: 'center', paddingTop: 80, paddingBottom: 40 },
   
-  // 💡 タイトルの代わりにロゴ用のスタイルを追加
   logo: { 
-    width: '80%',       // 横幅（親要素に対する比率）
-    maxWidth: 280,      // 最大横幅
-    height: 100,        // 高さ（画像の縦横比に合わせて調整してください）
+    width: '80%',       
+    maxWidth: 280,      
+    height: 100,        
     alignSelf: 'center',
     marginBottom: 10 
   },
