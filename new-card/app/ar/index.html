@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>SnapCard AR Viewer</title>
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+    <style>
+        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
+        /* ARキャンバスやカメラ映像がここに入ります（MindARや8thWallのセットアップ領域） */
+        #ar-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
+        
+        #ar-ui-overlay {
+            position: absolute;
+            bottom: 50px;
+            width: 100%;
+            text-align: center;
+            z-index: 999;
+            display: none;
+        }
+        #app-redirect-btn {
+            padding: 16px 32px;
+            font-size: 16px;
+            font-weight: 900;
+            color: #fff;
+            background-color: #ec4899;
+            border: none;
+            border-radius: 30px;
+            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        #app-redirect-btn:active { transform: scale(0.95); }
+    </style>
+</head>
+<body>
+
+    <div id="ar-container"></div>
+
+    <div id="ar-ui-overlay">
+        <button id="app-redirect-btn">アクションを実行</button>
+    </div>
+
+    <script>
+        // 💡 ご自身のSupabaseのURLとAnon Keyに書き換えてください
+        const SUPABASE_URL = "https://your-project.supabase.co";
+        const SUPABASE_ANON_KEY = "your-anon-key";
+        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+        // URLパラメータの解析 (?type=xxx&id=yyy)
+        const urlParams = new URLSearchParams(window.location.search);
+        const arType = urlParams.get('type');
+        const targetId = urlParams.get('id');
+
+        window.addEventListener('load', async () => {
+            if (!arType || !targetId) return;
+
+            const overlay = document.getElementById('ar-ui-overlay');
+            const btn = document.getElementById('app-redirect-btn');
+
+            try {
+                // ==========================================
+                // アイデア1: 法人プラン連動（プロモカード獲得）
+                // ==========================================
+                if (arType === 'promo') {
+                    const { data: promo } = await supabase.from('promo_links').select('*, fixed_cards(*)').eq('id', targetId).single();
+                    if (promo) {
+                        // ※ここにARのレンダリング処理（promo.fixed_cards.image_urlを使用）を追加
+
+                        btn.innerText = `🎁 ${promo.corporate_name} 特典をアプリで受け取る`;
+                        btn.style.backgroundColor = "#10B981"; 
+                        btn.onclick = () => {
+                            window.location.href = `snapcard://claim-promo?promo_id=${targetId}`;
+                        };
+                        overlay.style.display = 'block';
+                    }
+                }
+
+                // ==========================================
+                // アイデア2: 等身大ボス降臨イベント
+                // ==========================================
+                else if (arType === 'boss') {
+                    const { data: boss } = await supabase.from('bosses').select('*').eq('id', targetId).single();
+                    if (boss) {
+                        // ※ここにARのレンダリング処理（ボスの3Dモデルや画像を使用）を追加
+
+                        btn.innerText = `⚔️ アプリに戻って「${boss.name}」を討伐！`;
+                        btn.style.backgroundColor = "#EF4444"; 
+                        btn.onclick = () => {
+                            window.location.href = `snapcard://start-battle?boss_id=${targetId}`;
+                        };
+                        overlay.style.display = 'block';
+                    }
+                }
+
+                // ==========================================
+                // アイデア3: UGCカード現実ディスプレー
+                // ==========================================
+                else if (arType === 'ugc') {
+                    const { data: card } = await supabase.from('cards').select('*').eq('id', targetId).single();
+                    if (card) {
+                        // ※ここにARのレンダリング処理（作成したカード画像を空間に配置）を追加
+
+                        btn.innerText = `📸 SNSでハッシュタグをつけてシェア！`;
+                        btn.style.backgroundColor = "#3B82F6"; 
+                        btn.onclick = () => {
+                            window.location.href = `snapcard://share-back?card_id=${targetId}`;
+                        };
+                        overlay.style.display = 'block';
+                    }
+                }
+            } catch (error) {
+                console.error('ARデータの取得に失敗:', error);
+            }
+        });
+    </script>
+</body>
+</html>
