@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform, Dimensions } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform, Dimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
@@ -261,7 +261,7 @@ export default function ForgeScreen() {
       <View style={styles.bgDecorCircle1} />
       <View style={styles.bgDecorCircle2} />
 
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} style={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={[styles.baseBadge, isAdmin ? styles.adminBadge : isInfinite ? styles.devBadge : styles.limitBadge]}>
           <Text style={[styles.baseBadgeText, isAdmin ? styles.adminText : isInfinite ? styles.devText : styles.limitText]} numberOfLines={1}>
             {renderBadgeText()}
@@ -314,7 +314,7 @@ export default function ForgeScreen() {
             </View>
           </View>
         )}
-      </View>
+      </ScrollView>
 
       {/* ド派手リザルトモーダル */}
       <Modal visible={showResultModal} animationType="none" transparent={true}>
@@ -367,7 +367,10 @@ const styles = StyleSheet.create({
   bgDecorCircle2: { position: 'absolute', bottom: -50, left: -100, width: 250, height: 250, borderRadius: 125, backgroundColor: '#1E293B', opacity: 0.5 },
   
   // 上下の余白を確保してコンテンツが端で切れないように調整
-  content: { flex: 1, justifyContent: 'flex-start', alignItems: 'center', paddingTop: 40, paddingBottom: 60, zIndex: 10 },
+  // content は ScrollView の contentContainerStyle として使う（flex を外す）
+  content: { justifyContent: 'flex-start', alignItems: 'center', paddingTop: 40, paddingBottom: 60, zIndex: 10 },
+  // ScrollView 自体のスタイル
+  scrollContainer: { flex: 1 },
   
   loadingArea: { alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.8)', padding: 40, borderRadius: 30, borderWidth: 1, borderColor: '#334155' },
   loadingCircle: { backgroundColor: '#3B82F6', padding: 20, borderRadius: 50, marginBottom: 20, shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 15 },
