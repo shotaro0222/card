@@ -1,11 +1,16 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform, Dimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Camera, Image as ImageIcon } from 'lucide-react-native';
+import { Camera, Image as ImageIcon, Zap } from 'lucide-react-native';
+
+// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（さらに階層が1つ深いため '../../assets/...' になります）
+import logoImg from '../../../assets/images/logo.png';
+
+const { width, height } = Dimensions.get('window');
 
 const safeAlert = (title: string, msg: string) => {
   if (Platform.OS === 'web') {
@@ -15,7 +20,7 @@ const safeAlert = (title: string, msg: string) => {
   }
 };
 
-const MAX_FORGE_LIMIT = 3; // デフォルトの最大生成回数
+const MAX_FORGE_LIMIT = 3;
 
 export default function ForgeScreen() {
   const [loading, setLoading] = useState(false);
@@ -23,16 +28,20 @@ export default function ForgeScreen() {
   const [customName, setCustomName] = useState<string>('');
   const [activeCampaigns, setActiveCampaigns] = useState<any[]>([]);
   
-  // ユーザーの生成権限制御ステート
   const [forgeCount, setForgeCount] = useState<number>(0);
   const [isInfinite, setIsInfinite] = useState<boolean>(false);
-  const [isAdmin, setIsAdmin] = useState<boolean>(false); // 💡 管理者フラグを追加
+  const [isAdmin, setIsAdmin] = useState<boolean>(false);
   
   const [forgedCardResult, setForgedCardResult] = useState<any | null>(null);
   const [showResultModal, setShowResultModal] = useState(false);
 
-  const cardScale = useRef(new Animated.Value(0.3)).current;
+  // === ド派手演出用のアニメーション値 ===
+  const cardScale = useRef(new Animated.Value(0)).current;
   const cardOpacity = useRef(new Animated.Value(0)).current;
+  const glowOpacity = useRef(new Animated.Value(0)).current;
+  const spinAnim = useRef(new Animated.Value(0)).current;
+  const nameScale = useRef(new Animated.Value(3)).current; 
+  const nameOpacity = useRef(new Animated.Value(0)).current;
   const shakeX = useRef(new Animated.Value(0)).current;
   
   const router = useRouter();
@@ -40,7 +49,7 @@ export default function ForgeScreen() {
   useFocusEffect(
     useCallback(() => {
       fetchCampaigns();
-      fetchUserProfile(); // 画面フォーカス時にユーザーデータを取得
+      fetchUserProfile();
     }, [])
   );
 
@@ -59,7 +68,6 @@ export default function ForgeScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        // 💡 is_admin も取得するように変更
         const { data: profile } = await supabase.from('profiles').select('forge_count, is_infinite_forge, is_admin').eq('id', user.id).single();
         if (profile) {
           setForgeCount(profile.forge_count || 0);
@@ -74,39 +82,58 @@ export default function ForgeScreen() {
 
   const getRarityConfig = (rarity: string) => {
     switch (rarity) {
-      case 'UR': return { color: '#FBBF24', shakeIntensity: 2.5, effectTitle: '🌟【UR】神・実体化！！🌟' };
-      case 'SSR': return { color: '#EF4444', shakeIntensity: 1.5, effectTitle: '🔥【SSR】超・実体化！！🔥' };
-      case 'SR': return { color: '#A855F7', shakeIntensity: 0.8, effectTitle: '⚡【SR】強・実体化！⚡' };
-      case 'R': return { color: '#3B82F6', shakeIntensity: 0, effectTitle: '✨【R】レア・実体化✨' };
-      case 'DUST': return { color: '#EF4444', shakeIntensity: 0.5, effectTitle: '⚠️【ERROR】バグデータ実体化' };
-      case 'N': default: return { color: '#FFFFFF', shakeIntensity: 0, effectTitle: '⚙️【N】通常・実体化' };
+      case 'UR': return { color: '#FBBF24', glow: '#FEF08A', effectTitle: '🌟 UR 神格化完了 🌟', hasShake: true };
+      case 'SSR': return { color: '#EF4444', glow: '#FECACA', effectTitle: '🔥 SSR 超絶実体化 🔥', hasShake: true };
+      case 'SR': return { color: '#A855F7', glow: '#E9D5FF', effectTitle: '⚡ SR 物質化成功 ⚡', hasShake: false };
+      case 'R': return { color: '#3B82F6', glow: '#BFDBFE', effectTitle: '✨ R レア抽出 ✨', hasShake: false };
+      case 'DUST': return { color: '#64748B', glow: '#1E293B', effectTitle: '⚠️ ERROR 汚染データ', hasShake: true };
+      case 'N': default: return { color: '#FFFFFF', glow: '#E2E8F0', effectTitle: '⚙️ N 通常構築', hasShake: false };
     }
   };
 
   const startResultEffect = (rarity: string) => {
-    cardScale.setValue(0.3);
+    cardScale.setValue(0);
     cardOpacity.setValue(0);
+    glowOpacity.setValue(0);
+    nameScale.setValue(4);
+    nameOpacity.setValue(0);
+    spinAnim.setValue(0);
     shakeX.setValue(0);
+
     const config = getRarityConfig(rarity);
-    Animated.parallel([
-      Animated.timing(cardScale, { toValue: 1, duration: 350, easing: Easing.out(Easing.back(1.5)), useNativeDriver: true }),
-      Animated.timing(cardOpacity, { toValue: 1, duration: 300, useNativeDriver: true })
-    ]).start(() => {
-      if (config.shakeIntensity > 0) {
+
+    Animated.loop(
+      Animated.timing(spinAnim, { toValue: 1, duration: 8000, easing: Easing.linear, useNativeDriver: true })
+    ).start();
+
+    Animated.sequence([
+      Animated.parallel([
+        Animated.timing(glowOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
+        Animated.spring(cardScale, { toValue: 1, friction: 6, tension: 40, useNativeDriver: true }),
+        Animated.timing(cardOpacity, { toValue: 1, duration: 300, useNativeDriver: true })
+      ]),
+      ...(config.hasShake ? [
         Animated.sequence([
-          Animated.timing(shakeX, { toValue: 10 * config.shakeIntensity, duration: 40, useNativeDriver: true }),
-          Animated.timing(shakeX, { toValue: -10 * config.shakeIntensity, duration: 40, useNativeDriver: true }),
+          Animated.timing(shakeX, { toValue: 15, duration: 40, useNativeDriver: true }),
+          Animated.timing(shakeX, { toValue: -15, duration: 40, useNativeDriver: true }),
           Animated.timing(shakeX, { toValue: 0, duration: 40, useNativeDriver: true })
-        ]).start();
-      }
-    });
+        ])
+      ] : []),
+      Animated.parallel([
+        Animated.spring(nameScale, { toValue: 1, friction: 4, tension: 50, useNativeDriver: true }),
+        Animated.timing(nameOpacity, { toValue: 1, duration: 200, useNativeDriver: true })
+      ])
+    ]).start();
   };
 
-  // 実行前の制限チェック
+  const spin = spinAnim.interpolate({
+    inputRange: [0, 1],
+    outputRange: ['0deg', '360deg']
+  });
+
   const checkLimit = () => {
-    // 💡 管理者 または 無制限ユーザー ならチェックをパス
     if (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
-      safeAlert('生成上限', `規定の生成回数（${MAX_FORGE_LIMIT}回）に達しました。`);
+      safeAlert('限界到達', `本日の抽出上限（${MAX_FORGE_LIMIT}回）に達しています。`);
       return false;
     }
     return true;
@@ -117,16 +144,14 @@ export default function ForgeScreen() {
     try {
       const cameraPerm = await ImagePicker.requestCameraPermissionsAsync();
       if (!cameraPerm.granted) {
-        safeAlert('権限エラー', 'カメラへのアクセスを許可してください。');
+        safeAlert('権限エラー', '次元カメラへのアクセスを許可してください。');
         return;
       }
       const result = await ImagePicker.launchCameraAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.4, base64: true });
       if (!result.canceled && result.assets && result.assets[0].base64) {
         forgeCard(result.assets[0].base64);
       }
-    } catch (error: any) {
-      safeAlert('カメラエラー', error.message);
-    }
+    } catch (error: any) { safeAlert('エラー', error.message); }
   };
 
   const launchLibrary = async () => {
@@ -136,20 +161,17 @@ export default function ForgeScreen() {
       if (!result.canceled && result.assets && result.assets[0].base64) {
         forgeCard(result.assets[0].base64);
       }
-    } catch (error: any) {
-      safeAlert('アルバムエラー', error.message);
-    }
+    } catch (error: any) { safeAlert('エラー', error.message); }
   };
 
   const forgeCard = async (base64Img: string) => {
-    // 念のためここでもチェック
     if (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
       safeAlert('生成上限', '生成回数の上限に達しています。');
       return;
     }
 
     setLoading(true);
-    setLoadingSubText('位置情報を確認中...');
+    setLoadingSubText('空間座標を走査中...');
     
     try {
       const { data: { user } } = await supabase.auth.getUser();
@@ -168,17 +190,15 @@ export default function ForgeScreen() {
           userLat = locResult.coords.latitude;
           userLng = locResult.coords.longitude;
         }
-      } catch (e) {
-        console.log("位置情報スキップ");
-      }
+      } catch (e) { console.log("位置情報スキップ"); }
 
-      setLoadingSubText('画像をサーバーへ転送中...');
+      setLoadingSubText('物質データを転送中...');
       const fileName = `${user.id}/${Date.now()}.jpg`;
       const { error: uploadError } = await supabase.storage.from('card_images').upload(fileName, decode(base64Img), { contentType: 'image/jpeg' });
       if (uploadError) throw new Error(`画像保存失敗: ${uploadError.message}`);
       const { data: { publicUrl } } = supabase.storage.from('card_images').getPublicUrl(fileName);
 
-      setLoadingSubText('AIが画像を解析中...');
+      setLoadingSubText('AIが事象を解析・再構築中...');
       let aiResultData;
       try {
         const { data: aiData, error: aiError } = await supabase.functions.invoke('super-task', {
@@ -190,7 +210,7 @@ export default function ForgeScreen() {
         aiResultData = { card_name: "ERROR_ENTITY", rarity: "DUST", element: "虚無", skill_name: "ノイズ・バースト", feature: "解析不能なノイズデータ。", status_hp: 404, status_atk: 404, status_def: 404, status_spd: 404 };
       }
 
-      setLoadingSubText('データベースに登録中...');
+      setLoadingSubText('カードとして実体化中...');
       
       const { error: insertError } = await supabase.from('cards').insert([{
         player_id: user.id,
@@ -210,7 +230,6 @@ export default function ForgeScreen() {
 
       if (insertError) throw new Error(`DB保存失敗: ${insertError.message}`);
 
-      // 💡 管理者・無制限ユーザー以外なら生成回数を1増やす
       if (!isAdmin && !isInfinite) {
         const newCount = forgeCount + 1;
         await supabase.from('profiles').update({ forge_count: newCount }).eq('id', user.id);
@@ -229,108 +248,115 @@ export default function ForgeScreen() {
     }
   };
 
-  // 表示用のバッジテキストを判定
   const renderBadgeText = () => {
-    if (isAdmin) return '👑 管理者モード: ゴッドモード';
-    if (isInfinite) return '🛠️ 開発モード: 無制限';
+    if (isAdmin) return '👑 MASTER: 無制限抽出';
+    if (isInfinite) return '🛠️ DEV: 制限解除';
     const remaining = Math.max(0, MAX_FORGE_LIMIT - forgeCount);
-    return `⚡ 残り生成回数: ${remaining} / ${MAX_FORGE_LIMIT}`;
-  };
-
-  // 💡 バッジのスタイルを判定
-  const getBadgeStyle = () => {
-    if (isAdmin) return styles.adminBadge;
-    if (isInfinite) return styles.devBadge;
-    return styles.limitBadge;
-  };
-
-  const getBadgeTextStyle = () => {
-    if (isAdmin) return styles.adminText;
-    if (isInfinite) return styles.devText;
-    return styles.limitText;
+    return `⚡ 本日の抽出可能回数: ${remaining} / ${MAX_FORGE_LIMIT}`;
   };
 
   return (
     <SafeAreaView style={styles.container}>
+      {/* 背景の装飾 */}
+      <View style={styles.bgDecorCircle1} />
+      <View style={styles.bgDecorCircle2} />
+
       <View style={styles.content}>
-        <View style={[styles.baseBadge, getBadgeStyle()]}>
-          <Text style={[styles.baseBadgeText, getBadgeTextStyle()]} numberOfLines={1} adjustsFontSizeToFit>
+        <View style={[styles.baseBadge, isAdmin ? styles.adminBadge : isInfinite ? styles.devBadge : styles.limitBadge]}>
+          <Text style={[styles.baseBadgeText, isAdmin ? styles.adminText : isInfinite ? styles.devText : styles.limitText]} numberOfLines={1}>
             {renderBadgeText()}
           </Text>
         </View>
 
         {loading ? (
           <View style={styles.loadingArea}>
-            <ActivityIndicator size="large" color="#3B82F6" />
-            <Text style={styles.loadingText}>次元からデータを抽出中...</Text>
+            <View style={styles.loadingCircle}>
+              <ActivityIndicator size="large" color="#FFFFFF" />
+            </View>
+            <Text style={styles.loadingText}>事象を抽出中...</Text>
             <Text style={styles.loadingSubText}>{loadingStep}</Text>
           </View>
         ) : (
           <View style={styles.mainBox}>
-            <Text style={styles.instruction} numberOfLines={1} adjustsFontSizeToFit>好きな名前を指定（任意）</Text>
-            <TextInput 
-              style={styles.input} 
-              placeholder="カードの名称を入力..." 
-              value={customName} 
-              onChangeText={setCustomName} 
-              maxLength={15} 
+            
+            {/* 💡 修正箇所2: importした画像変数を使用する */}
+            <Image 
+              source={logoImg} 
+              style={styles.mainLogo}
+              resizeMode="contain"
             />
+            
+            <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
+            
+            <View style={styles.inputContainer}>
+              <TextInput 
+                style={styles.input} 
+                placeholder="真名（カード名）を指定... [任意]" 
+                placeholderTextColor="#94A3B8"
+                value={customName} 
+                onChangeText={setCustomName} 
+                maxLength={15} 
+              />
+            </View>
             
             <View style={styles.buttonRow}>
               <TouchableOpacity 
-                style={[styles.actionButtonHalf, (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
-                onPress={launchCamera} 
-                activeOpacity={0.8}
+                style={[styles.actionButton, styles.cameraButton, (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
+                onPress={launchCamera} activeOpacity={0.8}
               >
-                <Camera color="#FFFFFF" size={20} />
-                <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit>カメラ</Text>
+                <Camera color="#FFFFFF" size={22} style={styles.btnIcon} />
+                <Text style={styles.actionButtonText}>次元カメラ起動</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
-                style={[styles.actionButtonHalf, styles.actionButtonLibrary, (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
-                onPress={launchLibrary} 
-                activeOpacity={0.8}
+                style={[styles.actionButton, styles.libraryButton, (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) && styles.actionButtonDisabled]} 
+                onPress={launchLibrary} activeOpacity={0.8}
               >
-                <ImageIcon color="#FFFFFF" size={20} />
-                <Text style={styles.actionButtonText} numberOfLines={1} adjustsFontSizeToFit>アルバム</Text>
+                <ImageIcon color="#FFFFFF" size={22} style={styles.btnIcon} />
+                <Text style={styles.actionButtonText}>ライブラリ抽出</Text>
               </TouchableOpacity>
             </View>
-            
-            <Text style={styles.subInfo}>現実の風景や商品を撮影してカード生成</Text>
           </View>
         )}
       </View>
 
-      <Modal visible={showResultModal} animationType="fade" transparent={true}>
+      {/* ド派手リザルトモーダル */}
+      <Modal visible={showResultModal} animationType="none" transparent={true}>
         <View style={styles.modalOverlay}>
-          <Animated.View style={[styles.modalContent, forgedCardResult?.rarity === 'DUST' && styles.dustContent, { transform: [{ translateX: shakeX }] }]}>
+          <Animated.View style={[styles.glowBackground, { 
+            backgroundColor: forgedCardResult ? getRarityConfig(forgedCardResult.rarity).glow : 'transparent',
+            opacity: glowOpacity,
+            transform: [{ rotate: spin }] 
+          }]} />
+
+          <Animated.View style={[styles.modalContent, { transform: [{ translateX: shakeX }] }]}>
             
-            <Text style={[styles.resultTitle, { color: getRarityConfig(forgedCardResult?.rarity).color }]} adjustsFontSizeToFit numberOfLines={1}>
-              {getRarityConfig(forgedCardResult?.rarity).effectTitle}
-            </Text>
+            <Animated.Text style={[styles.resultTitle, { color: getRarityConfig(forgedCardResult?.rarity || 'N').color, opacity: glowOpacity }]}>
+              {getRarityConfig(forgedCardResult?.rarity || 'N').effectTitle}
+            </Animated.Text>
             
-            <Animated.View style={[styles.cardPreview, { transform: [{ scale: cardScale }], opacity: cardOpacity }]}>
+            <Animated.View style={[styles.cardPreviewWrapper, { transform: [{ scale: cardScale }], opacity: cardOpacity }]}>
               <Image source={{ uri: forgedCardResult?.image_url }} style={styles.resultImage} resizeMode="cover" />
-              
               <View style={styles.cardOverlay}>
-                <Text style={styles.cardOverlayText} adjustsFontSizeToFit numberOfLines={1}>
-                  {forgedCardResult?.card_name}
+                <Text style={styles.cardOverlayStats} numberOfLines={1}>
+                  属性: {forgedCardResult?.element} | 戦闘力: {forgedCardResult?.status_total}
                 </Text>
               </View>
             </Animated.View>
             
-            <Text style={[styles.resultName, forgedCardResult?.rarity === 'DUST' && styles.dustTextWhite]} adjustsFontSizeToFit numberOfLines={1}>
+            <Animated.Text style={[
+              styles.hugeResultName, 
+              { color: getRarityConfig(forgedCardResult?.rarity || 'N').color },
+              { transform: [{ scale: nameScale }], opacity: nameOpacity }
+            ]} adjustsFontSizeToFit numberOfLines={1}>
               {forgedCardResult?.card_name}
-            </Text>
-            
-            <View style={styles.resultStatsRow}>
-              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]} numberOfLines={1}>属性: {forgedCardResult?.element}</Text>
-              <Text style={[styles.resultPower, forgedCardResult?.rarity === 'DUST' && styles.dustTextLight]} numberOfLines={1}>合計: {forgedCardResult?.status_total}</Text>
-            </View>
+            </Animated.Text>
 
-            <TouchableOpacity style={[styles.closeBtn, forgedCardResult?.rarity === 'DUST' && styles.dustCloseBtn]} onPress={() => setShowResultModal(false)}>
-              <Text style={[styles.closeBtnText, forgedCardResult?.rarity === 'DUST' && styles.dustTextWhite]} numberOfLines={1}>図鑑に格納</Text>
-            </TouchableOpacity>
+            <Animated.View style={{ opacity: nameOpacity, width: '100%', alignItems: 'center' }}>
+              <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)} activeOpacity={0.8}>
+                <Text style={styles.closeBtnText}>図鑑に格納する</Text>
+              </TouchableOpacity>
+            </Animated.View>
 
           </Animated.View>
         </View>
@@ -340,61 +366,62 @@ export default function ForgeScreen() {
 }
 
 const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#F8FAFC' },
-  content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 100 },
-  loadingArea: { alignItems: 'center' },
-  loadingText: { marginTop: 20, color: '#3B82F6', fontWeight: '800', fontSize: 16, textAlign: 'center' },
-  loadingSubText: { marginTop: 8, color: '#94A3B8', fontWeight: '600', fontSize: 12, textAlign: 'center' },
+  container: { flex: 1, backgroundColor: '#0F172A', position: 'relative' }, 
+  bgDecorCircle1: { position: 'absolute', top: -100, right: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: '#1E293B', opacity: 0.5 },
+  bgDecorCircle2: { position: 'absolute', bottom: -50, left: -100, width: 250, height: 250, borderRadius: 125, backgroundColor: '#1E293B', opacity: 0.5 },
   
-  baseBadge: {
-    flexDirection: 'row', alignItems: 'center', justifyContent: 'center',
-    paddingHorizontal: 16, paddingVertical: 8, 
-    borderRadius: 20, marginBottom: 40, alignSelf: 'center', maxWidth: '90%'
+  content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 60, zIndex: 10 },
+  
+  loadingArea: { alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.8)', padding: 40, borderRadius: 30, borderWidth: 1, borderColor: '#334155' },
+  loadingCircle: { backgroundColor: '#3B82F6', padding: 20, borderRadius: 50, marginBottom: 20, shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 15 },
+  loadingText: { color: '#FFFFFF', fontWeight: '900', fontSize: 18, textAlign: 'center', letterSpacing: 2 },
+  loadingSubText: { marginTop: 12, color: '#94A3B8', fontWeight: '600', fontSize: 13, textAlign: 'center' },
+  
+  baseBadge: { flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingHorizontal: 20, paddingVertical: 10, borderRadius: 30, marginBottom: 40, borderWidth: 1 },
+  baseBadgeText: { fontWeight: '800', fontSize: 12, letterSpacing: 1 },
+  adminBadge: { backgroundColor: 'rgba(254, 240, 138, 0.1)', borderColor: '#FEF08A' },
+  adminText: { color: '#FEF08A' },
+  devBadge: { backgroundColor: 'rgba(59, 130, 246, 0.1)', borderColor: '#3B82F6' },
+  devText: { color: '#60A5FA' },
+  limitBadge: { backgroundColor: 'rgba(236, 72, 153, 0.1)', borderColor: '#EC4899' },
+  limitText: { color: '#F472B6' },
+
+  mainBox: { width: '85%', maxWidth: 400, alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.85)', padding: 30, borderRadius: 32, borderWidth: 1, borderColor: '#334155', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
+  
+  mainLogo: {
+    width: '85%',
+    height: 55,
+    alignSelf: 'center',
+    marginBottom: 15
   },
-  baseBadgeText: { fontWeight: '700', fontSize: 13, flexShrink: 1 },
 
-  // 管理者向けゴッドモードバッジ（ゴールド風）
-  adminBadge: { backgroundColor: '#FEF08A' },
-  adminText: { color: '#854D0E' },
-
-  // 開発無制限バッジ
-  devBadge: { backgroundColor: '#EFF6FF' },
-  devText: { color: '#2563EB' },
+  instruction: { fontSize: 13, color: '#94A3B8', marginBottom: 30, fontWeight: '600', textAlign: 'center' },
   
-  // 一般ユーザー向けバッジスタイル
-  limitBadge: { backgroundColor: '#FDF2F8' },
-  limitText: { color: '#DB2777' },
-
-  mainBox: { width: '85%', maxWidth: 400, alignItems: 'center', backgroundColor: '#FFFFFF', padding: 25, borderRadius: 24, shadowColor: '#000', shadowOpacity: 0.05, shadowRadius: 10, elevation: 2 },
-  instruction: { fontSize: 14, color: '#64748B', marginBottom: 15, fontWeight: '600', textAlign: 'center', flexShrink: 1 },
-  input: { width: '100%', backgroundColor: '#F1F5F9', paddingHorizontal: 15, paddingVertical: 14, borderRadius: 12, fontSize: 15, marginBottom: 20 },
+  inputContainer: { width: '100%', marginBottom: 25 },
+  input: { width: '100%', backgroundColor: 'rgba(15, 23, 42, 0.6)', paddingHorizontal: 20, paddingVertical: 18, borderRadius: 16, fontSize: 16, color: '#FFFFFF', borderWidth: 1, borderColor: '#475569', fontWeight: '700', textAlign: 'center' },
   
-  buttonRow: { flexDirection: 'row', justifyContent: 'space-between', width: '100%', gap: 10 },
-  actionButtonHalf: { flex: 1, flexDirection: 'row', backgroundColor: '#3B82F6', height: 55, borderRadius: 15, alignItems: 'center', justifyContent: 'center' },
-  actionButtonLibrary: { backgroundColor: '#0F172A' },
-  actionButtonDisabled: { opacity: 0.4 }, // 制限時のボタンスタイル
-  actionButtonText: { color: '#FFFFFF', fontSize: 15, fontWeight: '800', marginLeft: 8, flexShrink: 1 },
+  buttonRow: { flexDirection: 'column', width: '100%', gap: 15 },
+  actionButton: { flexDirection: 'row', height: 60, borderRadius: 18, alignItems: 'center', justifyContent: 'center', shadowColor: '#000', shadowOpacity: 0.3, shadowRadius: 8, shadowOffset: { width: 0, height: 4 } },
+  cameraButton: { backgroundColor: '#3B82F6' },
+  libraryButton: { backgroundColor: '#475569' },
+  actionButtonDisabled: { opacity: 0.3 },
+  btnIcon: { marginRight: 10 },
+  actionButtonText: { color: '#FFFFFF', fontSize: 16, fontWeight: '900', letterSpacing: 1 },
   
-  subInfo: { color: '#94A3B8', fontSize: 11, marginTop: 15, fontWeight: '500', textAlign: 'center', flexShrink: 1, flexWrap: 'wrap' },
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.9)', justifyContent: 'center', alignItems: 'center', overflow: 'hidden' },
+  glowBackground: { position: 'absolute', width: height * 1.5, height: height * 1.5, borderRadius: height }, 
+  modalContent: { width: '100%', alignItems: 'center', justifyContent: 'center', zIndex: 10 },
   
-  modalOverlay: { flex: 1, backgroundColor: 'rgba(0,0,0,0.85)', justifyContent: 'center', alignItems: 'center' },
-  modalContent: { width: '85%', maxWidth: 350, maxHeight: '90%', backgroundColor: '#FFF', borderRadius: 24, padding: 20, alignItems: 'center', justifyContent: 'center' },
-  dustContent: { backgroundColor: '#18181B' },
-  resultTitle: { fontSize: 18, fontWeight: '900', marginBottom: 15, textAlign: 'center', flexShrink: 1 },
+  resultTitle: { fontSize: 22, fontWeight: '900', marginBottom: 20, textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 0, height: 2 }, textShadowRadius: 10, letterSpacing: 2 },
   
-  cardPreview: { width: '75%', aspectRatio: 3 / 4, borderRadius: 15, overflow: 'hidden', marginBottom: 15, borderWidth: 3, borderColor: '#DDD', position: 'relative' },
+  cardPreviewWrapper: { width: '70%', aspectRatio: 3 / 4, borderRadius: 20, overflow: 'hidden', borderWidth: 4, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 20 }, shadowOpacity: 0.5, shadowRadius: 30, elevation: 20 },
   resultImage: { width: '100%', height: '100%' },
   
-  cardOverlay: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'rgba(15, 23, 42, 0.75)', paddingVertical: 8, paddingHorizontal: 10 },
-  cardOverlayText: { color: '#FFFFFF', fontSize: 15, fontWeight: '900', textAlign: 'center', textShadowColor: 'rgba(0,0,0,0.8)', textShadowOffset: { width: 1, height: 1 }, textShadowRadius: 3, flexShrink: 1 },
+  cardOverlay: { position: 'absolute', bottom: 0, width: '100%', backgroundColor: 'rgba(0,0,0,0.8)', paddingVertical: 12, borderTopWidth: 1, borderTopColor: 'rgba(255,255,255,0.2)' },
+  cardOverlayStats: { color: '#94A3B8', fontSize: 12, fontWeight: '800', textAlign: 'center', letterSpacing: 1 },
   
-  resultName: { fontSize: 22, fontWeight: '900', color: '#0F172A', textAlign: 'center', flexShrink: 1 },
-  resultStatsRow: { flexDirection: 'row', gap: 15, marginTop: 8 },
-  resultPower: { fontSize: 14, color: '#64748B', fontWeight: '700', flexShrink: 1 },
-  closeBtn: { marginTop: 20, backgroundColor: '#0F172A', paddingVertical: 14, paddingHorizontal: 40, borderRadius: 15 },
-  closeBtnText: { color: '#FFF', fontWeight: '800', flexShrink: 1 },
-
-  dustTextWhite: { color: '#F8FAFC' },
-  dustTextLight: { color: '#94A3B8' },
-  dustCloseBtn: { backgroundColor: '#334155', borderWidth: 1, borderColor: '#475569' }
+  hugeResultName: { fontSize: 42, fontWeight: '900', textAlign: 'center', marginVertical: 30, textShadowColor: '#000', textShadowOffset: { width: 2, height: 4 }, textShadowRadius: 10, paddingHorizontal: 10, width: '100%' },
+  
+  closeBtn: { backgroundColor: '#FFFFFF', paddingVertical: 16, paddingHorizontal: 40, borderRadius: 30, shadowColor: '#FFFFFF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 10 },
+  closeBtnText: { color: '#0F172A', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
 });

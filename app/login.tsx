@@ -1,7 +1,10 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator, Image } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
+
+// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（階層が変わったため '../assets/...' になります）
+import logoImg from '../assets/images/logo.png';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
@@ -88,8 +91,13 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-      {/* 修正箇所: Gitのコンフリクトマーカーを削除し、正しい表示に統合しました */}
-      <Text style={styles.title}>SnapCard</Text>
+      
+      {/* 💡 修正箇所2: importした画像変数を使用する */}
+      <Image 
+        source={logoImg} 
+        style={styles.logo}
+        resizeMode="contain"
+      />
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
@@ -195,7 +203,15 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   scrollContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   container: { padding: 24, justifyContent: 'center', paddingTop: 80, paddingBottom: 40 },
-  title: { fontSize: 40, fontWeight: '900', color: '#0F172A', textAlign: 'center', letterSpacing: 2, marginBottom: 5 },
+  
+  logo: { 
+    width: '80%',       
+    maxWidth: 280,      
+    height: 100,        
+    alignSelf: 'center',
+    marginBottom: 10 
+  },
+  
   subtitle: { fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 40, fontWeight: '700' },
   formTitle: { color: '#475569', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 24 },
   
