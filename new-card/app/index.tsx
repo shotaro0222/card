@@ -3,6 +3,9 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 
+// ロゴコンポーネント
+import SnapCardLogo from './components/SnapCardLogo';
+
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -88,8 +91,8 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-      {/* 修正箇所: Gitのコンフリクトマーカーを削除し、正しい表示に統合しました */}
-      <Text style={styles.title}>SnapCard</Text>
+      {/* タイトルをテキストからロゴコンポーネントへ差し替え */}
+      <SnapCardLogo color="#0F172A" bgColor="#F8FAFC" scale={1.2} />
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
