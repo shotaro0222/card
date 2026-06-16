@@ -3,6 +3,9 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 
+// 💡 カスタムロゴコンポーネントをインポート
+import SnapCardLogo from './components/SnapCardLogo';
+
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -89,7 +92,9 @@ export default function LoginScreen() {
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
       
-      <Text style={styles.appTitle}>SNAP CARD</Text>
+      {/* 💡 テキストタイトルの代わりにコンポーネントロゴを配置 */}
+      <SnapCardLogo color="#0F172A" bgColor="#F8FAFC" scale={1.1} />
+      
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
@@ -196,7 +201,6 @@ const styles = StyleSheet.create({
   scrollContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   container: { padding: 24, justifyContent: 'center', paddingTop: 80, paddingBottom: 40 },
   
-  appTitle: { fontSize: 28, fontWeight: '900', color: '#0F172A', textAlign: 'center', letterSpacing: 2, marginBottom: 8 },
   subtitle: { fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 40, fontWeight: '700' },
   formTitle: { color: '#475569', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 24 },
   

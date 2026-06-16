@@ -7,6 +7,9 @@ import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Camera, Image as ImageIcon, Zap } from 'lucide-react-native';
 
+// 💡 先ほど作成したカスタムロゴコンポーネントをインポート
+import SnapCardLogo from '../components/SnapCardLogo';
+
 const { width, height } = Dimensions.get('window');
 
 const safeAlert = (title: string, msg: string) => {
@@ -276,7 +279,9 @@ export default function ForgeScreen() {
         ) : (
           <View style={styles.mainBox}>
             
-            <Text style={styles.appTitle}>SNAP CARD</Text>
+            {/* 💡 ここをテキストからSnapCardLogoコンポーネントに差し替えました */}
+            <SnapCardLogo color="#FFFFFF" bgColor="#1E293B" scale={0.9} />
+            
             <Text style={styles.appSubtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
             
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
@@ -381,7 +386,6 @@ const styles = StyleSheet.create({
 
   mainBox: { width: '90%', maxWidth: 450, alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.85)', paddingHorizontal: 28, paddingVertical: 35, borderRadius: 32, borderWidth: 1, borderColor: '#334155', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
   
-  appTitle: { fontSize: 28, fontWeight: '900', color: '#FFFFFF', textAlign: 'center', letterSpacing: 2, marginBottom: 8 },
   appSubtitle: { fontSize: 11, color: '#94A3B8', textAlign: 'center', letterSpacing: 1, marginBottom: 28, fontWeight: '700' },
 
   instruction: { fontSize: 13, color: '#94A3B8', marginBottom: 30, fontWeight: '600', textAlign: 'center' },
