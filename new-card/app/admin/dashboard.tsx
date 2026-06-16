@@ -3,6 +3,7 @@ import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Ale
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
+import * as DocumentPicker from 'expo-document-picker'; // 💡 新規統合: 3Dモデル(.glb)等のアップロード用
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { decode } from 'base64-arraybuffer';
@@ -86,11 +87,11 @@ export default function AdminDashboard() {
   const [newElement, setNewElement] = useState('');
   const [newRarity, setNewRarity] = useState('');
 
-  // ==================== 💡 8-新規. WebAR動的配信制御 ====================
+  // ==================== 💡 8. WebAR動的配信＆クライアント別オブジェクト管理 ====================
   const [arClientType, setArClientType] = useState<'global' | 'client_specific'>('global');
-  const [arTargetClientId, setArTargetClientId] = useState(''); // 特定の企業・プロモID
+  const [arTargetClientId, setArTargetClientId] = useState(''); // promo_linksテーブルの対象UUID
   const [arDisplayMode, setArDisplayMode] = useState<'3d_model' | 'card_frame' | 'hybrid'>('card_frame');
-  const [arAssetCustomUrl, setArAssetCustomUrl] = useState(''); // .glbモデルや特定画像のURLを指定
+  const [arAssetCustomUrl, setArAssetCustomUrl] = useState(''); // .glb等アセットのURL
   const [arBtnPlacement, setArBtnPlacement] = useState<'bottom_center' | 'top_right' | 'hidden'>('bottom_center');
   const [arActionText, setArActionText] = useState('アプリにデータを同期');
 
@@ -103,7 +104,7 @@ export default function AdminDashboard() {
       fetchBosses();
       fetchMasterData();
       fetchRandomBossConfig();
-      fetchArWebSettings(); // AR設定の取得
+      fetchArWebSettings();
     }, [])
   );
 
@@ -122,7 +123,7 @@ export default function AdminDashboard() {
         if (c.arBtnPlacement) setArBtnPlacement(c.arBtnPlacement);
         if (c.arActionText) setArActionText(c.arActionText);
       }
-    } catch (e) { console.log('AR設定フェッチスキップ', e); }
+    } catch (e) { console.log('AR設定フェッチ非活性', e); }
   };
 
   const fetchRandomBossConfig = async () => {
@@ -198,7 +199,7 @@ export default function AdminDashboard() {
       }
       if (data) setUgcCards(data);
     } catch (err) {
-      console.log('UGC Fetch Exception:', err);
+      console.log('UGC 取得失敗:', err);
     }
   };
 
@@ -238,24 +239,58 @@ export default function AdminDashboard() {
   };
 
   // ==========================================
-  // 分析データ CSVエクスポート
+  // 💡 3Dオブジェクト(.glbなど)のファイルピッカー＆インサート関数
   // ==========================================
-  const exportAnalyticsCSV = async () => {
+  const handleUploadArAsset = async (promoId: string) => {
+    if (!promoId || promoId === 'ALL') {
+      Alert.alert('エラー', 'アセットを個別指定するには、最初に対象のプロモID（クライアントUUID）を入力してください。');
+      return;
+    }
+
     try {
-      const header = "Date,DAU,MAU,Total_Cards,Total_Battles,Males,Females,Teens,Twenties,Thirties,OverForties\n";
-      const row = `${new Date().toLocaleDateString()},${analyticsData.dau},${analyticsData.mau},${analyticsData.total_posts},${analyticsData.total_battles},${analyticsData.demographics.males},${analyticsData.demographics.females},${analyticsData.demographics.teens},${analyticsData.demographics.twenties},${analyticsData.demographics.thirties},${analyticsData.demographics.overForties}\n`;
-      const csvString = header + row;
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['application/octet-stream', 'model/gltf-binary', 'image/*'],
+        copyToCacheDirectory: true
+      });
 
-      const fileUri = FileSystem.documentDirectory + `analytics_${Date.now()}.csv`;
-      await FileSystem.writeAsStringAsync(fileUri, csvString, { encoding: FileSystem.EncodingType.UTF8 });
+      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      
+      setLoading(true);
+      const asset = result.assets[0];
 
-      if (await Sharing.isAvailableAsync()) {
-        await Sharing.shareAsync(fileUri);
+      let arrayBuffer;
+      if (Platform.OS === 'web') {
+        const response = await fetch(asset.uri);
+        arrayBuffer = await response.arrayBuffer();
       } else {
-        Alert.alert("エラー", "このデバイスでは共有機能がサポートされていません");
+        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+        arrayBuffer = decode(base64);
       }
+
+      const fileName = `${promoId}/${Date.now()}_${asset.name}`;
+      
+      const { error: uploadError } = await supabase.storage
+        .from('ar_assets')
+        .upload(fileName, arrayBuffer, { contentType: asset.mimeType || 'application/octet-stream', upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from('ar_assets').getPublicUrl(fileName);
+
+      const { error: dbError } = await supabase
+        .from('promo_links')
+        .update({ ar_asset_url: publicUrl, ar_display_mode: arDisplayMode })
+        .eq('id', promoId);
+
+      if (dbError) throw dbError;
+
+      setArAssetCustomUrl(publicUrl);
+      Alert.alert('アップロード成功', `アセット「${asset.name}」をクライアントレコードに直接紐付けました！`);
+
     } catch (e: any) {
-      Alert.alert("エクスポート失敗", e.message);
+      Alert.alert('アップロード失敗', e.message);
+    } finally {
+      setLoading(false);
     }
   };
 
@@ -401,7 +436,7 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const prefix = ['次元の', '彷徨える', '極大の', 'アビス・', 'ヴォイド・', '災厄の', '覚醒せし'];
-      const suffix = ['ゴーレム', 'ベヒモス', 'フェニックス', 'リヴァイアサン', 'ナイトメア', '機神龍', 'タイタン'];
+      const suffix = ['ゴーレム', 'ベヒモス', 'フェニックス', 'リヴァイアsan', 'ナイトメア', '機神龍', 'タイタン'];
       const randomName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
       
       const randomElement = elementsList[Math.floor(Math.random() * elementsList.length)] || '闇';
@@ -429,7 +464,7 @@ export default function AdminDashboard() {
         const dropRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedDropPrompt } });
         if (dropRes.data?.imageUrl) finalDropUrl = dropRes.data.imageUrl;
       } catch (aiErr) {
-        console.log('AI Generation Timeout / Non-configured Endpoint. Fallback to sample data placeholders.', aiErr);
+        console.log('AI自動散布タイムアウト、プレースホルダー適用。', aiErr);
       }
 
       const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
@@ -450,7 +485,7 @@ export default function AdminDashboard() {
       }]);
       if (bossError) throw bossError;
 
-      Alert.alert('自動生成成功', `マップ上に「${randomName}」を完全にランダム突発出現させ、配置に成功しました！`);
+      Alert.alert('自動生成成功', `マップ上に「${randomName}」を完全自動降臨させました！`);
       fetchBosses();
     } catch (err: any) {
       Alert.alert('エラー', err.message);
@@ -495,7 +530,7 @@ export default function AdminDashboard() {
   };
 
   // ==========================================
-  // 💡 新機能: WebARダイナミック制御の更新処理
+  // 💡 WebARダイナミック制御の更新処理
   // ==========================================
   const handleUpdateArConfig = async () => {
     setLoading(true);
@@ -515,7 +550,7 @@ export default function AdminDashboard() {
       });
 
       if (error) throw error;
-      Alert.alert('同期成功', 'WebARのリアルタイム配信パラメータを更新しました。ブラウザ側に即時反映されます。');
+      Alert.alert('同期成功', 'WebARパラメータを更新しました。ブラウザ側にリアルタイム同期されます。');
     } catch (e: any) {
       Alert.alert('エラー', e.message);
     } finally {
@@ -551,7 +586,7 @@ export default function AdminDashboard() {
           <Text style={[styles.tabText, activeTab === 'bosses' && styles.activeTabText]}>ボス/マップ</Text>
         </TouchableOpacity>
         
-        {/* 💡 導線追加: WebAR制御タブ */}
+        {/* 動的制御＆ファイルアップローダー付WebARタブ */}
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'ar' && styles.activeTabBtn]} onPress={() => setActiveTab('ar')}>
           <Layers color={activeTab === 'ar' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'ar' && styles.activeTabText]}>WebAR制御</Text>
@@ -887,16 +922,15 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 💡 8. 拡張：WebAR制御 ===================== */}
+        {/* ===================== 💡 8. WebAR制御（クライアント別 3Dオブジェクト直登録版） ===================== */}
         {activeTab === 'ar' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>🌐 WebAR 動的配信・オーバーレイ制御</Text>
+            <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト管理パネル</Text>
             <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
-              ブラウザ（WebAR）で起動した画面の、表示アセット、クライアントスコープ、およびボタンレイアウトをリアルタイム制御します。
+              特定の企業・キャンペーンURLごとに、空間へ配置する3Dモデルファイルや表示モードをリアルタイムに指示・上書きします。
             </Text>
 
-            {/* 対象クライアントの切り替え */}
-            <Text style={styles.label}>対象クライアント / 配信ターゲット指定</Text>
+            <Text style={styles.label}>1. 配信制御範囲の指定</Text>
             <View style={styles.radioGroup}>
               <TouchableOpacity style={[styles.radioBtn, arClientType === 'global' && styles.activeRadio]} onPress={() => setArClientType('global')}>
                 <Text style={[styles.radioText, arClientType === 'global' && styles.activeRadioText]}>全体一括配信</Text>
@@ -906,69 +940,64 @@ export default function AdminDashboard() {
               </TouchableOpacity>
             </View>
 
-            {arClientType === 'client_specific' && (
-              <>
-                <Text style={styles.label}>ターゲットID（プロモID or 企業UUIDを指定）</Text>
-                <TextInput 
-                  style={styles.input} 
-                  value={arTargetClientId} 
-                  onChangeText={setArTargetClientId} 
-                  placeholder="例: promo_linksのIDまたは企業識別符号を入力" 
-                />
-              </>
-            )}
-
-            <View style={styles.divider} />
-
-            {/* 表示オブジェクトの指定・変更 */}
-            <Text style={styles.label}>空間表示オブジェクト（レンダリング種別）</Text>
-            <View style={[styles.radioGroup, {flexWrap: 'wrap'}]}>
-              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'card_frame' && styles.activeRadio, {minWidth: '45%'}]} onPress={() => setArDisplayMode('card_frame')}>
-                <Text style={[styles.radioText, arDisplayMode === 'card_frame' && styles.activeRadioText]}>2Dカード枠浮遊</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === '3d_model' && styles.activeRadio, {minWidth: '45%'}]} onPress={() => setArDisplayMode('3d_model')}>
-                <Text style={[styles.radioText, arDisplayMode === '3d_model' && styles.activeRadioText]}>等身大3Dモデル(.glb)</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'hybrid' && styles.activeRadio, {minWidth: '100%', marginTop: 6}]} onPress={() => setArDisplayMode('hybrid')}>
-                <Text style={[styles.radioText, arDisplayMode === 'hybrid' && styles.activeRadioText]}>ハイブリッド（3D＋情報ステータス）</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.label}>カスタムアセット外部参照URL（空欄の場合は標準画像）</Text>
+            <Text style={styles.label}>2. 対象のプロモURL（クライアントUUID）を入力</Text>
             <TextInput 
               style={styles.input} 
-              value={arAssetCustomUrl} 
-              onChangeText={setArAssetCustomUrl} 
-              placeholder="https://.../asset.glb またはカスタムテクスチャURL" 
+              value={arTargetClientId} 
+              onChangeText={setArTargetClientId} 
+              placeholder="promo_links テーブルの UUID を指定" 
+              disabled={arClientType === 'global'}
               autoCapitalize="none"
             />
 
+            <Text style={styles.label}>3. ARオブジェクトの直接アップロード（.glb 3Dモデル または 画像）</Text>
+            <TouchableOpacity 
+              style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#10B981', marginTop: 8, marginBottom: 12 }]} 
+              onPress={() => handleUploadArAsset(arTargetClientId)}
+              disabled={loading || arClientType === 'global'}
+            >
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>📁 ファイルを選択して直接紐付け</Text>}
+            </TouchableOpacity>
+
+            {arAssetCustomUrl ? (
+              <View style={{ backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, marginBottom: 10 }}>
+                <Text style={{ fontSize: 12, color: '#475569', fontWeight: 'bold' }}>🔗 反映中のカスタムオブジェクトURL:</Text>
+                <Text style={{ fontSize: 11, color: '#2563EB', marginTop: 4 }} numberOfLines={2}>{arAssetCustomUrl}</Text>
+              </View>
+            ) : null}
+
             <View style={styles.divider} />
 
-            {/* 表示させるボタンの配置 */}
-            <Text style={styles.label}>既存AR画面上へのUIボタン配置ロケーション</Text>
-            <View style={[styles.radioGroup, {flexWrap: 'wrap'}]}>
-              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'bottom_center' && styles.activeRadio]} onPress={() => setArBtnPlacement('bottom_center')}>
-                <Text style={[styles.radioText, arBtnPlacement === 'bottom_center' && styles.activeRadioText]}>下部中央固定</Text>
+            <Text style={styles.label}>4. レンダリング種別（表示形式）</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'card_frame' && styles.activeRadio]} onPress={() => setArDisplayMode('card_frame')}>
+                <Text style={[styles.radioText, arDisplayMode === 'card_frame' && styles.activeRadioText]}>2Dカード枠浮遊</Text>
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'top_right' && styles.activeRadio]} onPress={() => setArBtnPlacement('top_right')}>
-                <Text style={[styles.radioText, arBtnPlacement === 'top_right' && styles.activeRadioText]}>右上コンパクト</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'hidden' && styles.activeRadio]} onPress={() => setArBtnPlacement('hidden')}>
-                <Text style={[styles.radioText, arBtnPlacement === 'hidden' && styles.activeRadioText]}>配置しない(OFF)</Text>
+              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === '3d_model' && styles.activeRadio]} onPress={() => setArDisplayMode('3d_model')}>
+                <Text style={[styles.radioText, arDisplayMode === '3d_model' && styles.activeRadioText]}>等身大3Dモデル</Text>
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.label}>配置ボタンのアクション文言（ボタンテキスト）</Text>
+            <Text style={styles.label}>5. アプリ誘導コンフィグ（画面上のボタン配置）</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'bottom_center' && styles.activeRadio]} onPress={() => setArBtnPlacement('bottom_center')}>
+                <Text style={[styles.radioText, arBtnPlacement === 'bottom_center' && styles.activeRadioText]}>下部中央固定</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'hidden' && styles.activeRadio]} onPress={() => setArBtnPlacement('hidden')}>
+                <Text style={[styles.radioText, arBtnPlacement === 'hidden' && styles.activeRadioText]}>非表示（OFF）</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>配置ボタンのアクション文言</Text>
             <TextInput 
               style={styles.input} 
               value={arActionText} 
               onChangeText={setArActionText} 
-              placeholder="例: この限定アセットをアプリで実体化！" 
+              placeholder="例: 限定カードをGET！" 
             />
 
-            <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#EC4899'}]} onPress={handleUpdateArConfig} disabled={loading}>
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>WebARへ設定を即時同期・上書き</Text>}
+            <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#EC4899', marginTop: 30}]} onPress={handleUpdateArConfig} disabled={loading}>
+              <Text style={styles.primaryBtnText}>この構成をWebAR全体に即時同期</Text>
             </TouchableOpacity>
           </View>
         )}
