@@ -599,6 +599,30 @@ export default function AdminDashboard() {
     }
   };
 
+  // ==========================================
+  // 💡 分析データをCSVでエクスポート
+  // ==========================================
+  const exportAnalyticsCSV = async () => {
+    try {
+      const csvContent = `分析レポート\nDAU,${analyticsData.dau}\nMAU,${analyticsData.mau}\n総投稿数,${analyticsData.total_posts}\n総バトル数,${analyticsData.total_battles}`;
+      if (Platform.OS === 'web') {
+        const blob = new Blob([csvContent], { type: 'text/csv' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `analytics_${Date.now()}.csv`;
+        a.click();
+      } else {
+        const fileUri = `${FileSystem.documentDirectory}analytics_${Date.now()}.csv`;
+        await FileSystem.writeAsStringAsync(fileUri, csvContent);
+        await Sharing.shareAsync(fileUri);
+      }
+      Alert.alert('成功', 'CSVファイルをエクスポートしました！');
+    } catch (e: any) {
+      Alert.alert('エラー', `エクスポート失敗: ${e.message}`);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
