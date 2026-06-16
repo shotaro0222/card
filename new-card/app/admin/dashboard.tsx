@@ -242,17 +242,6 @@ export default function AdminDashboard() {
   const pickWebFile = async (accept: string) => {
     return await new Promise<File | null>((resolve) => {
       const input = document.createElement('input');
-      let resolved = false;
-      const cleanup = () => {
-        if (!resolved) {
-          resolved = true;
-          resolve(null);
-        }
-        if (input.parentNode) {
-          input.parentNode.removeChild(input);
-        }
-      };
-
       input.type = 'file';
       input.accept = accept;
       input.style.position = 'fixed';
@@ -260,24 +249,51 @@ export default function AdminDashboard() {
       input.style.opacity = '0';
       input.style.width = '1px';
       input.style.height = '1px';
+      input.style.pointerEvents = 'none';
 
       input.onchange = () => {
-        if (!resolved) {
-          resolved = true;
-          resolve(input.files?.[0] ?? null);
-        }
-        cleanup();
+        resolve(input.files?.[0] ?? null);
+        if (input.parentNode) input.parentNode.removeChild(input);
       };
-      input.oncancel = cleanup;
-      input.onblur = () => {
-        if (!input.files?.length) {
-          cleanup();
-        }
-      };
-
       document.body.appendChild(input);
       input.click();
     });
+  };
+
+  const pickWebDocument = async () => {
+    try {
+      const result = await DocumentPicker.getDocumentAsync({
+        type: ['*/*']
+      });
+      if (result.type === 'success') return result;
+    } catch (_) {
+      // fallback to native file input on web
+    }
+    const file = await pickWebFile('*/*');
+    if (!file) return { type: 'cancel' as const };
+    return {
+      type: 'success' as const,
+      uri: URL.createObjectURL(file),
+      name: file.name,
+      size: file.size,
+      mimeType: file.type,
+      file
+    } as const;
+  };
+
+  const getArrayBufferFromAsset = async (asset: any) => {
+    if (Platform.OS === 'web') {
+      if (asset.arrayBuffer) return await asset.arrayBuffer();
+      if (asset.file?.arrayBuffer) return await asset.file.arrayBuffer();
+      if (asset.uri) {
+        const response = await fetch(asset.uri);
+        return await response.arrayBuffer();
+      }
+      throw new Error('Web のファイルを読み込めませんでした');
+    }
+
+    const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
+    return decode(base64);
   };
 
   // ==========================================
@@ -289,29 +305,17 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      let asset: any;
-      if (Platform.OS === 'web') {
-        const file = await pickWebFile('.glb,image/*');
-        if (!file) return;
-        asset = file;
-      } else {
-        const result = await DocumentPicker.getDocumentAsync({
-          type: ['application/octet-stream', 'model/gltf-binary', 'image/*'],
-          copyToCacheDirectory: true
-        });
-        if (result.canceled || !result.assets || result.assets.length === 0) return;
-        asset = result.assets[0];
-      }
-      
+      const result = Platform.OS === 'web'
+        ? await pickWebDocument()
+        : await DocumentPicker.getDocumentAsync({
+            type: ['*/*'],
+            copyToCacheDirectory: true
+          });
+      if (result.type !== 'success') return;
+      const asset: any = result;
       setLoading(true);
 
-      let arrayBuffer;
-      if (Platform.OS === 'web') {
-        arrayBuffer = await asset.arrayBuffer();
-      } else {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
-        arrayBuffer = decode(base64);
-      }
+      const arrayBuffer = await getArrayBufferFromAsset(asset);
 
       const fileName = `${promoId}/${Date.now()}_asset_${asset.name}`;
       const { error: uploadError } = await supabase.storage
@@ -343,29 +347,17 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      let asset: any;
-      if (Platform.OS === 'web') {
-        const file = await pickWebFile('.mind,image/*');
-        if (!file) return;
-        asset = file;
-      } else {
-        const result = await DocumentPicker.getDocumentAsync({
-          type: ['application/octet-stream', 'image/*'], // .mindファイルや画像を想定
-          copyToCacheDirectory: true
-        });
-        if (result.canceled || !result.assets || result.assets.length === 0) return;
-        asset = result.assets[0];
-      }
-      
+      const result = Platform.OS === 'web'
+        ? await pickWebDocument()
+        : await DocumentPicker.getDocumentAsync({
+            type: ['*/*'],
+            copyToCacheDirectory: true
+          });
+      if (result.type !== 'success') return;
+      const asset: any = result;
       setLoading(true);
 
-      let arrayBuffer;
-      if (Platform.OS === 'web') {
-        arrayBuffer = await asset.arrayBuffer();
-      } else {
-        const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
-        arrayBuffer = decode(base64);
-      }
+      const arrayBuffer = await getArrayBufferFromAsset(asset);
 
       const fileName = `${promoId}/${Date.now()}_marker_${asset.name}`;
       const { error: uploadError } = await supabase.storage
