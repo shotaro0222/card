@@ -287,7 +287,7 @@ export default function ForgeScreen() {
             <View style={styles.inputContainer}>
               <TextInput 
                 style={styles.input} 
-                placeholder="真名（カード名）を指定... [任意]" 
+                placeholder="カード名を指定... [任意]" 
                 placeholderTextColor="#94A3B8"
                 value={customName} 
                 onChangeText={setCustomName} 
@@ -301,7 +301,7 @@ export default function ForgeScreen() {
                 onPress={launchCamera} activeOpacity={0.8}
               >
                 <Camera color="#FFFFFF" size={22} style={styles.btnIcon} />
-                <Text style={styles.actionButtonText}>次元カメラ起動</Text>
+                <Text style={styles.actionButtonText}>カメラ起動</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -309,7 +309,7 @@ export default function ForgeScreen() {
                 onPress={launchLibrary} activeOpacity={0.8}
               >
                 <ImageIcon color="#FFFFFF" size={22} style={styles.btnIcon} />
-                <Text style={styles.actionButtonText}>ライブラリ抽出</Text>
+                <Text style={styles.actionButtonText}>ライブラリから抽出</Text>
               </TouchableOpacity>
             </View>
           </View>
@@ -350,7 +350,7 @@ export default function ForgeScreen() {
 
             <Animated.View style={{ opacity: nameOpacity, width: '100%', alignItems: 'center' }}>
               <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)} activeOpacity={0.8}>
-                <Text style={styles.closeBtnText}>図鑑に格納する</Text>
+                <Text style={styles.closeBtnText}>図鑑に保存する</Text>
               </TouchableOpacity>
             </Animated.View>
 

@@ -1,5 +1,5 @@
 import React, { useState, useCallback, useRef, useEffect } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform, Dimensions } from 'react-native';
+import { ScrollView, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform, Dimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
@@ -261,7 +261,7 @@ export default function ForgeScreen() {
       <View style={styles.bgDecorCircle1} />
       <View style={styles.bgDecorCircle2} />
 
-      <View style={styles.content}>
+      <ScrollView contentContainerStyle={styles.content} style={styles.scrollContainer} keyboardShouldPersistTaps="handled">
         <View style={[styles.baseBadge, isAdmin ? styles.adminBadge : isInfinite ? styles.devBadge : styles.limitBadge]}>
           <Text style={[styles.baseBadgeText, isAdmin ? styles.adminText : isInfinite ? styles.devText : styles.limitText]} numberOfLines={1}>
             {renderBadgeText()}
@@ -282,14 +282,12 @@ export default function ForgeScreen() {
             {/* 💡 ここをテキストからSnapCardLogoコンポーネントに差し替えました */}
             <SnapCardLogo color="#FFFFFF" bgColor="#1E293B" scale={0.9} />
             
-            <Text style={styles.appSubtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
-            
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
             
             <View style={styles.inputContainer}>
               <TextInput 
                 style={styles.input} 
-                placeholder="真名（カード名）を指定... [任意]" 
+                placeholder="カード名を指定... [任意]" 
                 placeholderTextColor="#94A3B8"
                 value={customName} 
                 onChangeText={setCustomName} 
@@ -303,7 +301,7 @@ export default function ForgeScreen() {
                 onPress={launchCamera} activeOpacity={0.8}
               >
                 <Camera color="#FFFFFF" size={22} style={styles.btnIcon} />
-                <Text style={styles.actionButtonText}>次元カメラ起動</Text>
+                <Text style={styles.actionButtonText}>カメラ起動</Text>
               </TouchableOpacity>
               
               <TouchableOpacity 
@@ -311,12 +309,12 @@ export default function ForgeScreen() {
                 onPress={launchLibrary} activeOpacity={0.8}
               >
                 <ImageIcon color="#FFFFFF" size={22} style={styles.btnIcon} />
-                <Text style={styles.actionButtonText}>ライブラリ抽出</Text>
+                <Text style={styles.actionButtonText}>ライブラリから抽出</Text>
               </TouchableOpacity>
             </View>
           </View>
         )}
-      </View>
+      </ScrollView>
 
       {/* ド派手リザルトモーダル */}
       <Modal visible={showResultModal} animationType="none" transparent={true}>
@@ -352,7 +350,7 @@ export default function ForgeScreen() {
 
             <Animated.View style={{ opacity: nameOpacity, width: '100%', alignItems: 'center' }}>
               <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)} activeOpacity={0.8}>
-                <Text style={styles.closeBtnText}>図鑑に格納する</Text>
+                <Text style={styles.closeBtnText}>図鑑に保存する</Text>
               </TouchableOpacity>
             </Animated.View>
 
@@ -368,7 +366,11 @@ const styles = StyleSheet.create({
   bgDecorCircle1: { position: 'absolute', top: -100, right: -50, width: 300, height: 300, borderRadius: 150, backgroundColor: '#1E293B', opacity: 0.5 },
   bgDecorCircle2: { position: 'absolute', bottom: -50, left: -100, width: 250, height: 250, borderRadius: 125, backgroundColor: '#1E293B', opacity: 0.5 },
   
-  content: { flex: 1, justifyContent: 'center', alignItems: 'center', paddingBottom: 60, zIndex: 10 },
+  // 上下の余白を確保してコンテンツが端で切れないように調整
+  // content は ScrollView の contentContainerStyle として使う（flex を外す）
+  content: { justifyContent: 'flex-start', alignItems: 'center', paddingTop: 40, paddingBottom: 60, zIndex: 10 },
+  // ScrollView 自体のスタイル
+  scrollContainer: { flex: 1 },
   
   loadingArea: { alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.8)', padding: 40, borderRadius: 30, borderWidth: 1, borderColor: '#334155' },
   loadingCircle: { backgroundColor: '#3B82F6', padding: 20, borderRadius: 50, marginBottom: 20, shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 15 },

@@ -97,7 +97,7 @@ export default function LoginScreen() {
       
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
-      <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
+      <Text style={styles.formTitle}>{isSignUp ? '【新規登録】' : '【ログイン】'}</Text>
 
       <TextInput
         style={styles.input}
@@ -119,7 +119,7 @@ export default function LoginScreen() {
 
       {isSignUp && (
         <View style={styles.demoSection}>
-          <Text style={styles.sectionTitle}>司令官プロファイル（マーケティング割付用）</Text>
+          <Text style={styles.sectionTitle}>プロファイル</Text>
           
           <TextInput
             style={styles.input}
@@ -178,7 +178,7 @@ export default function LoginScreen() {
         <>
           {!isSignUp ? (
             <TouchableOpacity style={styles.button} onPress={signInWithEmail}>
-              <Text style={styles.buttonText}>ゲートを開放してログイン</Text>
+              <Text style={styles.buttonText}>ログイン</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[styles.button, { backgroundColor: '#10b981' }]} onPress={signUpWithEmail}>
@@ -188,7 +188,7 @@ export default function LoginScreen() {
 
           <TouchableOpacity style={styles.toggleLink} onPress={() => setIsSignUp(!isSignUp)}>
             <Text style={styles.toggleLinkText}>
-              {isSignUp ? 'すでにアカウントをお持ちの方（ログインへ）' : '新しく軍勢を登録する（新規作成へ）'}
+              {isSignUp ? 'すでにアカウントをお持ちの方（ログインへ）' : '新しく登録する（新規作成へ）'}
             </Text>
           </TouchableOpacity>
         </>
