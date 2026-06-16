@@ -69,9 +69,9 @@ export default function AdminDashboard() {
 
   // ==================== 5-新規. ランダムボス設定 ====================
   const [randomBossEnabled, setRandomBossEnabled] = useState(false);
-  const [randomBossInterval, setRandomBossInterval] = useState('1h'); // 1h, 3h, 6h, 12h, 24h
-  const [baseLat, setBaseLat] = useState('35.6983'); // ランダム出現の中心点緯度
-  const [baseLng, setBaseLng] = useState('139.4130'); // ランダム出現の中心点経度
+  const [randomBossInterval, setRandomBossInterval] = useState('1h');
+  const [baseLat, setBaseLat] = useState('35.6983');
+  const [baseLng, setBaseLng] = useState('139.4130');
 
   // ==================== 6. お知らせ配信 ====================
   const [annTitle, setAnnTitle] = useState('');
@@ -86,6 +86,14 @@ export default function AdminDashboard() {
   const [newElement, setNewElement] = useState('');
   const [newRarity, setNewRarity] = useState('');
 
+  // ==================== 💡 8-新規. WebAR動的配信制御 ====================
+  const [arClientType, setArClientType] = useState<'global' | 'client_specific'>('global');
+  const [arTargetClientId, setArTargetClientId] = useState(''); // 特定の企業・プロモID
+  const [arDisplayMode, setArDisplayMode] = useState<'3d_model' | 'card_frame' | 'hybrid'>('card_frame');
+  const [arAssetCustomUrl, setArAssetCustomUrl] = useState(''); // .glbモデルや特定画像のURLを指定
+  const [arBtnPlacement, setArBtnPlacement] = useState<'bottom_center' | 'top_right' | 'hidden'>('bottom_center');
+  const [arActionText, setArActionText] = useState('アプリにデータを同期');
+
   // 初回データ読み込み
   useFocusEffect(
     useCallback(() => {
@@ -95,12 +103,28 @@ export default function AdminDashboard() {
       fetchBosses();
       fetchMasterData();
       fetchRandomBossConfig();
+      fetchArWebSettings(); // AR設定の取得
     }, [])
   );
 
   // ==========================================
   // データフェッチ関数
   // ==========================================
+  const fetchArWebSettings = async () => {
+    try {
+      const { data } = await supabase.from('system_config').select('*').eq('id', 'webar_dynamic_settings').single();
+      if (data && data.config_data) {
+        const c = data.config_data;
+        if (c.arClientType) setArClientType(c.arClientType);
+        if (c.arTargetClientId) setArTargetClientId(c.arTargetClientId);
+        if (c.arDisplayMode) setArDisplayMode(c.arDisplayMode);
+        if (c.arAssetCustomUrl) setArAssetCustomUrl(c.arAssetCustomUrl);
+        if (c.arBtnPlacement) setArBtnPlacement(c.arBtnPlacement);
+        if (c.arActionText) setArActionText(c.arActionText);
+      }
+    } catch (e) { console.log('AR設定フェッチスキップ', e); }
+  };
+
   const fetchRandomBossConfig = async () => {
     try {
       const { data } = await supabase.from('system_config').select('*').eq('id', 'random_boss_settings').single();
@@ -165,7 +189,6 @@ export default function AdminDashboard() {
         .order('created_at', { ascending: false })
         .limit(50);
       if (error) {
-        console.warn('JOIN failed, fallback to raw fetch:', error);
         const fallback = await supabase
           .from('cards')
           .select('id, card_name, image_url, is_hidden, created_at, player_id')
@@ -317,7 +340,6 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // 既存の個別ボス配置処理
   const handleCreateBoss = async () => {
     setLoading(true);
     try {
@@ -360,9 +382,6 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // ==========================================
-  // 新機能: ランダムボス自動生成・設定保存処理
-  // ==========================================
   const handleUpdateRandomBossConfig = async () => {
     setLoading(true);
     try {
@@ -381,7 +400,6 @@ export default function AdminDashboard() {
   const triggerInstantRandomBoss = async () => {
     setLoading(true);
     try {
-      // 1. 各種アセットの完全ランダムシード選定
       const prefix = ['次元の', '彷徨える', '極大の', 'アビス・', 'ヴォイド・', '災厄の', '覚醒せし'];
       const suffix = ['ゴーレム', 'ベヒモス', 'フェニックス', 'リヴァイアサン', 'ナイトメア', '機神龍', 'タイタン'];
       const randomName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
@@ -391,19 +409,16 @@ export default function AdminDashboard() {
       
       const randomHp = Math.floor(Math.random() * 2000) + 1000;
       const randomAtk = Math.floor(Math.random() * 150) + 50;
-      const randomDef = Math.floor(Math.random() * 100) + 30;
+      const randomDrop = Math.floor(Math.random() * 100) + 30;
 
-      // 現在の中心座標から一定の範囲(およそ数キロ圏内)にランダム散布
       const latOffset = (Math.random() - 0.5) * 0.04;
       const lngOffset = (Math.random() - 0.5) * 0.04;
       const finalLat = (parseFloat(baseLat) || 35.6983) + latOffset;
       const finalLng = (parseFloat(baseLng) || 139.4130) + lngOffset;
 
-      // 2. 完全自動AIプロンプトアセンブリ
       const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
       const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
 
-      // 3. AI画像生成API（エッジファンクション）のコール
       let finalBossUrl = 'https://via.placeholder.com/300x400.png?text=AI+Boss';
       let finalDropUrl = 'https://via.placeholder.com/300x400.png?text=AI+Drop';
 
@@ -417,7 +432,6 @@ export default function AdminDashboard() {
         console.log('AI Generation Timeout / Non-configured Endpoint. Fallback to sample data placeholders.', aiErr);
       }
 
-      // 4. マップデータベースへのインプット
       const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
         title: `【突発ランダム出現】${randomName}`, sponsor_name: 'システム自動生成',
         target_lat: finalLat, target_lng: finalLng, radius_meters: 1500, is_active: true
@@ -431,7 +445,7 @@ export default function AdminDashboard() {
       if (dropError) throw dropError;
 
       const { error: bossError } = await supabase.from('bosses').insert([{
-        name: randomName, hp: randomHp, atk: randomAtk, def: randomDef,
+        name: randomName, hp: randomHp, atk: randomAtk, def: randomDrop,
         element: randomElement, image_url: finalBossUrl, trigger_campaign_id: campData.id
       }]);
       if (bossError) throw bossError;
@@ -480,6 +494,35 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
+  // ==========================================
+  // 💡 新機能: WebARダイナミック制御の更新処理
+  // ==========================================
+  const handleUpdateArConfig = async () => {
+    setLoading(true);
+    try {
+      const config_data = {
+        arClientType,
+        arTargetClientId: arClientType === 'client_specific' ? arTargetClientId : 'ALL',
+        arDisplayMode,
+        arAssetCustomUrl,
+        arBtnPlacement,
+        arActionText
+      };
+
+      const { error } = await supabase.from('system_config').upsert({
+        id: 'webar_dynamic_settings',
+        config_data
+      });
+
+      if (error) throw error;
+      Alert.alert('同期成功', 'WebARのリアルタイム配信パラメータを更新しました。ブラウザ側に即時反映されます。');
+    } catch (e: any) {
+      Alert.alert('エラー', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -507,6 +550,13 @@ export default function AdminDashboard() {
           <ShieldAlert color={activeTab === 'bosses' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'bosses' && styles.activeTabText]}>ボス/マップ</Text>
         </TouchableOpacity>
+        
+        {/* 💡 導線追加: WebAR制御タブ */}
+        <TouchableOpacity style={[styles.tabBtn, activeTab === 'ar' && styles.activeTabBtn]} onPress={() => setActiveTab('ar')}>
+          <Layers color={activeTab === 'ar' ? '#FFF' : '#64748B'} size={18} />
+          <Text style={[styles.tabText, activeTab === 'ar' && styles.activeTabText]}>WebAR制御</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'announcements' && styles.activeTabBtn]} onPress={() => setActiveTab('announcements')}>
           <Bell color={activeTab === 'announcements' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'announcements' && styles.activeTabText]}>お知らせ</Text>
@@ -580,7 +630,7 @@ export default function AdminDashboard() {
         {activeTab === 'ugc' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>ユーザー生成カード (UGC) 管理</Text>
-            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>不適切なカード（公序良俗に反する画像やテキスト）を非表示にできます。</Text>
+            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>不適切なカードを非表示にできます。</Text>
             {ugcCards.length === 0 ? (
               <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>UGCカードがありません</Text>
             ) : (
@@ -713,11 +763,10 @@ export default function AdminDashboard() {
         {/* ===================== 5. BOSS & MAP ===================== */}
         {activeTab === 'bosses' && (
           <View>
-            {/* 新機能コンポーネント: ランダムボス出現スケジュール管理 */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>🎲 ランダムボス自動出現システム</Text>
               <Text style={{color:'#64748B', fontSize: 12, marginBottom: 12}}>
-                有効にすると、指定した時間ごとにシステムがボス名称、ステータス、配置場所、ドロップアセット、AIグラフィックを完全ランダム自動ビルドしてマップへ配置します。
+                有効にすると、指定した時間ごとにシステムがボスを完全ランダム自動ビルドしてマップへ配置します。
               </Text>
 
               <Text style={styles.label}>自動出現状態</Text>
@@ -763,7 +812,6 @@ export default function AdminDashboard() {
               </TouchableOpacity>
             </View>
 
-            {/* 既存機能コンポーネント: 個別・協賛ボス固定配置 */}
             <View style={styles.card}>
               <Text style={styles.cardTitle}>手動・協賛ボス固定配置マニュアル設定</Text>
 
@@ -839,6 +887,92 @@ export default function AdminDashboard() {
           </View>
         )}
 
+        {/* ===================== 💡 8. 拡張：WebAR制御 ===================== */}
+        {activeTab === 'ar' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>🌐 WebAR 動的配信・オーバーレイ制御</Text>
+            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
+              ブラウザ（WebAR）で起動した画面の、表示アセット、クライアントスコープ、およびボタンレイアウトをリアルタイム制御します。
+            </Text>
+
+            {/* 対象クライアントの切り替え */}
+            <Text style={styles.label}>対象クライアント / 配信ターゲット指定</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, arClientType === 'global' && styles.activeRadio]} onPress={() => setArClientType('global')}>
+                <Text style={[styles.radioText, arClientType === 'global' && styles.activeRadioText]}>全体一括配信</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, arClientType === 'client_specific' && styles.activeRadio]} onPress={() => setArClientType('client_specific')}>
+                <Text style={[styles.radioText, arClientType === 'client_specific' && styles.activeRadioText]}>特定コード・企業指定</Text>
+              </TouchableOpacity>
+            </View>
+
+            {arClientType === 'client_specific' && (
+              <>
+                <Text style={styles.label}>ターゲットID（プロモID or 企業UUIDを指定）</Text>
+                <TextInput 
+                  style={styles.input} 
+                  value={arTargetClientId} 
+                  onChangeText={setArTargetClientId} 
+                  placeholder="例: promo_linksのIDまたは企業識別符号を入力" 
+                />
+              </>
+            )}
+
+            <View style={styles.divider} />
+
+            {/* 表示オブジェクトの指定・変更 */}
+            <Text style={styles.label}>空間表示オブジェクト（レンダリング種別）</Text>
+            <View style={[styles.radioGroup, {flexWrap: 'wrap'}]}>
+              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'card_frame' && styles.activeRadio, {minWidth: '45%'}]} onPress={() => setArDisplayMode('card_frame')}>
+                <Text style={[styles.radioText, arDisplayMode === 'card_frame' && styles.activeRadioText]}>2Dカード枠浮遊</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === '3d_model' && styles.activeRadio, {minWidth: '45%'}]} onPress={() => setArDisplayMode('3d_model')}>
+                <Text style={[styles.radioText, arDisplayMode === '3d_model' && styles.activeRadioText]}>等身大3Dモデル(.glb)</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'hybrid' && styles.activeRadio, {minWidth: '100%', marginTop: 6}]} onPress={() => setArDisplayMode('hybrid')}>
+                <Text style={[styles.radioText, arDisplayMode === 'hybrid' && styles.activeRadioText]}>ハイブリッド（3D＋情報ステータス）</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>カスタムアセット外部参照URL（空欄の場合は標準画像）</Text>
+            <TextInput 
+              style={styles.input} 
+              value={arAssetCustomUrl} 
+              onChangeText={setArAssetCustomUrl} 
+              placeholder="https://.../asset.glb またはカスタムテクスチャURL" 
+              autoCapitalize="none"
+            />
+
+            <View style={styles.divider} />
+
+            {/* 表示させるボタンの配置 */}
+            <Text style={styles.label}>既存AR画面上へのUIボタン配置ロケーション</Text>
+            <View style={[styles.radioGroup, {flexWrap: 'wrap'}]}>
+              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'bottom_center' && styles.activeRadio]} onPress={() => setArBtnPlacement('bottom_center')}>
+                <Text style={[styles.radioText, arBtnPlacement === 'bottom_center' && styles.activeRadioText]}>下部中央固定</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'top_right' && styles.activeRadio]} onPress={() => setArBtnPlacement('top_right')}>
+                <Text style={[styles.radioText, arBtnPlacement === 'top_right' && styles.activeRadioText]}>右上コンパクト</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'hidden' && styles.activeRadio]} onPress={() => setArBtnPlacement('hidden')}>
+                <Text style={[styles.radioText, arBtnPlacement === 'hidden' && styles.activeRadioText]}>配置しない(OFF)</Text>
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.label}>配置ボタンのアクション文言（ボタンテキスト）</Text>
+            <TextInput 
+              style={styles.input} 
+              value={arActionText} 
+              onChangeText={setArActionText} 
+              placeholder="例: この限定アセットをアプリで実体化！" 
+            />
+
+            <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#EC4899'}]} onPress={handleUpdateArConfig} disabled={loading}>
+              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>WebARへ設定を即時同期・上書き</Text>}
+            </TouchableOpacity>
+          </View>
+        )}
+
         {/* ===================== 6. お知らせ ===================== */}
         {activeTab === 'announcements' && (
           <View style={styles.card}>
@@ -878,7 +1012,7 @@ export default function AdminDashboard() {
         {activeTab === 'master' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>データベース拡張 (属性 / レアリティ)</Text>
-            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>システムに新しい属性やレアリティを追加します。追加した内容はガチャやボス配置で選択可能になります。</Text>
+            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>システムに新しい属性やレアリティを追加します。</Text>
             
             <Text style={styles.label}>現在の属性一覧</Text>
             <Text style={styles.listItemSub}>{elementsList.join(' / ')}</Text>
@@ -918,7 +1052,6 @@ const styles = StyleSheet.create({
   content: { padding: 16, paddingBottom: 100 },
   card: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 24, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0' },
   cardTitle: { fontSize: 18, fontWeight: '800', color: '#0F172A', marginBottom: 16 },
-  sectionHeading: { fontSize: 14, fontWeight: '800', color: '#64748B', marginBottom: 12, marginLeft: 4 },
   statsGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 10 },
   statBox: { flex: 1, minWidth: '45%', backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0' },
   statLabel: { color: '#64748B', fontSize: 12, fontWeight: '700', marginBottom: 4 },
