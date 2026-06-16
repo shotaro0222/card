@@ -7,6 +7,9 @@ import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Camera, Image as ImageIcon, Zap } from 'lucide-react-native';
 
+// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（さらに階層が1つ深いため '../../assets/...' になります）
+import logoImg from '../../assets/images/logo.png';
+
 const { width, height } = Dimensions.get('window');
 
 const safeAlert = (title: string, msg: string) => {
@@ -37,7 +40,7 @@ export default function ForgeScreen() {
   const cardOpacity = useRef(new Animated.Value(0)).current;
   const glowOpacity = useRef(new Animated.Value(0)).current;
   const spinAnim = useRef(new Animated.Value(0)).current;
-  const nameScale = useRef(new Animated.Value(3)).current; // ドーン！と出すための初期値
+  const nameScale = useRef(new Animated.Value(3)).current; 
   const nameOpacity = useRef(new Animated.Value(0)).current;
   const shakeX = useRef(new Animated.Value(0)).current;
   
@@ -89,7 +92,6 @@ export default function ForgeScreen() {
   };
 
   const startResultEffect = (rarity: string) => {
-    // リセット
     cardScale.setValue(0);
     cardOpacity.setValue(0);
     glowOpacity.setValue(0);
@@ -100,20 +102,16 @@ export default function ForgeScreen() {
 
     const config = getRarityConfig(rarity);
 
-    // 後光の回転ループ
     Animated.loop(
       Animated.timing(spinAnim, { toValue: 1, duration: 8000, easing: Easing.linear, useNativeDriver: true })
     ).start();
 
-    // 登場シーケンス
     Animated.sequence([
-      // 1. 背景の光とカードが飛び出してくる
       Animated.parallel([
         Animated.timing(glowOpacity, { toValue: 1, duration: 400, useNativeDriver: true }),
         Animated.spring(cardScale, { toValue: 1, friction: 6, tension: 40, useNativeDriver: true }),
         Animated.timing(cardOpacity, { toValue: 1, duration: 300, useNativeDriver: true })
       ]),
-      // 2. 画面揺れ（高レアのみ）
       ...(config.hasShake ? [
         Animated.sequence([
           Animated.timing(shakeX, { toValue: 15, duration: 40, useNativeDriver: true }),
@@ -121,7 +119,6 @@ export default function ForgeScreen() {
           Animated.timing(shakeX, { toValue: 0, duration: 40, useNativeDriver: true })
         ])
       ] : []),
-      // 3. 名前が「ドーン！」とスタンプのように迫ってくる
       Animated.parallel([
         Animated.spring(nameScale, { toValue: 1, friction: 4, tension: 50, useNativeDriver: true }),
         Animated.timing(nameOpacity, { toValue: 1, duration: 200, useNativeDriver: true })
@@ -281,9 +278,10 @@ export default function ForgeScreen() {
           </View>
         ) : (
           <View style={styles.mainBox}>
-            {/* 💡 修正箇所: タイトルテキストヘッダーを排除し、ロゴ画像をメインビジュアルとして統合 */}
+            
+            {/* 💡 修正箇所2: importした画像変数を使用する */}
             <Image 
-              source={require('../assets/images/logo.png')} 
+              source={logoImg} 
               style={styles.mainLogo}
               resizeMode="contain"
             />
@@ -325,7 +323,6 @@ export default function ForgeScreen() {
       {/* ド派手リザルトモーダル */}
       <Modal visible={showResultModal} animationType="none" transparent={true}>
         <View style={styles.modalOverlay}>
-          {/* 回転する後光エフェクト */}
           <Animated.View style={[styles.glowBackground, { 
             backgroundColor: forgedCardResult ? getRarityConfig(forgedCardResult.rarity).glow : 'transparent',
             opacity: glowOpacity,
@@ -347,7 +344,6 @@ export default function ForgeScreen() {
               </View>
             </Animated.View>
             
-            {/* ドーン！と出る名前 */}
             <Animated.Text style={[
               styles.hugeResultName, 
               { color: getRarityConfig(forgedCardResult?.rarity || 'N').color },
@@ -392,7 +388,6 @@ const styles = StyleSheet.create({
 
   mainBox: { width: '85%', maxWidth: 400, alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.85)', padding: 30, borderRadius: 32, borderWidth: 1, borderColor: '#334155', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
   
-  // 💡 修正箇所: メインビジュアルロゴ用のスタイルを追加
   mainLogo: {
     width: '85%',
     height: 55,
