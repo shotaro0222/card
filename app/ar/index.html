@@ -1,118 +1,157 @@
 <!DOCTYPE html>
 <html lang="ja">
 <head>
-    <meta charset="UTF-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
-    <title>SnapCard AR Viewer</title>
-    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
-    <style>
-        body { margin: 0; overflow: hidden; background-color: #000; font-family: sans-serif; }
-        /* ARキャンバスやカメラ映像がここに入ります（MindARや8thWallのセットアップ領域） */
-        #ar-container { width: 100vw; height: 100vh; position: absolute; top: 0; left: 0; z-index: 1; }
-        
-        #ar-ui-overlay {
-            position: absolute;
-            bottom: 50px;
-            width: 100%;
-            text-align: center;
-            z-index: 999;
-            display: none;
-        }
-        #app-redirect-btn {
-            padding: 16px 32px;
-            font-size: 16px;
-            font-weight: 900;
-            color: #fff;
-            background-color: #ec4899;
-            border: none;
-            border-radius: 30px;
-            box-shadow: 0 4px 20px rgba(0,0,0,0.5);
-            cursor: pointer;
-            transition: transform 0.2s;
-        }
-        #app-redirect-btn:active { transform: scale(0.95); }
-    </style>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SNAP CARD - WebAR</title>
+  
+  <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
+  
+  <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+
+  <style>
+    body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #000; }
+    #loading-screen {
+      position: absolute; top: 0; left: 0; width: 100%; height: 100%;
+      background-color: #0F172A; display: flex; flex-direction: column;
+      justify-content: center; align-items: center; z-index: 9999; color: #FFF;
+    }
+    .spinner {
+      border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #3B82F6;
+      border-radius: 50%; width: 40px; height: 40px; animation: spin 1s linear infinite;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    
+    #ui-container {
+      position: absolute; bottom: 30px; left: 0; width: 100%;
+      display: none; justify-content: center; z-index: 100;
+    }
+    #action-btn {
+      background-color: #EC4899; color: white; border: none;
+      padding: 15px 30px; border-radius: 30px; font-size: 16px; font-weight: bold;
+      box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: pointer;
+    }
+  </style>
 </head>
 <body>
 
-    <div id="ar-container"></div>
+  <div id="loading-screen">
+    <div class="spinner"></div>
+    <p style="margin-top: 15px; font-weight: bold; letter-spacing: 1px;">空間データを同期中...</p>
+  </div>
 
-    <div id="ar-ui-overlay">
-        <button id="app-redirect-btn">アクションを実行</button>
-    </div>
+  <div id="ar-container"></div>
 
-    <script>
-        // 💡 ご自身のSupabaseのURLとAnon Keyに書き換えてください
-        const SUPABASE_URL = "https://your-project.supabase.co";
-        const SUPABASE_ANON_KEY = "your-anon-key";
-        const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+  <div id="ui-container">
+    <button id="action-btn">アプリでカードをGET!</button>
+  </div>
 
-        // URLパラメータの解析 (?type=xxx&id=yyy)
-        const urlParams = new URLSearchParams(window.location.search);
-        const arType = urlParams.get('type');
-        const targetId = urlParams.get('id');
+  <script>
+    // ==========================================
+    // 1. Supabaseの初期設定
+    // ==========================================
+    const SUPABASE_URL = 'YOUR_SUPABASE_URL'; // ★書き換えてください
+    const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY'; // ★書き換えてください
+    const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
-        window.addEventListener('load', async () => {
-            if (!arType || !targetId) return;
+    async function initAR() {
+      // ==========================================
+      // 2. URLパラメータからプロモIDを取得
+      // 例: https://your-vercel.app/?id=1234-abcd
+      // ==========================================
+      const urlParams = new URLSearchParams(window.location.search);
+      const promoId = urlParams.get('id');
 
-            const overlay = document.getElementById('ar-ui-overlay');
-            const btn = document.getElementById('app-redirect-btn');
+      if (!promoId) {
+        alert("エラー: プロモIDが指定されていません。\nQRコードを再確認してください。");
+        return;
+      }
 
-            try {
-                // ==========================================
-                // アイデア1: 法人プラン連動（プロモカード獲得）
-                // ==========================================
-                if (arType === 'promo') {
-                    const { data: promo } = await supabase.from('promo_links').select('*, fixed_cards(*)').eq('id', targetId).single();
-                    if (promo) {
-                        // ※ここにARのレンダリング処理（promo.fixed_cards.image_urlを使用）を追加
+      try {
+        // ==========================================
+        // 3. Supabaseからマーカーと3DモデルのURLを取得
+        // ==========================================
+        const { data, error } = await supabase
+          .from('promo_links')
+          .select('ar_marker_url, ar_asset_url, ar_display_mode')
+          .eq('id', promoId)
+          .single();
 
-                        btn.innerText = `🎁 ${promo.corporate_name} 特典をアプリで受け取る`;
-                        btn.style.backgroundColor = "#10B981"; 
-                        btn.onclick = () => {
-                            window.location.href = `snapcard://claim-promo?promo_id=${targetId}`;
-                        };
-                        overlay.style.display = 'block';
-                    }
-                }
+        if (error || !data || !data.ar_marker_url || !data.ar_asset_url) {
+          throw new Error("ARデータの取得に失敗しました。対象のアセットが登録されていません。");
+        }
 
-                // ==========================================
-                // アイデア2: 等身大ボス降臨イベント
-                // ==========================================
-                else if (arType === 'boss') {
-                    const { data: boss } = await supabase.from('bosses').select('*').eq('id', targetId).single();
-                    if (boss) {
-                        // ※ここにARのレンダリング処理（ボスの3Dモデルや画像を使用）を追加
+// ==========================================
+// 4. アセットタイプに応じて動的に要素を生成
+// ==========================================
+const assetUrl = data.ar_asset_url;
+let entityHTML = "";
 
-                        btn.innerText = `⚔️ アプリに戻って「${boss.name}」を討伐！`;
-                        btn.style.backgroundColor = "#EF4444"; 
-                        btn.onclick = () => {
-                            window.location.href = `snapcard://start-battle?boss_id=${targetId}`;
-                        };
-                        overlay.style.display = 'block';
-                    }
-                }
+// 拡張子またはDBのフラグで判定（ここではURLの末尾で簡易判定）
+if (assetUrl.match(/\.(glb|gltf)$/i)) {
+  // 3Dモデルの場合
+  entityHTML = `
+    <a-assets><a-asset-item id="dynamicAsset" src="${assetUrl}"></a-asset-item></a-assets>
+    <a-gltf-model src="#dynamicAsset" position="0 0 0" scale="0.5 0.5 0.5"></a-gltf-model>
+  `;
+} else if (assetUrl.match(/\.(mp4|webm)$/i)) {
+  // 動画の場合（ビデオプレーンとして表示）
+  entityHTML = `
+    <a-assets><video id="dynamicAsset" src="${assetUrl}" autoplay loop="true" muted playsinline></video></a-assets>
+    <a-video src="#dynamicAsset" width="1" height="0.56" position="0 0 0"></a-video>
+  `;
+} else {
+  // 画像の場合
+  entityHTML = `
+    <a-assets><img id="dynamicAsset" src="${assetUrl}"></a-assets>
+    <a-image src="#dynamicAsset" width="1" height="1" position="0 0 0"></a-image>
+  `;
+}
 
-                // ==========================================
-                // アイデア3: UGCカード現実ディスプレー
-                // ==========================================
-                else if (arType === 'ugc') {
-                    const { data: card } = await supabase.from('cards').select('*').eq('id', targetId).single();
-                    if (card) {
-                        // ※ここにARのレンダリング処理（作成したカード画像を空間に配置）を追加
+const sceneHTML = `
+  <a-scene 
+    mindar-image="imageTargetSrc: ${data.ar_marker_url}; uiError:yes; uiLoading:yes; uiScanning:yes;" 
+    color-space="sRGB" 
+    renderer="colorManagement: true, physicallyCorrectLights" 
+    vr-mode-ui="enabled: false" 
+    device-orientation-permission-ui="enabled: false">
+    
+    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-                        btn.innerText = `📸 SNSでハッシュタグをつけてシェア！`;
-                        btn.style.backgroundColor = "#3B82F6"; 
-                        btn.onclick = () => {
-                            window.location.href = `snapcard://share-back?card_id=${targetId}`;
-                        };
-                        overlay.style.display = 'block';
-                    }
-                }
-            } catch (error) {
-                console.error('ARデータの取得に失敗:', error);
-            }
+    <a-entity mindar-image-target="targetIndex: 0">
+      ${entityHTML}
+    </a-entity>
+  </a-scene>
+`;
+
+document.getElementById('ar-container').innerHTML = sceneHTML;
+
+        // ==========================================
+        // 5. ボタンの表示とアプリ遷移ロジック
+        // ==========================================
+        const uiContainer = document.getElementById('ui-container');
+        const actionBtn = document.getElementById('action-btn');
+        uiContainer.style.display = 'flex';
+
+        actionBtn.addEventListener('click', () => {
+          // Expoアプリのディープリンクへ飛ばす（UUIDを渡す）
+          window.location.href = `snapcard://claim-promo?promo_id=${promoId}`;
+          
+          // アプリが入っていない場合のためのフォールバック処理を仕込むことも可能
+          setTimeout(() => {
+             // AppStore/GooglePlayへの誘導など
+          }, 2000);
         });
-    </script>
+
+      } catch (err) {
+        alert(err.message);
+        document.getElementById('loading-screen').innerHTML = `<p style="color:red; font-weight:bold;">${err.message}</p>`;
+      }
+    }
+
+    // 起動
+    initAR();
+  </script>
 </body>
 </html>
