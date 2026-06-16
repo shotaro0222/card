@@ -91,7 +91,7 @@ export default function LoginScreen() {
       
       {/* 💡 テキストからロゴ画像へ変更 */}
       <Image 
-        source={require('./assets/logo.png')} // ※ファイルの階層に合わせて '../assets/logo.png' や '../../assets/logo.png' に調整してください
+        source={require('./assets/images/logo.png')} // ※ファイルの階層に合わせて '../assets/logo.png' や '../../assets/logo.png' に調整してください
         style={styles.logo}
         resizeMode="contain"
       />
