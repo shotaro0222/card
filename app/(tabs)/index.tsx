@@ -282,8 +282,6 @@ export default function ForgeScreen() {
             {/* 💡 ここをテキストからSnapCardLogoコンポーネントに差し替えました */}
             <SnapCardLogo color="#FFFFFF" bgColor="#1E293B" scale={0.9} />
             
-            <Text style={styles.appSubtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
-            
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
             
             <View style={styles.inputContainer}>
