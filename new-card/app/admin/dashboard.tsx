@@ -239,6 +239,47 @@ export default function AdminDashboard() {
     return supabase.storage.from('card_images').getPublicUrl(fileName).data.publicUrl;
   };
 
+  const pickWebFile = async (accept: string) => {
+    return await new Promise<File | null>((resolve) => {
+      const input = document.createElement('input');
+      let resolved = false;
+      const cleanup = () => {
+        if (!resolved) {
+          resolved = true;
+          resolve(null);
+        }
+        if (input.parentNode) {
+          input.parentNode.removeChild(input);
+        }
+      };
+
+      input.type = 'file';
+      input.accept = accept;
+      input.style.position = 'fixed';
+      input.style.left = '-9999px';
+      input.style.opacity = '0';
+      input.style.width = '1px';
+      input.style.height = '1px';
+
+      input.onchange = () => {
+        if (!resolved) {
+          resolved = true;
+          resolve(input.files?.[0] ?? null);
+        }
+        cleanup();
+      };
+      input.oncancel = cleanup;
+      input.onblur = () => {
+        if (!input.files?.length) {
+          cleanup();
+        }
+      };
+
+      document.body.appendChild(input);
+      input.click();
+    });
+  };
+
   // ==========================================
   // 💡 3Dオブジェクト(.glb)のアップロード
   // ==========================================
@@ -248,19 +289,25 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/octet-stream', 'model/gltf-binary', 'image/*'],
-        copyToCacheDirectory: true
-      });
-      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      let asset: any;
+      if (Platform.OS === 'web') {
+        const file = await pickWebFile('.glb,image/*');
+        if (!file) return;
+        asset = file;
+      } else {
+        const result = await DocumentPicker.getDocumentAsync({
+          type: ['application/octet-stream', 'model/gltf-binary', 'image/*'],
+          copyToCacheDirectory: true
+        });
+        if (result.canceled || !result.assets || result.assets.length === 0) return;
+        asset = result.assets[0];
+      }
       
       setLoading(true);
-      const asset = result.assets[0];
 
       let arrayBuffer;
       if (Platform.OS === 'web') {
-        const response = await fetch(asset.uri);
-        arrayBuffer = await response.arrayBuffer();
+        arrayBuffer = await asset.arrayBuffer();
       } else {
         const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
         arrayBuffer = decode(base64);
@@ -269,7 +316,7 @@ export default function AdminDashboard() {
       const fileName = `${promoId}/${Date.now()}_asset_${asset.name}`;
       const { error: uploadError } = await supabase.storage
         .from('ar_assets')
-        .upload(fileName, arrayBuffer, { contentType: asset.mimeType || 'application/octet-stream', upsert: true });
+        .upload(fileName, arrayBuffer, { contentType: asset.type || asset.mimeType || 'application/octet-stream', upsert: true });
 
       if (uploadError) throw uploadError;
 
@@ -296,19 +343,25 @@ export default function AdminDashboard() {
       return;
     }
     try {
-      const result = await DocumentPicker.getDocumentAsync({
-        type: ['application/octet-stream', 'image/*'], // .mindファイルや画像を想定
-        copyToCacheDirectory: true
-      });
-      if (result.canceled || !result.assets || result.assets.length === 0) return;
+      let asset: any;
+      if (Platform.OS === 'web') {
+        const file = await pickWebFile('.mind,image/*');
+        if (!file) return;
+        asset = file;
+      } else {
+        const result = await DocumentPicker.getDocumentAsync({
+          type: ['application/octet-stream', 'image/*'], // .mindファイルや画像を想定
+          copyToCacheDirectory: true
+        });
+        if (result.canceled || !result.assets || result.assets.length === 0) return;
+        asset = result.assets[0];
+      }
       
       setLoading(true);
-      const asset = result.assets[0];
 
       let arrayBuffer;
       if (Platform.OS === 'web') {
-        const response = await fetch(asset.uri);
-        arrayBuffer = await response.arrayBuffer();
+        arrayBuffer = await asset.arrayBuffer();
       } else {
         const base64 = await FileSystem.readAsStringAsync(asset.uri, { encoding: FileSystem.EncodingType.Base64 });
         arrayBuffer = decode(base64);
@@ -317,7 +370,7 @@ export default function AdminDashboard() {
       const fileName = `${promoId}/${Date.now()}_marker_${asset.name}`;
       const { error: uploadError } = await supabase.storage
         .from('ar_markers')
-        .upload(fileName, arrayBuffer, { contentType: asset.mimeType || 'application/octet-stream', upsert: true });
+        .upload(fileName, arrayBuffer, { contentType: asset.type || asset.mimeType || 'application/octet-stream', upsert: true });
 
       if (uploadError) throw uploadError;
 
