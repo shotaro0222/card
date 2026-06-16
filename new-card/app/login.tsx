@@ -4,7 +4,7 @@ import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 
 // 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（階層が変わったため '../assets/...' になります）
-import logoImg from './assets/images/logo.png';
+import logoImg from '../assets/images/logo.png';
 
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
