@@ -283,7 +283,7 @@ export default function ForgeScreen() {
           <View style={styles.mainBox}>
             <View style={styles.boxHeader}>
               <Zap color="#3B82F6" size={24} />
-              <Text style={styles.boxTitle}>VOID FORGE</Text>
+              <Text style={styles.boxTitle}>カード生成</Text>
             </View>
             
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
