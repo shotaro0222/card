@@ -276,7 +276,7 @@ export default function ForgeScreen() {
         ) : (
           <View style={styles.mainBox}>
             
-            <Text style={styles.appTitle}>SNAPSHOT CARD</Text>
+            <Text style={styles.appTitle}>SNAP CARD</Text>
             <Text style={styles.appSubtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
             
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
