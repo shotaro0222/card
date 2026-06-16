@@ -3,9 +3,6 @@ import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView,
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 
-// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（require()を使用してExpoのバンドラーで正しく認識させます）
-const logoImg = require('./assets/images/logo.png');
-
 export default function LoginScreen() {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -92,12 +89,7 @@ export default function LoginScreen() {
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
       
-      {/* 💡 修正箇所2: importした画像変数を使用する */}
-      <Image 
-        source={logoImg} 
-        style={styles.logo}
-        resizeMode="contain"
-      />
+      <Text style={styles.appTitle}>SNAPSHOT CARD</Text>
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
@@ -204,14 +196,7 @@ const styles = StyleSheet.create({
   scrollContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   container: { padding: 24, justifyContent: 'center', paddingTop: 80, paddingBottom: 40 },
   
-  logo: { 
-    width: '80%',       
-    maxWidth: 280,      
-    height: 100,        
-    alignSelf: 'center',
-    marginBottom: 10 
-  },
-  
+  appTitle: { fontSize: 28, fontWeight: '900', color: '#0F172A', textAlign: 'center', letterSpacing: 2, marginBottom: 8 },
   subtitle: { fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 40, fontWeight: '700' },
   formTitle: { color: '#475569', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 24 },
   

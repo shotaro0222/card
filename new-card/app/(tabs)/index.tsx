@@ -7,9 +7,6 @@ import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Camera, Image as ImageIcon, Zap } from 'lucide-react-native';
 
-// 💡 修正箇所1: 画像をファイルの先頭で確実にインポートする（require()を使用してExpoのバンドラーで正しく認識させます）
-const logoImg = require('../assets/images/logo.png');
-
 const { width, height } = Dimensions.get('window');
 
 const safeAlert = (title: string, msg: string) => {
@@ -279,12 +276,8 @@ export default function ForgeScreen() {
         ) : (
           <View style={styles.mainBox}>
             
-            {/* 💡 修正箇所2: importした画像変数を使用する */}
-            <Image 
-              source={logoImg} 
-              style={styles.mainLogo}
-              resizeMode="contain"
-            />
+            <Text style={styles.appTitle}>SNAPSHOT CARD</Text>
+            <Text style={styles.appSubtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
             
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
             
@@ -386,14 +379,10 @@ const styles = StyleSheet.create({
   limitBadge: { backgroundColor: 'rgba(236, 72, 153, 0.1)', borderColor: '#EC4899' },
   limitText: { color: '#F472B6' },
 
-  mainBox: { width: '85%', maxWidth: 400, alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.85)', padding: 30, borderRadius: 32, borderWidth: 1, borderColor: '#334155', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
+  mainBox: { width: '90%', maxWidth: 450, alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.85)', paddingHorizontal: 28, paddingVertical: 35, borderRadius: 32, borderWidth: 1, borderColor: '#334155', shadowColor: '#000', shadowOpacity: 0.5, shadowRadius: 20, shadowOffset: { width: 0, height: 10 } },
   
-  mainLogo: {
-    width: '85%',
-    height: 55,
-    alignSelf: 'center',
-    marginBottom: 15
-  },
+  appTitle: { fontSize: 28, fontWeight: '900', color: '#FFFFFF', textAlign: 'center', letterSpacing: 2, marginBottom: 8 },
+  appSubtitle: { fontSize: 11, color: '#94A3B8', textAlign: 'center', letterSpacing: 1, marginBottom: 28, fontWeight: '700' },
 
   instruction: { fontSize: 13, color: '#94A3B8', marginBottom: 30, fontWeight: '600', textAlign: 'center' },
   
