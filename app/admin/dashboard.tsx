@@ -49,6 +49,9 @@ export default function AdminDashboard() {
   // ==================== 5. ボス / マップ配置 ====================
   const [bosses, setBosses] = useState<any[]>([]);
   const [bName, setBName] = useState('');
+  // ボスの公開スケジュール (ISO 文字列)
+  const [bStartAt, setBStartAt] = useState('');
+  const [bEndAt, setBEndAt] = useState('');
   const [bHp, setBHp] = useState('1500');
   const [bAtk, setBAtk] = useState('100');
   const [bDef, setBDef] = useState('50');
@@ -87,6 +90,11 @@ export default function AdminDashboard() {
   const [newElement, setNewElement] = useState('');
   const [newRarity, setNewRarity] = useState('');
 
+  // 直接配布セグメント設定
+  const [directTargetGender, setDirectTargetGender] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
+  const [directTargetAge, setDirectTargetAge] = useState<'ALL' | 'TEENS' | 'TWENTIES' | 'THIRTIES'>('ALL');
+  const [directTargetLocation, setDirectTargetLocation] = useState('');
+
   // ==================== 💡 8. WebAR動的配信＆クライアント別オブジェクト管理 ====================
   const [arClientType, setArClientType] = useState<'global' | 'client_specific'>('global');
   const [arTargetClientId, setArTargetClientId] = useState(''); // promo_linksテーブルの対象UUID
@@ -95,6 +103,9 @@ export default function AdminDashboard() {
   const [arMarkerCustomUrl, setArMarkerCustomUrl] = useState(''); // 💡 新規: マーカーファイルのURL
   const [arBtnPlacement, setArBtnPlacement] = useState<'bottom_center' | 'top_right' | 'hidden'>('bottom_center');
   const [arActionText, setArActionText] = useState('アプリにデータを同期');
+  // WebAR 実装時期 (即時 or スケジュール)
+  const [arDeployMode, setArDeployMode] = useState<'immediate' | 'scheduled'>('immediate');
+  const [arScheduledAt, setArScheduledAt] = useState('');
 
   // 初回データ読み込み
   useFocusEffect(
@@ -123,6 +134,8 @@ export default function AdminDashboard() {
         if (c.arAssetCustomUrl) setArAssetCustomUrl(c.arAssetCustomUrl);
         if (c.arBtnPlacement) setArBtnPlacement(c.arBtnPlacement);
         if (c.arActionText) setArActionText(c.arActionText);
+        if (c.arDeployMode) setArDeployMode(c.arDeployMode);
+        if (c.arScheduledAt) setArScheduledAt(c.arScheduledAt);
       }
     } catch (e) { console.log('AR設定フェッチ非活性', e); }
   };
@@ -453,10 +466,62 @@ export default function AdminDashboard() {
         if (shopError) throw shopError;
         Alert.alert('成功', `ショップに${shopItemType === 'pack' ? 'パック商品' : '単体カード'}を出品しました！`);
       } else {
-        const { error: fixError } = await supabase.from('fixed_cards').insert([{
+        // 固定カードとしてテンプレートを作成し、必要ならターゲットセグメントへ直接配布
+        const { data: insertedFixed, error: fixError } = await supabase.from('fixed_cards').insert([{
           card_name: cName, trigger_type: 'admin_mint', image_url: finalCardImageUrl, stats: cardDataToInsert
-        }]);
+        }]).select().single();
         if (fixError) throw fixError;
+
+        // 直接配布の場合はセグメントに応じてカードをユーザーに配布し、お知らせを送る
+        if (mintDest === 'direct') {
+          // 全プロファイルを取得してクライアント側でフィルタリング（簡易実装）
+          const { data: allProfiles } = await supabase.from('profiles').select('*').limit(10000);
+          const matched = (allProfiles || []).filter((p: any) => {
+            // 性別フィルタ
+            if (directTargetGender === 'MALE' && !(p.gender === 'male' || p.gender === '男性')) return false;
+            if (directTargetGender === 'FEMALE' && !(p.gender === 'female' || p.gender === '女性')) return false;
+            // 年代フィルタ
+            const age = parseInt(p.age) || 0;
+            if (directTargetAge === 'TEENS' && !(age > 0 && age < 20)) return false;
+            if (directTargetAge === 'TWENTIES' && !(age >= 20 && age < 30)) return false;
+            if (directTargetAge === 'THIRTIES' && !(age >= 30)) return false;
+            // エリアフィルタ
+            if (directTargetLocation && p.location && !p.location.includes(directTargetLocation)) return false;
+            return true;
+          });
+
+          // バッチでカードを作成
+          const cardsToInsert = matched.map((p: any) => ({
+            player_id: p.id,
+            card_name: `【特典】${cName}`,
+            image_url: finalCardImageUrl,
+            feature: `運営直配布`,
+            skill_name: cardDataToInsert.skill_name,
+            status_hp: cardDataToInsert.status_hp || 100,
+            status_atk: cardDataToInsert.status_atk || 50,
+            status_def: cardDataToInsert.status_def || 50,
+            status_spd: cardDataToInsert.status_spd || 50,
+            status_total: cardDataToInsert.status_total || 300,
+            rarity: cRarity,
+            element: cAttr,
+            is_active: true
+          }));
+
+          if (cardsToInsert.length > 0) {
+            const { error: insertErr } = await supabase.from('cards').insert(cardsToInsert);
+            if (insertErr) console.warn('direct distribute cards error', insertErr);
+
+            // お知らせを送信（各ユーザー向けにmetadataでrecipient_idを付与）
+            const messages = matched.map((p: any) => ({
+              sender_id: 'SYSTEM',
+              text: `🎁 特典を配布しました: ${cName}`,
+              metadata: { type: 'direct_gift', card_name: cName, fixed_card_id: insertedFixed?.id || null, recipient_id: p.id }
+            }));
+            const { error: msgErr } = await supabase.from('messages').insert(messages);
+            if (msgErr) console.warn('direct distribute messages error', msgErr);
+          }
+        }
+
         Alert.alert('成功', '特権カードを生成・登録しました！');
       }
       setCName(''); setCImage(''); setCPackageImage(''); setCAiPrompt(''); setPackDesc('');
@@ -484,7 +549,8 @@ export default function AdminDashboard() {
 
       const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
         title: `ボス出現: ${bName}`, sponsor_name: bSponsorName || '運営',
-        target_lat: parseFloat(bLat), target_lng: parseFloat(bLng), radius_meters: parseInt(bRadius), is_active: true
+        target_lat: parseFloat(bLat), target_lng: parseFloat(bLng), radius_meters: parseInt(bRadius),
+        start_at: bStartAt || null, end_at: bEndAt || null, is_active: true
       }]).select().single();
       if (campError) throw campError;
 
@@ -629,7 +695,9 @@ export default function AdminDashboard() {
         arDisplayMode,
         arAssetCustomUrl,
         arBtnPlacement,
-        arActionText
+        arActionText,
+        arDeployMode,
+        arScheduledAt: arDeployMode === 'scheduled' ? arScheduledAt : null
       };
 
       const { error } = await supabase.from('system_config').upsert({
@@ -901,6 +969,30 @@ export default function AdminDashboard() {
               </>
             )}
 
+            {mintDest === 'direct' && (
+              <>
+                <View style={styles.divider} />
+                <Text style={styles.label}>直接配布 - 対象セグメント</Text>
+                <Text style={styles.label}>性別</Text>
+                <View style={styles.radioGroup}>
+                  <TouchableOpacity style={[styles.radioBtn, directTargetGender === 'ALL' && styles.activeRadio]} onPress={() => setDirectTargetGender('ALL')}><Text style={[styles.radioText, directTargetGender === 'ALL' && styles.activeRadioText]}>全員</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.radioBtn, directTargetGender === 'MALE' && styles.activeRadio]} onPress={() => setDirectTargetGender('MALE')}><Text style={[styles.radioText, directTargetGender === 'MALE' && styles.activeRadioText]}>男性のみ</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.radioBtn, directTargetGender === 'FEMALE' && styles.activeRadio]} onPress={() => setDirectTargetGender('FEMALE')}><Text style={[styles.radioText, directTargetGender === 'FEMALE' && styles.activeRadioText]}>女性のみ</Text></TouchableOpacity>
+                </View>
+
+                <Text style={styles.label}>年代</Text>
+                <View style={styles.radioGroup}>
+                  <TouchableOpacity style={[styles.radioBtn, directTargetAge === 'ALL' && styles.activeRadio]} onPress={() => setDirectTargetAge('ALL')}><Text style={[styles.radioText, directTargetAge === 'ALL' && styles.activeRadioText]}>全年代</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.radioBtn, directTargetAge === 'TEENS' && styles.activeRadio']} onPress={() => setDirectTargetAge('TEENS')}><Text style={[styles.radioText, directTargetAge === 'TEENS' && styles.activeRadioText]}>10代</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.radioBtn, directTargetAge === 'TWENTIES' && styles.activeRadio]} onPress={() => setDirectTargetAge('TWENTIES')}><Text style={[styles.radioText, directTargetAge === 'TWENTIES' && styles.activeRadioText]}>20代</Text></TouchableOpacity>
+                  <TouchableOpacity style={[styles.radioBtn, directTargetAge === 'THIRTIES' && styles.activeRadio]} onPress={() => setDirectTargetAge('THIRTIES')}><Text style={[styles.radioText, directTargetAge === 'THIRTIES' && styles.activeRadioText]}>30代以上</Text></TouchableOpacity>
+                </View>
+
+                <Text style={styles.label}>エリア (任意)</Text>
+                <TextInput style={styles.input} value={directTargetLocation} onChangeText={setDirectTargetLocation} placeholder="例: 東京" />
+              </>
+            )}
+
             <TouchableOpacity style={styles.primaryBtn} onPress={handleMintAction} disabled={loading}>
               {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{mintDest === 'shop' ? 'ショップに出品する' : '特権カードを配布する'}</Text>}
             </TouchableOpacity>
@@ -966,6 +1058,12 @@ export default function AdminDashboard() {
               <View style={styles.row}>
                 <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={bName} onChangeText={setBName} placeholder="ボス名" />
                 <TextInput style={[styles.input, {flex: 1}]} value={bSponsorName} onChangeText={setBSponsorName} placeholder="協賛名" />
+              </View>
+
+              <Text style={styles.label}>出現期間 (空白で常時表示)</Text>
+              <View style={styles.row}>
+                <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={bStartAt} onChangeText={setBStartAt} placeholder="開始日時 (ISO 例: 2026-06-20T12:00)" />
+                <TextInput style={[styles.input, {flex: 1}]} value={bEndAt} onChangeText={setBEndAt} placeholder="終了日時 (ISO 例: 2026-06-21T12:00)" />
               </View>
 
               <Text style={styles.label}>ボス属性 / ステータス(HP/ATK/DEF)</Text>
@@ -1124,6 +1222,19 @@ export default function AdminDashboard() {
               onChangeText={setArActionText} 
               placeholder="例: 限定カードをGET！" 
             />
+
+            <Text style={[styles.label, {marginTop: 8}]}>実装時期</Text>
+            <View style={styles.radioGroup}>
+              <TouchableOpacity style={[styles.radioBtn, arDeployMode === 'immediate' && styles.activeRadio]} onPress={() => setArDeployMode('immediate')}>
+                <Text style={[styles.radioText, arDeployMode === 'immediate' && styles.activeRadioText]}>即時反映</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.radioBtn, arDeployMode === 'scheduled' && styles.activeRadio]} onPress={() => setArDeployMode('scheduled')}>
+                <Text style={[styles.radioText, arDeployMode === 'scheduled' && styles.activeRadioText]}>スケジュール</Text>
+              </TouchableOpacity>
+            </View>
+            {arDeployMode === 'scheduled' && (
+              <TextInput style={[styles.input, {marginTop: 8}]} value={arScheduledAt} onChangeText={setArScheduledAt} placeholder="実行日時 (ISO 例: 2026-06-20T12:00)" />
+            )}
 
             <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#EC4899', marginTop: 30}]} onPress={handleUpdateArConfig} disabled={loading}>
               <Text style={styles.primaryBtnText}>この構成をWebAR全体に即時同期</Text>
