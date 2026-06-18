@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>SNAP CARD - WebAR</title>
+  <title>SNAP CARD - WebAR Command</title>
   
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
@@ -25,12 +25,12 @@
     }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     
-    /* 💡 UIコンテナ（ターゲット認識時のみ表示される） */
+    /* UIコンテナ（ターゲット認識時のみ表示される） */
     #ui-container {
       position: absolute; left: 0; width: 100%;
-      display: none; /* 初期は非表示。対象を認識したら js で flex にする */
+      display: none; 
       flex-direction: column; align-items: center; justify-content: center;
-      z-index: 100; pointer-events: none; /* 後ろのAR操作を邪魔しないため */
+      z-index: 100; pointer-events: none;
     }
 
     /* 配置設定用クラス (ダッシュボードの設定が反映される) */
@@ -40,12 +40,13 @@
 
     /* インセンティブ告知用ポップアップ */
     #incentive-popup {
-      background: rgba(15, 23, 42, 0.85); color: #FFF;
-      padding: 10px 20px; border-radius: 12px; font-size: 14px; font-weight: bold;
+      background: rgba(15, 23, 42, 0.9); color: #FFF;
+      padding: 12px 24px; border-radius: 16px; font-size: 14px; font-weight: bold;
       margin-bottom: 15px; border: 1px solid #3B82F6;
-      box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+      box-shadow: 0 0 20px rgba(59, 130, 246, 0.6);
       text-align: center; backdrop-filter: blur(4px);
     }
+    .win-border { border-color: #F59E0B !important; box-shadow: 0 0 25px rgba(245, 158, 11, 0.8) !important; }
 
     /* アクションボタン */
     #action-btn {
@@ -53,9 +54,11 @@
       color: white; border: none; padding: 16px 32px; border-radius: 30px; 
       font-size: 16px; font-weight: 900; letter-spacing: 1px;
       box-shadow: 0 10px 25px rgba(236, 72, 153, 0.5);
-      cursor: pointer; pointer-events: auto; /* ボタン自体はタップ可能に */
+      cursor: pointer; pointer-events: auto;
       transition: transform 0.2s;
     }
+    .win-btn { background: linear-gradient(135deg, #D97706 0%, #F59E0B 100%) !important; box-shadow: 0 10px 25px rgba(245, 158, 11, 0.5) !important; }
+    
     #action-btn:active { transform: scale(0.95); }
   </style>
 </head>
@@ -69,34 +72,31 @@
   <div id="ar-container"></div>
 
   <div id="ui-container">
-    <div id="incentive-popup">✨ 対象を捕捉しました ✨<br><span style="font-size:11px; font-weight:normal; color:#CBD5E1;" id="shop-note">報酬データを受信中...</span></div>
+    <div id="incentive-popup" class="">
+      <span id="ar-title">✨ 対象を捕捉しました ✨</span><br>
+      <span style="font-size:12px; font-weight:normal; color:#CBD5E1;" id="shop-note">報酬データを受信中...</span>
+    </div>
     <button id="action-btn">読み込み中...</button>
   </div>
 
   <script>
-    // ==========================================
-    // 1. Supabaseの初期設定
-    // ==========================================
-    const SUPABASE_URL = 'YOUR_SUPABASE_URL'; // ★環境に合わせて書き換えてください
-    const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY'; // ★環境に合わせて書き換えてください
+    const SUPABASE_URL = 'YOUR_SUPABASE_URL'; 
+    const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY'; 
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     async function initAR() {
-      // URLパラメータから shop_id (または promo_id) を取得
       const urlParams = new URLSearchParams(window.location.search);
       const shopId = urlParams.get('shop_id') || urlParams.get('id');
 
       if (!shopId) {
-        alert("エラー: 店舗IDが指定されていません。\nQRコードを再確認してください。");
+        alert("エラー: 店舗IDが指定されていません。");
         return;
       }
 
       try {
-        // ==========================================
-        // 2. 店舗固有のマーカーデータ ＆ 共通のAR設定 を同時に取得
-        // ==========================================
+        // 1. 店舗データと一括配信設定を同時に取得
         const [promoRes, configRes] = await Promise.all([
-          supabase.from('promo_links').select('ar_marker_url, ar_asset_url, client_name, note').eq('id', shopId).single(),
+          supabase.from('promo_links').select('ar_marker_url, ar_asset_url, ar_win_asset_url, win_rate, ar_action_text_win, client_name, note').eq('id', shopId).single(),
           supabase.from('system_config').select('config_data').eq('id', 'webar_dynamic_settings').single()
         ]);
 
@@ -105,103 +105,100 @@
         const shopData = promoRes.data;
         const arConfig = configRes.data?.config_data || {};
 
-        // 店舗からのメッセージ（インセンティブ等）があればポップアップに反映
-        const noteText = shopData.note && shopData.note !== '場所未設定' ? shopData.note : `${shopData.client_name} 限定報酬`;
-        document.getElementById('shop-note').innerText = noteText;
+        // 💡 2. 確率判定ロジックの実装 (100%基準でシミュレーション)
+        const rawWinRate = shopData.win_rate !== undefined && shopData.win_rate !== null ? parseFloat(shopData.win_rate) : 0; 
+        const rand = Math.random() * 100;
+        const isUserWin = rand < rawWinRate; // 例: win_rateが0.1なら、0.1未満で当選
 
-        // ダッシュボードの設定をUIに反映
+        // 💡 3. 当選ステータスに応じたアセットURLとUI文言の完全切り替え
+        let selectedAssetUrl = isUserWin ? shopData.ar_win_asset_url : shopData.ar_asset_url;
+        
+        // フォールバック処理
+        if (!selectedAssetUrl) selectedAssetUrl = arConfig.arAssetCustomUrl;
+        if (!selectedAssetUrl) throw new Error("表示用のアセットが登録されていません。");
+
         const actionBtn = document.getElementById('action-btn');
         const uiContainer = document.getElementById('ui-container');
-        
-        actionBtn.innerText = arConfig.arActionText || "アプリでカードをGET!";
+        const incentivePopup = document.getElementById('incentive-popup');
+        const arTitle = document.getElementById('ar-title');
+        const shopNote = document.getElementById('shop-note');
+
+        // UI設定の書き換え
         uiContainer.classList.add(`pos-${arConfig.arBtnPlacement || 'bottom_center'}`);
 
-        // ==========================================
-        // 3. アセットタイプに応じてARオブジェクトを生成
-        // ==========================================
-        let assetUrl = shopData.ar_asset_url;
-        // 特定設定がない場合は、グローバル設定のURLを使用（フォールバック）
-        if (!assetUrl) assetUrl = arConfig.arAssetCustomUrl;
-        if (!assetUrl) throw new Error("ARアセットが設定されていません。");
+        if (isUserWin) {
+          // 🎉 当選時の画面構成
+          arTitle.innerHTML = "🎉 大当たり！限定クーポン解放 🎉";
+          arTitle.style.color = "#F59E0B";
+          shopNote.innerText = `${shopData.client_name}: 特典を獲得しました！`;
+          incentivePopup.classList.add('win-border');
+          actionBtn.classList.add('win-btn');
+          actionBtn.innerText = shopData.ar_action_text_win || "クーポンと限定カードをGET！";
+        } else {
+          // 幻滅させないハズレ（通常アプリ誘導）の画面構成
+          arTitle.innerText = "✨ 対象をスキャンしました ✨";
+          shopNote.innerText = shopData.note && shopData.note !== '場所未設定' ? shopData.note : `${shopData.client_name} 限定カード召喚`;
+          actionBtn.innerText = arConfig.arActionText || "アプリでカードをGET!";
+        }
 
+        // 4. A-Frameレンダリング要素の組み立て
         let entityHTML = "";
-        if (assetUrl.match(/\.(glb|gltf)$/i)) {
+        if (selectedAssetUrl.match(/\.(glb|gltf)$/i)) {
           entityHTML = `
-            <a-assets><a-asset-item id="dynamicAsset" src="${assetUrl}"></a-asset-item></a-assets>
-            <a-gltf-model src="#dynamicAsset" position="0 0 0" scale="0.5 0.5 0.5" animation-mixer></a-gltf-model>
+            <a-assets><a-asset-item id="dynamicAsset" src="${selectedAssetUrl}"></a-asset-item></a-assets>
+            <a-gltf-model src="#dynamicAsset" position="0 0 0" scale="0.6 0.6 0.6" animation-mixer></a-gltf-model>
           `;
-        } else if (assetUrl.match(/\.(mp4|webm)$/i)) {
+        } else if (selectedAssetUrl.match(/\.(mp4|webm)$/i)) {
           entityHTML = `
-            <a-assets><video id="dynamicAsset" src="${assetUrl}" autoplay loop="true" muted playsinline></video></a-assets>
+            <a-assets><video id="dynamicAsset" src="${selectedAssetUrl}" autoplay loop="true" muted playsinline></video></a-assets>
             <a-video src="#dynamicAsset" width="1" height="0.56" position="0 0 0"></a-video>
           `;
         } else {
           entityHTML = `
-            <a-assets><img id="dynamicAsset" src="${assetUrl}"></a-assets>
+            <a-assets><img id="dynamicAsset" src="${selectedAssetUrl}"></a-assets>
             <a-image src="#dynamicAsset" width="1" height="1" position="0 0 0"></a-image>
           `;
         }
 
-        // 💡 ターゲットに id="target-entity" を付与し、後でイベントを仕込めるようにする
         const sceneHTML = `
           <a-scene 
             id="ar-scene"
             mindar-image="imageTargetSrc: ${shopData.ar_marker_url}; uiError:yes; uiLoading:yes; uiScanning:yes;" 
-            color-space="sRGB" 
-            renderer="colorManagement: true, physicallyCorrectLights" 
-            vr-mode-ui="enabled: false" 
-            device-orientation-permission-ui="enabled: false">
-            
+            color-space="sRGB" renderer="colorManagement: true, physicallyCorrectLights" 
+            vr-mode-ui="enabled: false" device-orientation-permission-ui="enabled: false">
             <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
-
             <a-entity id="target-entity" mindar-image-target="targetIndex: 0">
               ${entityHTML}
             </a-entity>
           </a-scene>
         `;
 
-        // DOMに流し込み
         document.getElementById('ar-container').innerHTML = sceneHTML;
 
-        // ==========================================
-        // 4. イベントリスナーの設定 (ターゲット発見時 / 消失時)
-        // ==========================================
+        // 5. カメラ準備・認識時の表示制御
         setTimeout(() => {
           const sceneEl = document.getElementById('ar-scene');
           const targetEl = document.getElementById('target-entity');
           const loadingScreen = document.getElementById('loading-screen');
 
-          // ARエンジンとカメラの準備が整ったらローディングを消す
           sceneEl.addEventListener('arReady', () => {
             loadingScreen.style.opacity = '0';
             setTimeout(() => loadingScreen.style.display = 'none', 500);
           });
 
-          // 💡 ターゲット画像をカメラが捉えた瞬間にボタンとインセンティブを表示
-          targetEl.addEventListener('targetFound', () => {
-            uiContainer.style.display = 'flex';
-          });
-
-          // 💡 ターゲット画像を見失ったらボタンを隠す（画面タップの誤爆を防ぐため）
-          targetEl.addEventListener('targetLost', () => {
-            uiContainer.style.display = 'none';
-          });
+          targetEl.addEventListener('targetFound', () => { uiContainer.style.display = 'flex'; });
+          targetEl.addEventListener('targetLost', () => { uiContainer.style.display = 'none'; });
         }, 100);
 
-        // ==========================================
-        // 5. アプリ遷移（ディープリンク発火）
-        // ==========================================
+        // 6. アプリへのディープリンク送信 (結果フラグresultを乗せる)
         actionBtn.addEventListener('click', () => {
-          // ボタン押下時にアニメーション等を入れても良い
-          actionBtn.innerText = "同期中...";
+          actionBtn.innerText = "データ同期中...";
+          const resultFlag = isUserWin ? 'win' : 'lose';
           
-          // SNAP CARDアプリのディープリンクへ飛ばす（店舗IDを渡す）
-          window.location.href = `snapcard://claim-promo?shop_id=${shopId}`;
+          // 👑 判定結果(win/lose)をパラメータに追加してアプリを起動！
+          window.location.href = `snapcard://claim-promo?shop_id=${shopId}&result=${resultFlag}`;
           
-          // アプリがインストールされていないユーザーへの対応（2.5秒後にストアまたはLPへ飛ばす）
           setTimeout(() => {
-             // 実際にはiOS/Android判定をして各ストアへ飛ばすか、LPのダウンロード画面へ戻す
-             alert("アプリがインストールされていません。\nダウンロードページへ移動します。");
              window.location.href = `https://snapcard.example.com/#download`;
           }, 2500);
         });
@@ -209,14 +206,12 @@
       } catch (err) {
         document.getElementById('loading-screen').innerHTML = `
           <p style="color:#EF4444; font-weight:bold; text-align:center; padding: 20px;">
-            通信エラーが発生しました。<br><br>
-            <span style="font-size:12px; color:#CBD5E1;">${err.message}</span>
+            AR同期失敗<br><span style="font-size:12px; color:#CBD5E1;">${err.message}</span>
           </p>
         `;
       }
     }
 
-    // スクリプト起動
     initAR();
   </script>
 </body>

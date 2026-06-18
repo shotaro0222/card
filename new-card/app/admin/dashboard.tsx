@@ -7,7 +7,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { decode } from 'base64-arraybuffer';
-import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, HelpCircle, QrCode, MapPin } from 'lucide-react-native';
+import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, HelpCircle, QrCode, MapPin, Gift } from 'lucide-react-native';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -104,6 +104,11 @@ export default function AdminDashboard() {
   const [arActionText, setArActionText] = useState('アプリにデータを同期');
   const [arDeployMode, setArDeployMode] = useState<'immediate' | 'scheduled'>('immediate');
   const [arScheduledAt, setArScheduledAt] = useState('');
+
+  // 💡 8-1 追加: 確率型インセンティブ（クーポン連動）用のステート
+  const [arWinAssetUrl, setArWinAssetUrl] = useState('');
+  const [arWinRate, setArWinRate] = useState('0.1'); // デフォルト 0.1% (1000分の1)
+  const [arActionTextWin, setArActionTextWin] = useState('大当たり！クーポンを獲得！');
 
   // 💡 8-2. 新規店舗・キャンペーンのURL/QR発行用ステート
   const [newShopName, setNewShopName] = useState('');
@@ -311,6 +316,7 @@ export default function AdminDashboard() {
     return decode(base64);
   };
 
+  // 💡 通常（ハズレ）用ARアセットアップロード
   const handleUploadArAsset = async (promoId: string) => {
     try {
       const result = Platform.OS === 'web'
@@ -338,7 +344,43 @@ export default function AdminDashboard() {
       if (dbError) throw dbError;
 
       setArAssetCustomUrl(publicUrl);
-      Alert.alert('アップロード成功', `3Dモデル/画像を紐付けました！`);
+      Alert.alert('アップロード成功', `通常時の3Dモデル/画像を紐付けました！`);
+    } catch (e: any) {
+      Alert.alert('アップロード失敗', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 💡 当たり（クーポン）用ARアセットアップロード
+  const handleUploadArWinAsset = async (promoId: string) => {
+    try {
+      const result = Platform.OS === 'web'
+        ? await pickWebDocument()
+        : await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true });
+      if (result.type !== 'success') return;
+      const asset: any = result;
+
+      if (!promoId || promoId === 'ALL') {
+        Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
+        return;
+      }
+      setLoading(true);
+
+      const arrayBuffer = await getArrayBufferFromAsset(asset);
+      const fileName = `${promoId}/${Date.now()}_win_asset_${asset.name}`;
+      const { error: uploadError } = await supabase.storage
+        .from('ar_assets') // 同じバケットを使用
+        .upload(fileName, arrayBuffer, { contentType: asset.type || asset.mimeType || 'application/octet-stream', upsert: true });
+
+      if (uploadError) throw uploadError;
+
+      const { data: { publicUrl } } = supabase.storage.from('ar_assets').getPublicUrl(fileName);
+      const { error: dbError } = await supabase.from('promo_links').update({ ar_win_asset_url: publicUrl }).eq('id', promoId);
+      if (dbError) throw dbError;
+
+      setArWinAssetUrl(publicUrl);
+      Alert.alert('アップロード成功', `🎁 当たり(クーポン)用アセットを紐付けました！`);
     } catch (e: any) {
       Alert.alert('アップロード失敗', e.message);
     } finally {
@@ -638,18 +680,37 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
+  // 💡 WebAR動的構成の登録・上書き実行 (確率型クーポン対応)
   const handleUpdateArConfig = async () => {
+    if (arClientType === 'client_specific' && !arTargetClientId) {
+      Alert.alert('エラー', '個別指定時は対象のクライアントUUIDが必要です。');
+      return;
+    }
     setLoading(true);
     try {
-      const config_data = {
-        arClientType, arTargetClientId: arClientType === 'client_specific' ? arTargetClientId : 'ALL',
-        arDisplayMode, arAssetCustomUrl, arBtnPlacement, arActionText, arDeployMode,
-        arScheduledAt: arDeployMode === 'scheduled' ? arScheduledAt : null
-      };
+      if (arClientType === 'client_specific') {
+        // 特定の店舗レコードに対して確率・文言・アセットを一括更新
+        const { error } = await supabase.from('promo_links').update({
+          ar_asset_url: arAssetCustomUrl || null,
+          ar_win_asset_url: arWinAssetUrl || null,
+          win_rate: parseFloat(arWinRate) || 0,
+          ar_action_text_win: arActionTextWin,
+          ar_display_mode: arDisplayMode
+        }).eq('id', arTargetClientId);
 
-      const { error } = await supabase.from('system_config').upsert({ id: 'webar_dynamic_settings', config_data });
-      if (error) throw error;
-      Alert.alert('同期成功', 'WebARパラメータを更新しました。ブラウザ側にリアルタイム同期されます。');
+        if (error) throw error;
+        Alert.alert('同期成功', `店舗 [${arTargetClientId.substring(0,8)}] の確率・アセット構成を個別同期しました。`);
+      } else {
+        // グローバル設定の更新
+        const config_data = {
+          arClientType, arTargetClientId: 'ALL',
+          arDisplayMode, arAssetCustomUrl, arBtnPlacement, arActionText, arDeployMode,
+          arScheduledAt: arDeployMode === 'scheduled' ? arScheduledAt : null
+        };
+        const { error } = await supabase.from('system_config').upsert({ id: 'webar_dynamic_settings', config_data });
+        if (error) throw error;
+        Alert.alert('同期成功', 'グローバル一括WebARパラメータを更新しました。ブラウザ側にリアルタイム同期されます。');
+      }
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
@@ -680,9 +741,13 @@ export default function AdminDashboard() {
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(arUrl)}`;
 
       setGeneratedShopData({ id: shopId, url: arUrl, qr: qrUrl });
+      // 便利なように、そのまま下の編集フォームの対象IDに自動セット
+      setArTargetClientId(shopId);
+      setArClientType('client_specific');
+      
       setNewShopName('');
       setNewShopLocation('');
-      Alert.alert('発行成功', '新規店舗のQRコードとUUIDが生成されました！');
+      Alert.alert('発行成功', '新規店舗のQRコードとUUIDが生成されました！\n続けて下のパネルからアセットを設定できます。');
 
     } catch (e: any) {
       Alert.alert('発行失敗', e.message);
@@ -1092,7 +1157,7 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 💡 8. WebAR制御（QR発行 + 動的配信パネル） ===================== */}
+        {/* ===================== 💡 8. WebAR制御（QR発行 + 確率型インセンティブ動的配信パネル） ===================== */}
         {activeTab === 'ar' && (
           <View>
             {/* 🚀 新規追加: 店舗・キャンペーン登録＆QR発行パネル */}
@@ -1137,18 +1202,18 @@ export default function AdminDashboard() {
                   </View>
 
                   <View style={{ width: '100%', backgroundColor: '#F1F5F9', padding: 12, borderRadius: 8 }}>
-                    <Text style={{ fontSize: 11, color: '#64748B', fontWeight: 'bold' }}>クライアントUUID (下の設定で使用します)</Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', fontWeight: 'bold' }}>クライアントUUID (下の設定で自動セット済み)</Text>
                     <Text style={{ fontSize: 13, color: '#0F172A', marginTop: 4, fontWeight: '900' }} selectable>{generatedShopData.id}</Text>
                   </View>
                 </View>
               )}
             </View>
 
-            {/* 既存: オブジェクト管理パネル */}
+            {/* 🌐 クライアント別 オブジェクト＆確率管理パネル */}
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト管理パネル</Text>
+              <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト＆確率管理</Text>
               <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
-                上で発行したUUID（または全体）に対して、表示する「3Dモデル」や「トリガーマーカー」を個別に設定します。
+                上で発行したUUID（または全体）に対して、表示するオブジェクトやクーポンのドロップ確率を個別に設定します。
               </Text>
 
               <Text style={styles.label}>1. 配信制御範囲の指定</Text>
@@ -1161,7 +1226,7 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>2. 対象のプロモURL（クライアントUUID）を入力</Text>
+              <Text style={styles.label}>2. 操作対象の店舗UUID</Text>
               <TextInput 
                 style={styles.input} 
                 value={arTargetClientId} 
@@ -1187,21 +1252,55 @@ export default function AdminDashboard() {
                 </View>
               ) : null}
 
-              <Text style={styles.label}>4. ARオブジェクトのアップロード（.glb 3Dモデル または 画像）</Text>
+              <View style={styles.divider} />
+
+              {/* 🎁 確率型インセンティブ設定セクション */}
+              <Text style={[styles.cardTitle, {fontSize: 16, color: '#D97706'}]}><Gift color="#D97706" size={16} style={{top:3}} /> 4. 確率型インセンティブ（クーポン・アセット）設定</Text>
+              
+              <Text style={styles.label}>ハズレ（通常時）の表示オブジェクト（.glb または 画像）</Text>
               <TouchableOpacity 
-                style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#10B981', marginTop: 8, marginBottom: 12 }]} 
+                style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#475569', marginTop: 4, marginBottom: 8 }]} 
                 onPress={() => handleUploadArAsset(arTargetClientId)}
                 disabled={loading || arClientType === 'global'}
               >
-                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>📁 表示オブジェクトを選択して紐付け</Text>}
+                <Text style={styles.primaryBtnText}>📁 通常オブジェクトをアップロード</Text>
               </TouchableOpacity>
+              {arAssetCustomUrl ? <Text style={{fontSize:11, color:'#475569', marginBottom: 12}} numberOfLines={1}>登録済: {arAssetCustomUrl}</Text> : null}
 
-              {arAssetCustomUrl ? (
-                <View style={{ backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, marginBottom: 10 }}>
-                  <Text style={{ fontSize: 12, color: '#475569', fontWeight: 'bold' }}>🔗 反映中のカスタムオブジェクトURL:</Text>
-                  <Text style={{ fontSize: 11, color: '#2563EB', marginTop: 4 }} numberOfLines={2}>{arAssetCustomUrl}</Text>
-                </View>
-              ) : null}
+              <Text style={styles.label}>🎉 当たり（クーポン当選時）の表示オブジェクト（.glb または 画像）</Text>
+              <TouchableOpacity 
+                style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#D97706', marginTop: 4, marginBottom: 8 }]} 
+                onPress={() => handleUploadArWinAsset(arTargetClientId)}
+                disabled={loading || arClientType === 'global'}
+              >
+                <Text style={styles.primaryBtnText}>🎁 当たりオブジェクトをアップロード</Text>
+              </TouchableOpacity>
+              {arWinAssetUrl ? <Text style={{fontSize:11, color:'#D97706', marginBottom: 12}} numberOfLines={1}>登録済: {arWinAssetUrl}</Text> : null}
+
+              <Text style={styles.label}>💡 クーポン当選確率（%単位。例: 0.1 は 1000分の1）</Text>
+              <TextInput 
+                style={styles.input} 
+                value={arWinRate} 
+                onChangeText={setArWinRate} 
+                placeholder="例: 0.5" 
+                keyboardType="numeric"
+              />
+
+              <Text style={styles.label}>当たり（当選時）のボタンアクション文言</Text>
+              <TextInput 
+                style={styles.input} 
+                value={arActionTextWin} 
+                onChangeText={setArActionTextWin} 
+                placeholder="例: ギョーザ無料券と限定カードをGET！" 
+              />
+
+              <Text style={styles.label}>通常時（ハズレ時）のボタンアクション文言</Text>
+              <TextInput 
+                style={styles.input} 
+                value={arActionText} 
+                onChangeText={setArActionText} 
+                placeholder="例: 限定カードをGET！" 
+              />
 
               <View style={styles.divider} />
 
@@ -1225,14 +1324,6 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               </View>
 
-              <Text style={styles.label}>配置ボタンのアクション文言</Text>
-              <TextInput 
-                style={styles.input} 
-                value={arActionText} 
-                onChangeText={setArActionText} 
-                placeholder="例: 限定カードをGET！" 
-              />
-
               <Text style={[styles.label, {marginTop: 8}]}>実装時期</Text>
               <View style={styles.radioGroup}>
                 <TouchableOpacity style={[styles.radioBtn, arDeployMode === 'immediate' && styles.activeRadio]} onPress={() => setArDeployMode('immediate')}>
@@ -1247,7 +1338,7 @@ export default function AdminDashboard() {
               )}
 
               <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#EC4899', marginTop: 30}]} onPress={handleUpdateArConfig} disabled={loading}>
-                <Text style={styles.primaryBtnText}>この構成をWebAR全体に即時同期</Text>
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>この構成をWebAR店舗データに即時同期</Text>}
               </TouchableOpacity>
             </View>
           </View>
