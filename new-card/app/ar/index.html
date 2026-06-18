@@ -7,15 +7,17 @@
   
   <script src="https://aframe.io/releases/1.4.2/aframe.min.js"></script>
   <script src="https://cdn.jsdelivr.net/npm/mind-ar@1.2.2/dist/mindar-image-aframe.prod.js"></script>
-  
   <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
 
   <style>
     body { margin: 0; overflow: hidden; font-family: sans-serif; background-color: #000; }
+    
+    /* ローディング画面 */
     #loading-screen {
       position: absolute; top: 0; left: 0; width: 100%; height: 100%;
       background-color: #0F172A; display: flex; flex-direction: column;
       justify-content: center; align-items: center; z-index: 9999; color: #FFF;
+      transition: opacity 0.5s ease;
     }
     .spinner {
       border: 4px solid rgba(255,255,255,0.3); border-top: 4px solid #3B82F6;
@@ -23,15 +25,38 @@
     }
     @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
     
+    /* 💡 UIコンテナ（ターゲット認識時のみ表示される） */
     #ui-container {
-      position: absolute; bottom: 30px; left: 0; width: 100%;
-      display: none; justify-content: center; z-index: 100;
+      position: absolute; left: 0; width: 100%;
+      display: none; /* 初期は非表示。対象を認識したら js で flex にする */
+      flex-direction: column; align-items: center; justify-content: center;
+      z-index: 100; pointer-events: none; /* 後ろのAR操作を邪魔しないため */
     }
+
+    /* 配置設定用クラス (ダッシュボードの設定が反映される) */
+    .pos-bottom_center { bottom: 40px; }
+    .pos-top_right { top: 40px; right: 20px; align-items: flex-end !important; width: auto !important; }
+    .pos-hidden { display: none !important; }
+
+    /* インセンティブ告知用ポップアップ */
+    #incentive-popup {
+      background: rgba(15, 23, 42, 0.85); color: #FFF;
+      padding: 10px 20px; border-radius: 12px; font-size: 14px; font-weight: bold;
+      margin-bottom: 15px; border: 1px solid #3B82F6;
+      box-shadow: 0 0 15px rgba(59, 130, 246, 0.5);
+      text-align: center; backdrop-filter: blur(4px);
+    }
+
+    /* アクションボタン */
     #action-btn {
-      background-color: #EC4899; color: white; border: none;
-      padding: 15px 30px; border-radius: 30px; font-size: 16px; font-weight: bold;
-      box-shadow: 0 4px 15px rgba(0,0,0,0.3); cursor: pointer;
+      background: linear-gradient(135deg, #EC4899 0%, #F43F5E 100%);
+      color: white; border: none; padding: 16px 32px; border-radius: 30px; 
+      font-size: 16px; font-weight: 900; letter-spacing: 1px;
+      box-shadow: 0 10px 25px rgba(236, 72, 153, 0.5);
+      cursor: pointer; pointer-events: auto; /* ボタン自体はタップ可能に */
+      transition: transform 0.2s;
     }
+    #action-btn:active { transform: scale(0.95); }
   </style>
 </head>
 <body>
@@ -44,113 +69,154 @@
   <div id="ar-container"></div>
 
   <div id="ui-container">
-    <button id="action-btn">アプリでカードをGET!</button>
+    <div id="incentive-popup">✨ 対象を捕捉しました ✨<br><span style="font-size:11px; font-weight:normal; color:#CBD5E1;" id="shop-note">報酬データを受信中...</span></div>
+    <button id="action-btn">読み込み中...</button>
   </div>
 
   <script>
     // ==========================================
     // 1. Supabaseの初期設定
     // ==========================================
-    const SUPABASE_URL = 'YOUR_SUPABASE_URL'; // ★書き換えてください
-    const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY'; // ★書き換えてください
+    const SUPABASE_URL = 'YOUR_SUPABASE_URL'; // ★環境に合わせて書き換えてください
+    const SUPABASE_KEY = 'YOUR_SUPABASE_ANON_KEY'; // ★環境に合わせて書き換えてください
     const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
 
     async function initAR() {
-      // ==========================================
-      // 2. URLパラメータからプロモIDを取得
-      // 例: https://your-vercel.app/?id=1234-abcd
-      // ==========================================
+      // URLパラメータから shop_id (または promo_id) を取得
       const urlParams = new URLSearchParams(window.location.search);
-      const promoId = urlParams.get('id');
+      const shopId = urlParams.get('shop_id') || urlParams.get('id');
 
-      if (!promoId) {
-        alert("エラー: プロモIDが指定されていません。\nQRコードを再確認してください。");
+      if (!shopId) {
+        alert("エラー: 店舗IDが指定されていません。\nQRコードを再確認してください。");
         return;
       }
 
       try {
         // ==========================================
-        // 3. Supabaseからマーカーと3DモデルのURLを取得
+        // 2. 店舗固有のマーカーデータ ＆ 共通のAR設定 を同時に取得
         // ==========================================
-        const { data, error } = await supabase
-          .from('promo_links')
-          .select('ar_marker_url, ar_asset_url, ar_display_mode')
-          .eq('id', promoId)
-          .single();
+        const [promoRes, configRes] = await Promise.all([
+          supabase.from('promo_links').select('ar_marker_url, ar_asset_url, client_name, note').eq('id', shopId).single(),
+          supabase.from('system_config').select('config_data').eq('id', 'webar_dynamic_settings').single()
+        ]);
 
-        if (error || !data || !data.ar_marker_url || !data.ar_asset_url) {
-          throw new Error("ARデータの取得に失敗しました。対象のアセットが登録されていません。");
+        if (promoRes.error || !promoRes.data) throw new Error("店舗データの取得に失敗しました。");
+        
+        const shopData = promoRes.data;
+        const arConfig = configRes.data?.config_data || {};
+
+        // 店舗からのメッセージ（インセンティブ等）があればポップアップに反映
+        const noteText = shopData.note && shopData.note !== '場所未設定' ? shopData.note : `${shopData.client_name} 限定報酬`;
+        document.getElementById('shop-note').innerText = noteText;
+
+        // ダッシュボードの設定をUIに反映
+        const actionBtn = document.getElementById('action-btn');
+        const uiContainer = document.getElementById('ui-container');
+        
+        actionBtn.innerText = arConfig.arActionText || "アプリでカードをGET!";
+        uiContainer.classList.add(`pos-${arConfig.arBtnPlacement || 'bottom_center'}`);
+
+        // ==========================================
+        // 3. アセットタイプに応じてARオブジェクトを生成
+        // ==========================================
+        let assetUrl = shopData.ar_asset_url;
+        // 特定設定がない場合は、グローバル設定のURLを使用（フォールバック）
+        if (!assetUrl) assetUrl = arConfig.arAssetCustomUrl;
+        if (!assetUrl) throw new Error("ARアセットが設定されていません。");
+
+        let entityHTML = "";
+        if (assetUrl.match(/\.(glb|gltf)$/i)) {
+          entityHTML = `
+            <a-assets><a-asset-item id="dynamicAsset" src="${assetUrl}"></a-asset-item></a-assets>
+            <a-gltf-model src="#dynamicAsset" position="0 0 0" scale="0.5 0.5 0.5" animation-mixer></a-gltf-model>
+          `;
+        } else if (assetUrl.match(/\.(mp4|webm)$/i)) {
+          entityHTML = `
+            <a-assets><video id="dynamicAsset" src="${assetUrl}" autoplay loop="true" muted playsinline></video></a-assets>
+            <a-video src="#dynamicAsset" width="1" height="0.56" position="0 0 0"></a-video>
+          `;
+        } else {
+          entityHTML = `
+            <a-assets><img id="dynamicAsset" src="${assetUrl}"></a-assets>
+            <a-image src="#dynamicAsset" width="1" height="1" position="0 0 0"></a-image>
+          `;
         }
 
-// ==========================================
-// 4. アセットタイプに応じて動的に要素を生成
-// ==========================================
-const assetUrl = data.ar_asset_url;
-let entityHTML = "";
+        // 💡 ターゲットに id="target-entity" を付与し、後でイベントを仕込めるようにする
+        const sceneHTML = `
+          <a-scene 
+            id="ar-scene"
+            mindar-image="imageTargetSrc: ${shopData.ar_marker_url}; uiError:yes; uiLoading:yes; uiScanning:yes;" 
+            color-space="sRGB" 
+            renderer="colorManagement: true, physicallyCorrectLights" 
+            vr-mode-ui="enabled: false" 
+            device-orientation-permission-ui="enabled: false">
+            
+            <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
 
-// 拡張子またはDBのフラグで判定（ここではURLの末尾で簡易判定）
-if (assetUrl.match(/\.(glb|gltf)$/i)) {
-  // 3Dモデルの場合
-  entityHTML = `
-    <a-assets><a-asset-item id="dynamicAsset" src="${assetUrl}"></a-asset-item></a-assets>
-    <a-gltf-model src="#dynamicAsset" position="0 0 0" scale="0.5 0.5 0.5"></a-gltf-model>
-  `;
-} else if (assetUrl.match(/\.(mp4|webm)$/i)) {
-  // 動画の場合（ビデオプレーンとして表示）
-  entityHTML = `
-    <a-assets><video id="dynamicAsset" src="${assetUrl}" autoplay loop="true" muted playsinline></video></a-assets>
-    <a-video src="#dynamicAsset" width="1" height="0.56" position="0 0 0"></a-video>
-  `;
-} else {
-  // 画像の場合
-  entityHTML = `
-    <a-assets><img id="dynamicAsset" src="${assetUrl}"></a-assets>
-    <a-image src="#dynamicAsset" width="1" height="1" position="0 0 0"></a-image>
-  `;
-}
+            <a-entity id="target-entity" mindar-image-target="targetIndex: 0">
+              ${entityHTML}
+            </a-entity>
+          </a-scene>
+        `;
 
-const sceneHTML = `
-  <a-scene 
-    mindar-image="imageTargetSrc: ${data.ar_marker_url}; uiError:yes; uiLoading:yes; uiScanning:yes;" 
-    color-space="sRGB" 
-    renderer="colorManagement: true, physicallyCorrectLights" 
-    vr-mode-ui="enabled: false" 
-    device-orientation-permission-ui="enabled: false">
-    
-    <a-camera position="0 0 0" look-controls="enabled: false"></a-camera>
-
-    <a-entity mindar-image-target="targetIndex: 0">
-      ${entityHTML}
-    </a-entity>
-  </a-scene>
-`;
-
-document.getElementById('ar-container').innerHTML = sceneHTML;
+        // DOMに流し込み
+        document.getElementById('ar-container').innerHTML = sceneHTML;
 
         // ==========================================
-        // 5. ボタンの表示とアプリ遷移ロジック
+        // 4. イベントリスナーの設定 (ターゲット発見時 / 消失時)
         // ==========================================
-        const uiContainer = document.getElementById('ui-container');
-        const actionBtn = document.getElementById('action-btn');
-        uiContainer.style.display = 'flex';
+        setTimeout(() => {
+          const sceneEl = document.getElementById('ar-scene');
+          const targetEl = document.getElementById('target-entity');
+          const loadingScreen = document.getElementById('loading-screen');
 
+          // ARエンジンとカメラの準備が整ったらローディングを消す
+          sceneEl.addEventListener('arReady', () => {
+            loadingScreen.style.opacity = '0';
+            setTimeout(() => loadingScreen.style.display = 'none', 500);
+          });
+
+          // 💡 ターゲット画像をカメラが捉えた瞬間にボタンとインセンティブを表示
+          targetEl.addEventListener('targetFound', () => {
+            uiContainer.style.display = 'flex';
+          });
+
+          // 💡 ターゲット画像を見失ったらボタンを隠す（画面タップの誤爆を防ぐため）
+          targetEl.addEventListener('targetLost', () => {
+            uiContainer.style.display = 'none';
+          });
+        }, 100);
+
+        // ==========================================
+        // 5. アプリ遷移（ディープリンク発火）
+        // ==========================================
         actionBtn.addEventListener('click', () => {
-          // Expoアプリのディープリンクへ飛ばす（UUIDを渡す）
-          window.location.href = `snapcard://claim-promo?promo_id=${promoId}`;
+          // ボタン押下時にアニメーション等を入れても良い
+          actionBtn.innerText = "同期中...";
           
-          // アプリが入っていない場合のためのフォールバック処理を仕込むことも可能
+          // SNAP CARDアプリのディープリンクへ飛ばす（店舗IDを渡す）
+          window.location.href = `snapcard://claim-promo?shop_id=${shopId}`;
+          
+          // アプリがインストールされていないユーザーへの対応（2.5秒後にストアまたはLPへ飛ばす）
           setTimeout(() => {
-             // AppStore/GooglePlayへの誘導など
-          }, 2000);
+             // 実際にはiOS/Android判定をして各ストアへ飛ばすか、LPのダウンロード画面へ戻す
+             alert("アプリがインストールされていません。\nダウンロードページへ移動します。");
+             window.location.href = `https://snapcard.example.com/#download`;
+          }, 2500);
         });
 
       } catch (err) {
-        alert(err.message);
-        document.getElementById('loading-screen').innerHTML = `<p style="color:red; font-weight:bold;">${err.message}</p>`;
+        document.getElementById('loading-screen').innerHTML = `
+          <p style="color:#EF4444; font-weight:bold; text-align:center; padding: 20px;">
+            通信エラーが発生しました。<br><br>
+            <span style="font-size:12px; color:#CBD5E1;">${err.message}</span>
+          </p>
+        `;
       }
     }
 
-    // 起動
+    // スクリプト起動
     initAR();
   </script>
 </body>
