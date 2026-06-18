@@ -2,13 +2,13 @@ import { useEffect, useState } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Alert, Modal, View, Text, Image, Button, StyleSheet } from 'react-native';
-import { supabase } from '../lib/supabase'; // ※パスは環境に合わせて調整してください
-import { useARRewardHandler } from '../hooks/useARRewardHandler'; // 💡 作成したフックをインポート
+import { supabase } from '../lib/supabase';
+import { useARRewardHandler } from '../hooks/useARRewardHandler';
 
 export default function RootLayout() {
   const router = useRouter();
   
-  // 💡 フックに渡すために現在のログインユーザーIDを保持するステート
+  // フックに渡すために現在のログインユーザーIDを保持するステート
   const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // 初回レンダリング時と認証状態の変更時にユーザーIDを取得・更新
@@ -26,7 +26,7 @@ export default function RootLayout() {
     };
   }, []);
 
-  // 💡 AR報酬受け取りフックの呼び出し
+  // AR報酬受け取りフックの呼び出し
   const { isProcessing, rewardedCard, clearRewardedCard } = useARRewardHandler(currentUserId);
 
   useEffect(() => {
@@ -38,7 +38,7 @@ export default function RootLayout() {
       const { path, queryParams } = parsed;
 
       // ========================================================
-      // 1. アイデア1: プロモカードをインベントリに自動格納 (既存コード)
+      // 1. アイデア1: プロモカードをインベントリに自動格納
       // ========================================================
       if (path === 'claim-promo' && queryParams?.promo_id) {
         try {
@@ -83,16 +83,15 @@ export default function RootLayout() {
       }
 
       // ========================================================
-      // 2. アイデア2: ARで確認後、レイドバトルへ直行 (既存コード)
+      // 2. アイデア2: ARで確認後、レイドバトルへ直行
       // ========================================================
       else if (path === 'start-battle' && queryParams?.boss_id) {
         Alert.alert('💥 戦闘開始', '現実世界からボスデータを走査。迎撃体勢に入ります！');
-        // 例: バトル画面へ遷移
         router.push(`/battle/${queryParams.boss_id}`);
       }
 
       // ========================================================
-      // 3. アイデア3: AR物撮りから戻ってきてSNSシェアをトリガー (既存コード)
+      // 3. アイデア3: AR物撮りから戻ってきてSNSシェアをトリガー
       // ========================================================
       else if (path === 'share-back' && queryParams?.card_id) {
         Alert.alert('📸 撮影完了', 'ハッシュタグを生成してSNSへシェアしますか？', [
@@ -100,7 +99,6 @@ export default function RootLayout() {
           { 
             text: 'シェアする', 
             onPress: () => {
-              // 例: SNS連携用の画面やネイティブのShareを呼び出す処理
               console.log('SNS Share triggered for card:', queryParams.card_id);
             }
           }
@@ -108,7 +106,7 @@ export default function RootLayout() {
       }
     };
 
-    // イベントリスナーの登録（起動中・バックグラウンド復帰の両方を監視）
+    // イベントリスナーの登録
     const subscription = Linking.addEventListener('url', handleIncomingURL);
 
     // アプリが完全に閉じている状態からURLで起動された場合
@@ -131,7 +129,7 @@ export default function RootLayout() {
         <Stack.Screen name="admin/dashboard" />
       </Stack>
 
-      {/* 🎁 獲得モーダル（画面の最前面に表示されるように Stack の下に配置） */}
+      {/* 🎁 獲得モーダル */}
       {rewardedCard && (
         <Modal transparent={true} animationType="fade" visible={!!rewardedCard}>
           <View style={styles.modalOverlay}>
@@ -158,7 +156,6 @@ export default function RootLayout() {
   );
 }
 
-// 💡 モーダル用の簡単なスタイル
 const styles = StyleSheet.create({
   modalOverlay: {
     flex: 1,
