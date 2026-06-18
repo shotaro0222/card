@@ -7,7 +7,7 @@ import * as DocumentPicker from 'expo-document-picker';
 import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import { decode } from 'base64-arraybuffer';
-import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, HelpCircle } from 'lucide-react-native';
+import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, HelpCircle, QrCode, MapPin } from 'lucide-react-native';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -49,7 +49,6 @@ export default function AdminDashboard() {
   // ==================== 5. ボス / マップ配置 ====================
   const [bosses, setBosses] = useState<any[]>([]);
   const [bName, setBName] = useState('');
-  // ボスの公開スケジュール (ISO 文字列)
   const [bStartAt, setBStartAt] = useState('');
   const [bEndAt, setBEndAt] = useState('');
   const [bHp, setBHp] = useState('1500');
@@ -97,15 +96,19 @@ export default function AdminDashboard() {
 
   // ==================== 💡 8. WebAR動的配信＆クライアント別オブジェクト管理 ====================
   const [arClientType, setArClientType] = useState<'global' | 'client_specific'>('global');
-  const [arTargetClientId, setArTargetClientId] = useState(''); // promo_linksテーブルの対象UUID
+  const [arTargetClientId, setArTargetClientId] = useState('');
   const [arDisplayMode, setArDisplayMode] = useState<'3d_model' | 'card_frame' | 'hybrid'>('card_frame');
-  const [arAssetCustomUrl, setArAssetCustomUrl] = useState(''); // .glb等アセットのURL
-  const [arMarkerCustomUrl, setArMarkerCustomUrl] = useState(''); // 💡 新規: マーカーファイルのURL
+  const [arAssetCustomUrl, setArAssetCustomUrl] = useState('');
+  const [arMarkerCustomUrl, setArMarkerCustomUrl] = useState('');
   const [arBtnPlacement, setArBtnPlacement] = useState<'bottom_center' | 'top_right' | 'hidden'>('bottom_center');
   const [arActionText, setArActionText] = useState('アプリにデータを同期');
-  // WebAR 実装時期 (即時 or スケジュール)
   const [arDeployMode, setArDeployMode] = useState<'immediate' | 'scheduled'>('immediate');
   const [arScheduledAt, setArScheduledAt] = useState('');
+
+  // 💡 8-2. 新規店舗・キャンペーンのURL/QR発行用ステート
+  const [newShopName, setNewShopName] = useState('');
+  const [newShopLocation, setNewShopLocation] = useState('');
+  const [generatedShopData, setGeneratedShopData] = useState<{ id: string; url: string; qr: string } | null>(null);
 
   // 初回データ読み込み
   useFocusEffect(
@@ -280,7 +283,6 @@ export default function AdminDashboard() {
       });
       if (result.type === 'success') return result;
     } catch (_) {
-      // fallback to native file input on web
     }
     const file = await pickWebFile('*/*');
     if (!file) return { type: 'cancel' as const };
@@ -309,27 +311,21 @@ export default function AdminDashboard() {
     return decode(base64);
   };
 
-  // ==========================================
-  // 💡 3Dオブジェクト(.glb)のアップロード
-  // ==========================================
   const handleUploadArAsset = async (promoId: string) => {
-    if (!promoId || promoId === 'ALL') {
-      Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
-      return;
-    }
     try {
       const result = Platform.OS === 'web'
         ? await pickWebDocument()
-        : await DocumentPicker.getDocumentAsync({
-            type: ['*/*'],
-            copyToCacheDirectory: true
-          });
+        : await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true });
       if (result.type !== 'success') return;
       const asset: any = result;
+
+      if (!promoId || promoId === 'ALL') {
+        Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
+        return;
+      }
       setLoading(true);
 
       const arrayBuffer = await getArrayBufferFromAsset(asset);
-
       const fileName = `${promoId}/${Date.now()}_asset_${asset.name}`;
       const { error: uploadError } = await supabase.storage
         .from('ar_assets')
@@ -338,7 +334,6 @@ export default function AdminDashboard() {
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('ar_assets').getPublicUrl(fileName);
-
       const { error: dbError } = await supabase.from('promo_links').update({ ar_asset_url: publicUrl, ar_display_mode: arDisplayMode }).eq('id', promoId);
       if (dbError) throw dbError;
 
@@ -351,27 +346,21 @@ export default function AdminDashboard() {
     }
   };
 
-  // ==========================================
-  // 💡 ターゲットマーカー（.mind / 画像）のアップロード
-  // ==========================================
   const handleUploadArMarker = async (promoId: string) => {
-    if (!promoId || promoId === 'ALL') {
-      Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
-      return;
-    }
     try {
       const result = Platform.OS === 'web'
         ? await pickWebDocument()
-        : await DocumentPicker.getDocumentAsync({
-            type: ['*/*'],
-            copyToCacheDirectory: true
-          });
+        : await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true });
       if (result.type !== 'success') return;
       const asset: any = result;
+
+      if (!promoId || promoId === 'ALL') {
+        Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
+        return;
+      }
       setLoading(true);
 
       const arrayBuffer = await getArrayBufferFromAsset(asset);
-
       const fileName = `${promoId}/${Date.now()}_marker_${asset.name}`;
       const { error: uploadError } = await supabase.storage
         .from('ar_markers')
@@ -380,7 +369,6 @@ export default function AdminDashboard() {
       if (uploadError) throw uploadError;
 
       const { data: { publicUrl } } = supabase.storage.from('ar_markers').getPublicUrl(fileName);
-
       const { error: dbError } = await supabase.from('promo_links').update({ ar_marker_url: publicUrl }).eq('id', promoId);
       if (dbError) throw dbError;
 
@@ -454,8 +442,7 @@ export default function AdminDashboard() {
         const itemStats = shopItemType === 'pack' ? { item_type: 'pack', count: parseInt(packCardCount) || 5 } : { item_type: 'single', ...cardDataToInsert };
 
         const { error: shopError } = await supabase.from('shop_items').insert([{
-          name: cName,
-          description: shopItemType === 'pack' ? packDesc : `属性: ${cAttr} / レアリティ: ${cRarity}`,
+          name: cName, description: shopItemType === 'pack' ? packDesc : `属性: ${cAttr} / レアリティ: ${cRarity}`,
           price: parseInt(cPrice) || 500, stock: parseInt(cStock) || 100,
           package_image_url: finalPackageUrl || finalCardImageUrl,
           card_image_url: shopItemType === 'single' ? finalCardImageUrl : null,
@@ -464,13 +451,11 @@ export default function AdminDashboard() {
         if (shopError) throw shopError;
         Alert.alert('成功', `ショップに${shopItemType === 'pack' ? 'パック商品' : '単体カード'}を出品しました！`);
       } else {
-        // 固定カードとしてテンプレートを作成し、必要ならターゲットセグメントへ直接配布
         const { data: insertedFixed, error: fixError } = await supabase.from('fixed_cards').insert([{
           card_name: cName, trigger_type: 'admin_mint', image_url: finalCardImageUrl, stats: cardDataToInsert
         }]).select().single();
         if (fixError) throw fixError;
 
-        // 直接配布の場合はセグメントに応じてカードをユーザーに配布し、お知らせを送る
         if (mintDest === 'direct') {
           const { data: allProfiles } = await supabase.from('profiles').select('*').limit(10000);
           const matched = (allProfiles || []).filter((p: any) => {
@@ -485,35 +470,24 @@ export default function AdminDashboard() {
           });
 
           const cardsToInsert = matched.map((p: any) => ({
-            player_id: p.id,
-            card_name: `【特典】${cName}`,
-            image_url: finalCardImageUrl,
-            feature: `運営直配布`,
-            skill_name: cardDataToInsert.skill_name,
-            status_hp: cardDataToInsert.status_hp || 100,
-            status_atk: cardDataToInsert.status_atk || 50,
-            status_def: cardDataToInsert.status_def || 50,
-            status_spd: cardDataToInsert.status_spd || 50,
-            status_total: cardDataToInsert.status_total || 300,
-            rarity: cRarity,
-            element: cAttr,
-            is_active: true
+            player_id: p.id, card_name: `【特典】${cName}`, image_url: finalCardImageUrl, feature: `運営直配布`,
+            skill_name: cardDataToInsert.skill_name, status_hp: cardDataToInsert.status_hp || 100,
+            status_atk: cardDataToInsert.status_atk || 50, status_def: cardDataToInsert.status_def || 50,
+            status_spd: cardDataToInsert.status_spd || 50, status_total: cardDataToInsert.status_total || 300,
+            rarity: cRarity, element: cAttr, is_active: true
           }));
 
           if (cardsToInsert.length > 0) {
             const { error: insertErr } = await supabase.from('cards').insert(cardsToInsert);
             if (insertErr) console.warn('direct distribute cards error', insertErr);
-
             const messages = matched.map((p: any) => ({
-              sender_id: 'SYSTEM',
-              text: `🎁 特典を配布しました: ${cName}`,
+              sender_id: 'SYSTEM', text: `🎁 特典を配布しました: ${cName}`,
               metadata: { type: 'direct_gift', card_name: cName, fixed_card_id: insertedFixed?.id || null, recipient_id: p.id }
             }));
             const { error: msgErr } = await supabase.from('messages').insert(messages);
             if (msgErr) console.warn('direct distribute messages error', msgErr);
           }
         }
-
         Alert.alert('成功', '特権カードを生成・登録しました！');
       }
       setCName(''); setCImage(''); setCPackageImage(''); setCAiPrompt(''); setPackDesc('');
@@ -567,10 +541,8 @@ export default function AdminDashboard() {
     setLoading(true);
     try {
       const config_data = {
-        enabled: randomBossEnabled,
-        interval: randomBossInterval,
-        base_lat: parseFloat(baseLat) || 35.6983,
-        base_lng: parseFloat(baseLng) || 139.4130
+        enabled: randomBossEnabled, interval: randomBossInterval,
+        base_lat: parseFloat(baseLat) || 35.6983, base_lng: parseFloat(baseLng) || 139.4130
       };
       const { error } = await supabase.from('system_config').upsert({ id: 'random_boss_settings', config_data });
       if (error) throw error;
@@ -584,10 +556,8 @@ export default function AdminDashboard() {
       const prefix = ['次元の', '彷徨える', '極大の', 'アビス・', 'ヴォイド・', '災厄の', '覚醒せし'];
       const suffix = ['ゴーレム', 'ベヒモス', 'フェニックス', 'リヴァイアsan', 'ナイトメア', '機神龍', 'タイタン'];
       const randomName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
-      
       const randomElement = elementsList[Math.floor(Math.random() * elementsList.length)] || '闇';
       const randomRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
-      
       const randomHp = Math.floor(Math.random() * 2000) + 1000;
       const randomAtk = Math.floor(Math.random() * 150) + 50;
       const randomDrop = Math.floor(Math.random() * 100) + 30;
@@ -606,12 +576,9 @@ export default function AdminDashboard() {
       try {
         const bossRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedBossPrompt } });
         if (bossRes.data?.imageUrl) finalBossUrl = bossRes.data.imageUrl;
-        
         const dropRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedDropPrompt } });
         if (dropRes.data?.imageUrl) finalDropUrl = dropRes.data.imageUrl;
-      } catch (aiErr) {
-        console.log('AI自動散布タイムアウト、プレースホルダー適用。', aiErr);
-      }
+      } catch (aiErr) { console.log('AI自動散布タイムアウト', aiErr); }
 
       const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
         title: `【突発ランダム出現】${randomName}`, sponsor_name: 'システム自動生成',
@@ -633,11 +600,7 @@ export default function AdminDashboard() {
 
       Alert.alert('自動生成成功', `マップ上に「${randomName}」を完全自動降臨させました！`);
       fetchBosses();
-    } catch (err: any) {
-      Alert.alert('エラー', err.message);
-    } finally {
-      setLoading(false);
-    }
+    } catch (err: any) { Alert.alert('エラー', err.message); } finally { setLoading(false); }
   };
 
   const handleSendAnnouncement = async () => {
@@ -675,40 +638,59 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // ==========================================
-  // 💡 WebARダイナミック制御の更新処理
-  // ==========================================
   const handleUpdateArConfig = async () => {
     setLoading(true);
     try {
       const config_data = {
-        arClientType,
-        arTargetClientId: arClientType === 'client_specific' ? arTargetClientId : 'ALL',
-        arDisplayMode,
-        arAssetCustomUrl,
-        arBtnPlacement,
-        arActionText,
-        arDeployMode,
+        arClientType, arTargetClientId: arClientType === 'client_specific' ? arTargetClientId : 'ALL',
+        arDisplayMode, arAssetCustomUrl, arBtnPlacement, arActionText, arDeployMode,
         arScheduledAt: arDeployMode === 'scheduled' ? arScheduledAt : null
       };
 
-      const { error } = await supabase.from('system_config').upsert({
-        id: 'webar_dynamic_settings',
-        config_data
-      });
-
+      const { error } = await supabase.from('system_config').upsert({ id: 'webar_dynamic_settings', config_data });
       if (error) throw error;
       Alert.alert('同期成功', 'WebARパラメータを更新しました。ブラウザ側にリアルタイム同期されます。');
+    } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+  };
+
+  // ==========================================
+  // 💡 WebAR: 新規店舗・キャンペーンのURL/QR発行処理
+  // ==========================================
+  const handleGenerateShopQr = async () => {
+    if (!newShopName) {
+      Alert.alert('エラー', '店舗名（キャンペーン名）を入力してください。');
+      return;
+    }
+    setLoading(true);
+    try {
+      // promo_linksテーブルに新規店舗枠を確保し、UUIDを発行する
+      const { data, error } = await supabase.from('promo_links').insert([{
+        client_name: newShopName,
+        note: newShopLocation || '場所未設定',
+        is_active: true
+      }]).select('id').single();
+
+      if (error) throw error;
+
+      const shopId = data.id;
+      // 💡 WebARビューワー用の本番想定URL（ドメインはご自身のものに読み替えてください）
+      const arUrl = `https://snapcard.example.com/ar.php?shop_id=${shopId}`;
+      
+      // QRコード画像APIを利用してQRを生成
+      const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(arUrl)}`;
+
+      setGeneratedShopData({ id: shopId, url: arUrl, qr: qrUrl });
+      setNewShopName('');
+      setNewShopLocation('');
+      Alert.alert('発行成功', '新規店舗のQRコードとUUIDが生成されました！');
+
     } catch (e: any) {
-      Alert.alert('エラー', e.message);
+      Alert.alert('発行失敗', e.message);
     } finally {
       setLoading(false);
     }
   };
 
-  // ==========================================
-  // 💡 分析データをCSVでエクスポート
-  // ==========================================
   const exportAnalyticsCSV = async () => {
     try {
       const csvContent = `分析レポート\nDAU,${analyticsData.dau}\nMAU,${analyticsData.mau}\n総投稿数,${analyticsData.total_posts}\n総バトル数,${analyticsData.total_battles}`;
@@ -725,9 +707,7 @@ export default function AdminDashboard() {
         await Sharing.shareAsync(fileUri);
       }
       Alert.alert('成功', 'CSVファイルをエクスポートしました！');
-    } catch (e: any) {
-      Alert.alert('エラー', `エクスポート失敗: ${e.message}`);
-    }
+    } catch (e: any) { Alert.alert('エラー', `エクスポート失敗: ${e.message}`); }
   };
 
   return (
@@ -757,13 +737,10 @@ export default function AdminDashboard() {
           <ShieldAlert color={activeTab === 'bosses' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'bosses' && styles.activeTabText]}>ボス/マップ</Text>
         </TouchableOpacity>
-        
-        {/* 動的制御＆ファイルアップローダー付WebARタブ */}
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'ar' && styles.activeTabBtn]} onPress={() => setActiveTab('ar')}>
-          <Layers color={activeTab === 'ar' ? '#FFF' : '#64748B'} size={18} />
+          <QrCode color={activeTab === 'ar' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'ar' && styles.activeTabText]}>WebAR制御</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'announcements' && styles.activeTabBtn]} onPress={() => setActiveTab('announcements')}>
           <Bell color={activeTab === 'announcements' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'announcements' && styles.activeTabText]}>お知らせ</Text>
@@ -785,9 +762,7 @@ export default function AdminDashboard() {
               <View style={styles.statBox}><Text style={styles.statLabel}>累計発行カード</Text><Text style={styles.statValue}>{analyticsData.total_posts}</Text></View>
               <View style={styles.statBox}><Text style={styles.statLabel}>累計バトル数</Text><Text style={styles.statValue}>{analyticsData.total_battles}</Text></View>
             </View>
-
             <View style={styles.divider} />
-
             <Text style={styles.cardTitle}>ユーザー属性 (デモグラフィック)</Text>
             <View style={styles.statsGrid}>
               <View style={styles.statBox}>
@@ -803,7 +778,6 @@ export default function AdminDashboard() {
                 <Text style={{fontSize: 13, color: '#334155', marginTop: 4, fontWeight: '700'}}>40代以上: {analyticsData.demographics.overForties}人</Text>
               </View>
             </View>
-
             <TouchableOpacity style={[styles.primaryBtn, {flexDirection: 'row', justifyContent: 'center'}]} onPress={exportAnalyticsCSV}>
               <Download color="#FFF" size={20} style={{marginRight: 8}} />
               <Text style={styles.primaryBtnText}>全データをCSVでエクスポート</Text>
@@ -999,7 +973,6 @@ export default function AdminDashboard() {
               <Text style={{color:'#64748B', fontSize: 12, marginBottom: 12}}>
                 有効にすると、指定した時間ごとにシステムがボスを完全ランダム自動ビルドしてマップへ配置します。
               </Text>
-
               <Text style={styles.label}>自動出現状態</Text>
               <View style={styles.radioGroup}>
                 <TouchableOpacity style={[styles.radioBtn, randomBossEnabled && styles.activeRadio]} onPress={() => setRandomBossEnabled(true)}>
@@ -1013,11 +986,7 @@ export default function AdminDashboard() {
               <Text style={styles.label}>出現サイクル頻度</Text>
               <View style={[styles.radioGroup, {flexWrap: 'wrap'}]}>
                 {['1h', '3h', '6h', '12h', '24h'].map((interval) => (
-                  <TouchableOpacity 
-                    key={interval} 
-                    style={[styles.radioBtn, randomBossInterval === interval && styles.activeRadio, {minWidth: '28%', marginBottom: 6}]} 
-                    onPress={() => setRandomBossInterval(interval)}
-                  >
+                  <TouchableOpacity key={interval} style={[styles.radioBtn, randomBossInterval === interval && styles.activeRadio, {minWidth: '28%', marginBottom: 6}]} onPress={() => setRandomBossInterval(interval)}>
                     <Text style={[styles.radioText, randomBossInterval === interval && styles.activeRadioText]}>
                       {interval === '1h' ? '1時間毎' : interval === '3h' ? '3時間毎' : interval === '6h' ? '6時間毎' : interval === '12h' ? '12時間毎' : '24時間毎'}
                     </Text>
@@ -1045,7 +1014,6 @@ export default function AdminDashboard() {
 
             <View style={styles.card}>
               <Text style={styles.cardTitle}>手動・協賛ボス固定配置マニュアル設定</Text>
-
               <Text style={styles.label}>ボス名 / 協賛名</Text>
               <View style={styles.row}>
                 <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={bName} onChangeText={setBName} placeholder="ボス名" />
@@ -1124,113 +1092,164 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 💡 8. WebAR制御（クライアント別 オブジェクト＆マーカー直登録版） ===================== */}
+        {/* ===================== 💡 8. WebAR制御（QR発行 + 動的配信パネル） ===================== */}
         {activeTab === 'ar' && (
-          <View style={styles.card}>
-            <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト管理パネル</Text>
-            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
-              特定の企業・キャンペーンURLごとに、空間へ配置する「3Dモデル」や「トリガーマーカー」を個別に設定・上書きします。
-            </Text>
+          <View>
+            {/* 🚀 新規追加: 店舗・キャンペーン登録＆QR発行パネル */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>🚀 新規店舗・キャンペーン登録 ＆ QR発行</Text>
+              <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
+                店舗やイベントごとにユニークなURLとQRコードを発行します。
+              </Text>
 
-            <Text style={styles.label}>1. 配信制御範囲の指定</Text>
-            <View style={styles.radioGroup}>
-              <TouchableOpacity style={[styles.radioBtn, arClientType === 'global' && styles.activeRadio]} onPress={() => setArClientType('global')}>
-                <Text style={[styles.radioText, arClientType === 'global' && styles.activeRadioText]}>全体一括配信</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arClientType === 'client_specific' && styles.activeRadio]} onPress={() => setArClientType('client_specific')}>
-                <Text style={[styles.radioText, arClientType === 'client_specific' && styles.activeRadioText]}>特定コード・企業指定</Text>
-              </TouchableOpacity>
-            </View>
+              <Text style={styles.label}>店舗名 / キャンペーン名</Text>
+              <TextInput 
+                style={styles.input} 
+                value={newShopName} 
+                onChangeText={setNewShopName} 
+                placeholder="例: 麺屋 飛龍" 
+              />
 
-            <Text style={styles.label}>2. 対象のプロモURL（クライアントUUID）を入力</Text>
-            <TextInput 
-              style={styles.input} 
-              value={arTargetClientId} 
-              onChangeText={setArTargetClientId} 
-              placeholder="promo_links テーブルの UUID を指定" 
-              disabled={arClientType === 'global'}
-              autoCapitalize="none"
-            />
-
-            {/* 💡 マーカーのアップロード UI を追加 */}
-            <Text style={styles.label}>3. トリガーマーカーのアップロード（.mind または 画像）</Text>
-            <TouchableOpacity 
-              style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#8B5CF6', marginTop: 8, marginBottom: 12 }]} 
-              onPress={() => handleUploadArMarker(arTargetClientId)}
-              disabled={loading || arClientType === 'global'}
-            >
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>🎯 マーカーファイルを選択して紐付け</Text>}
-            </TouchableOpacity>
-
-            {arMarkerCustomUrl ? (
-              <View style={{ backgroundColor: '#F5F3FF', padding: 12, borderRadius: 12, marginBottom: 10 }}>
-                <Text style={{ fontSize: 12, color: '#6D28D9', fontWeight: 'bold' }}>🔗 反映中のマーカーURL:</Text>
-                <Text style={{ fontSize: 11, color: '#4C1D95', marginTop: 4 }} numberOfLines={2}>{arMarkerCustomUrl}</Text>
+              <Text style={styles.label}>設置場所・メモ (任意)</Text>
+              <View style={styles.row}>
+                <MapPin color="#94A3B8" size={20} style={{position: 'absolute', left: 14, zIndex: 1}} />
+                <TextInput 
+                  style={[styles.input, {flex: 1, paddingLeft: 42}]} 
+                  value={newShopLocation} 
+                  onChangeText={setNewShopLocation} 
+                  placeholder="例: 東京都立川市 レジ横POP" 
+                />
               </View>
-            ) : null}
 
-            <Text style={styles.label}>4. ARオブジェクトのアップロード（.glb 3Dモデル または 画像）</Text>
-            <TouchableOpacity 
-              style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#10B981', marginTop: 8, marginBottom: 12 }]} 
-              onPress={() => handleUploadArAsset(arTargetClientId)}
-              disabled={loading || arClientType === 'global'}
-            >
-              {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>📁 表示オブジェクトを選択して紐付け</Text>}
-            </TouchableOpacity>
+              <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#0F172A', marginTop: 16}]} onPress={handleGenerateShopQr} disabled={loading}>
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>専用URLとQRコードを発行</Text>}
+              </TouchableOpacity>
 
-            {arAssetCustomUrl ? (
-              <View style={{ backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, marginBottom: 10 }}>
-                <Text style={{ fontSize: 12, color: '#475569', fontWeight: 'bold' }}>🔗 反映中のカスタムオブジェクトURL:</Text>
-                <Text style={{ fontSize: 11, color: '#2563EB', marginTop: 4 }} numberOfLines={2}>{arAssetCustomUrl}</Text>
+              {generatedShopData && (
+                <View style={{ marginTop: 24, padding: 16, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center' }}>
+                  <Text style={{ fontSize: 14, fontWeight: '800', color: '#10B981', marginBottom: 12 }}>✨ 登録完了！QRコードが生成されました</Text>
+                  
+                  <Image source={{ uri: generatedShopData.qr }} style={{ width: 180, height: 180, marginBottom: 12 }} />
+                  
+                  <View style={{ width: '100%', backgroundColor: '#FFFFFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 12 }}>
+                    <Text style={{ fontSize: 11, color: '#64748B', fontWeight: 'bold' }}>NFC用 URL</Text>
+                    <Text style={{ fontSize: 12, color: '#2563EB', marginTop: 4 }} selectable>{generatedShopData.url}</Text>
+                  </View>
+
+                  <View style={{ width: '100%', backgroundColor: '#F1F5F9', padding: 12, borderRadius: 8 }}>
+                    <Text style={{ fontSize: 11, color: '#64748B', fontWeight: 'bold' }}>クライアントUUID (下の設定で使用します)</Text>
+                    <Text style={{ fontSize: 13, color: '#0F172A', marginTop: 4, fontWeight: '900' }} selectable>{generatedShopData.id}</Text>
+                  </View>
+                </View>
+              )}
+            </View>
+
+            {/* 既存: オブジェクト管理パネル */}
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト管理パネル</Text>
+              <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
+                上で発行したUUID（または全体）に対して、表示する「3Dモデル」や「トリガーマーカー」を個別に設定します。
+              </Text>
+
+              <Text style={styles.label}>1. 配信制御範囲の指定</Text>
+              <View style={styles.radioGroup}>
+                <TouchableOpacity style={[styles.radioBtn, arClientType === 'global' && styles.activeRadio]} onPress={() => setArClientType('global')}>
+                  <Text style={[styles.radioText, arClientType === 'global' && styles.activeRadioText]}>全体一括配信</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.radioBtn, arClientType === 'client_specific' && styles.activeRadio]} onPress={() => setArClientType('client_specific')}>
+                  <Text style={[styles.radioText, arClientType === 'client_specific' && styles.activeRadioText]}>特定コード・企業指定</Text>
+                </TouchableOpacity>
               </View>
-            ) : null}
 
-            <View style={styles.divider} />
+              <Text style={styles.label}>2. 対象のプロモURL（クライアントUUID）を入力</Text>
+              <TextInput 
+                style={styles.input} 
+                value={arTargetClientId} 
+                onChangeText={setArTargetClientId} 
+                placeholder="promo_links テーブルの UUID を指定" 
+                disabled={arClientType === 'global'}
+                autoCapitalize="none"
+              />
 
-            <Text style={styles.label}>5. レンダリング種別（表示形式）</Text>
-            <View style={styles.radioGroup}>
-              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'card_frame' && styles.activeRadio]} onPress={() => setArDisplayMode('card_frame')}>
-                <Text style={[styles.radioText, arDisplayMode === 'card_frame' && styles.activeRadioText]}>2Dカード枠浮遊</Text>
+              <Text style={styles.label}>3. トリガーマーカーのアップロード（.mind または 画像）</Text>
+              <TouchableOpacity 
+                style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#8B5CF6', marginTop: 8, marginBottom: 12 }]} 
+                onPress={() => handleUploadArMarker(arTargetClientId)}
+                disabled={loading || arClientType === 'global'}
+              >
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>🎯 マーカーファイルを選択して紐付け</Text>}
               </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arDisplayMode === '3d_model' && styles.activeRadio]} onPress={() => setArDisplayMode('3d_model')}>
-                <Text style={[styles.radioText, arDisplayMode === '3d_model' && styles.activeRadioText]}>等身大3Dモデル</Text>
+
+              {arMarkerCustomUrl ? (
+                <View style={{ backgroundColor: '#F5F3FF', padding: 12, borderRadius: 12, marginBottom: 10 }}>
+                  <Text style={{ fontSize: 12, color: '#6D28D9', fontWeight: 'bold' }}>🔗 反映中のマーカーURL:</Text>
+                  <Text style={{ fontSize: 11, color: '#4C1D95', marginTop: 4 }} numberOfLines={2}>{arMarkerCustomUrl}</Text>
+                </View>
+              ) : null}
+
+              <Text style={styles.label}>4. ARオブジェクトのアップロード（.glb 3Dモデル または 画像）</Text>
+              <TouchableOpacity 
+                style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#10B981', marginTop: 8, marginBottom: 12 }]} 
+                onPress={() => handleUploadArAsset(arTargetClientId)}
+                disabled={loading || arClientType === 'global'}
+              >
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>📁 表示オブジェクトを選択して紐付け</Text>}
+              </TouchableOpacity>
+
+              {arAssetCustomUrl ? (
+                <View style={{ backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, marginBottom: 10 }}>
+                  <Text style={{ fontSize: 12, color: '#475569', fontWeight: 'bold' }}>🔗 反映中のカスタムオブジェクトURL:</Text>
+                  <Text style={{ fontSize: 11, color: '#2563EB', marginTop: 4 }} numberOfLines={2}>{arAssetCustomUrl}</Text>
+                </View>
+              ) : null}
+
+              <View style={styles.divider} />
+
+              <Text style={styles.label}>5. レンダリング種別（表示形式）</Text>
+              <View style={styles.radioGroup}>
+                <TouchableOpacity style={[styles.radioBtn, arDisplayMode === 'card_frame' && styles.activeRadio]} onPress={() => setArDisplayMode('card_frame')}>
+                  <Text style={[styles.radioText, arDisplayMode === 'card_frame' && styles.activeRadioText]}>2Dカード枠浮遊</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.radioBtn, arDisplayMode === '3d_model' && styles.activeRadio]} onPress={() => setArDisplayMode('3d_model')}>
+                  <Text style={[styles.radioText, arDisplayMode === '3d_model' && styles.activeRadioText]}>等身大3Dモデル</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>6. アプリ誘導コンフィグ（画面上のボタン配置）</Text>
+              <View style={styles.radioGroup}>
+                <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'bottom_center' && styles.activeRadio]} onPress={() => setArBtnPlacement('bottom_center')}>
+                  <Text style={[styles.radioText, arBtnPlacement === 'bottom_center' && styles.activeRadioText]}>下部中央固定</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'hidden' && styles.activeRadio]} onPress={() => setArBtnPlacement('hidden')}>
+                  <Text style={[styles.radioText, arBtnPlacement === 'hidden' && styles.activeRadioText]}>非表示（OFF）</Text>
+                </TouchableOpacity>
+              </View>
+
+              <Text style={styles.label}>配置ボタンのアクション文言</Text>
+              <TextInput 
+                style={styles.input} 
+                value={arActionText} 
+                onChangeText={setArActionText} 
+                placeholder="例: 限定カードをGET！" 
+              />
+
+              <Text style={[styles.label, {marginTop: 8}]}>実装時期</Text>
+              <View style={styles.radioGroup}>
+                <TouchableOpacity style={[styles.radioBtn, arDeployMode === 'immediate' && styles.activeRadio]} onPress={() => setArDeployMode('immediate')}>
+                  <Text style={[styles.radioText, arDeployMode === 'immediate' && styles.activeRadioText]}>即時反映</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.radioBtn, arDeployMode === 'scheduled' && styles.activeRadio]} onPress={() => setArDeployMode('scheduled')}>
+                  <Text style={[styles.radioText, arDeployMode === 'scheduled' && styles.activeRadioText]}>スケジュール</Text>
+                </TouchableOpacity>
+              </View>
+              {arDeployMode === 'scheduled' && (
+                <TextInput style={[styles.input, {marginTop: 8}]} value={arScheduledAt} onChangeText={setArScheduledAt} placeholder="実行日時 (ISO 例: 2026-06-20T12:00)" />
+              )}
+
+              <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#EC4899', marginTop: 30}]} onPress={handleUpdateArConfig} disabled={loading}>
+                <Text style={styles.primaryBtnText}>この構成をWebAR全体に即時同期</Text>
               </TouchableOpacity>
             </View>
-
-            <Text style={styles.label}>6. アプリ誘導コンフィグ（画面上のボタン配置）</Text>
-            <View style={styles.radioGroup}>
-              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'bottom_center' && styles.activeRadio]} onPress={() => setArBtnPlacement('bottom_center')}>
-                <Text style={[styles.radioText, arBtnPlacement === 'bottom_center' && styles.activeRadioText]}>下部中央固定</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arBtnPlacement === 'hidden' && styles.activeRadio]} onPress={() => setArBtnPlacement('hidden')}>
-                <Text style={[styles.radioText, arBtnPlacement === 'hidden' && styles.activeRadioText]}>非表示（OFF）</Text>
-              </TouchableOpacity>
-            </View>
-
-            <Text style={styles.label}>配置ボタンのアクション文言</Text>
-            <TextInput 
-              style={styles.input} 
-              value={arActionText} 
-              onChangeText={setArActionText} 
-              placeholder="例: 限定カードをGET！" 
-            />
-
-            <Text style={[styles.label, {marginTop: 8}]}>実装時期</Text>
-            <View style={styles.radioGroup}>
-              <TouchableOpacity style={[styles.radioBtn, arDeployMode === 'immediate' && styles.activeRadio]} onPress={() => setArDeployMode('immediate')}>
-                <Text style={[styles.radioText, arDeployMode === 'immediate' && styles.activeRadioText]}>即時反映</Text>
-              </TouchableOpacity>
-              <TouchableOpacity style={[styles.radioBtn, arDeployMode === 'scheduled' && styles.activeRadio]} onPress={() => setArDeployMode('scheduled')}>
-                <Text style={[styles.radioText, arDeployMode === 'scheduled' && styles.activeRadioText]}>スケジュール</Text>
-              </TouchableOpacity>
-            </View>
-            {arDeployMode === 'scheduled' && (
-              <TextInput style={[styles.input, {marginTop: 8}]} value={arScheduledAt} onChangeText={setArScheduledAt} placeholder="実行日時 (ISO 例: 2026-06-20T12:00)" />
-            )}
-
-            <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#EC4899', marginTop: 30}]} onPress={handleUpdateArConfig} disabled={loading}>
-              <Text style={styles.primaryBtnText}>この構成をWebAR全体に即時同期</Text>
-            </TouchableOpacity>
           </View>
         )}
 
