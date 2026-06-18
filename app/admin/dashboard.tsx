@@ -14,7 +14,6 @@ export default function AdminDashboard() {
   const router = useRouter();
 
   // 💡 【重要】取得予定のWebAR用ドメイン（サブドメイン含む）のベースURLを定義
-  // ドメインを取得したら、ここを "https://ar.yourdomain.com" などに変更するだけで全体に反映される！
   const WEBAR_BASE_URL = 'https://snapcard.example.com';
 
   const [activeTab, setActiveTab] = useState('analytics');
@@ -83,8 +82,6 @@ export default function AdminDashboard() {
   const [baseLat, setBaseLat] = useState('35.6983');
   const [baseLng, setBaseLng] = useState('139.4130');
   const [targetMunicipality, setTargetMunicipality] = useState('東京都');
-
-  // 大量発生モード
   const [isMassiveSpawn, setIsMassiveSpawn] = useState(false);
   const [massiveSpawnCount, setMassiveSpawnCount] = useState('50');
   const [massiveStartAt, setMassiveStartAt] = useState('');
@@ -103,7 +100,6 @@ export default function AdminDashboard() {
   const [newElement, setNewElement] = useState('');
   const [newRarity, setNewRarity] = useState('');
 
-  // 直接配布セグメント設定
   const [directTargetGender, setDirectTargetGender] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
   const [directTargetAge, setDirectTargetAge] = useState<'ALL' | 'TEENS' | 'TWENTIES' | 'THIRTIES'>('ALL');
   const [directTargetLocation, setDirectTargetLocation] = useState('');
@@ -118,19 +114,32 @@ export default function AdminDashboard() {
   const [arDeployMode, setArDeployMode] = useState<'immediate' | 'scheduled'>('immediate');
   const [arScheduledAt, setArScheduledAt] = useState('');
 
-  // 通常アセットの生成/アップロード
+  // 通常アセットの生成/アップロード ＆ カードステータス
   const [arAssetMode, setArAssetMode] = useState<'upload' | 'ai'>('upload');
   const [arAssetCustomUrl, setArAssetCustomUrl] = useState('');
   const [arAssetAiPrompt, setArAssetAiPrompt] = useState('');
+  const [arAssetName, setArAssetName] = useState('');
+  const [arAssetRarity, setArAssetRarity] = useState('N');
+  const [arAssetAttr, setArAssetAttr] = useState('無');
+  const [arAssetHp, setArAssetHp] = useState('100');
+  const [arAssetAtk, setArAssetAtk] = useState('50');
+  const [arAssetDef, setArAssetDef] = useState('50');
+  const [arAssetSpd, setArAssetSpd] = useState('50');
 
-  // 当たりアセットの生成/アップロード
+  // 当たりアセットの生成/アップロード ＆ カードステータス
   const [arWinAssetMode, setArWinAssetMode] = useState<'upload' | 'ai'>('upload');
   const [arWinAssetUrl, setArWinAssetUrl] = useState('');
   const [arWinAssetAiPrompt, setArWinAssetAiPrompt] = useState('');
-  const [arWinRate, setArWinRate] = useState('0.1'); // デフォルト 0.1% (1000分の1)
+  const [arWinRate, setArWinRate] = useState('0.1');
   const [arActionTextWin, setArActionTextWin] = useState('大当たり！クーポンを獲得！');
+  const [arWinAssetName, setArWinAssetName] = useState('');
+  const [arWinAssetRarity, setArWinAssetRarity] = useState('SR');
+  const [arWinAssetAttr, setArWinAssetAttr] = useState('光');
+  const [arWinAssetHp, setArWinAssetHp] = useState('500');
+  const [arWinAssetAtk, setArWinAssetAtk] = useState('200');
+  const [arWinAssetDef, setArWinAssetDef] = useState('200');
+  const [arWinAssetSpd, setArWinAssetSpd] = useState('200');
 
-  // 新規店舗・キャンペーンのURL/QR発行用
   const [newShopName, setNewShopName] = useState('');
   const [newShopLocation, setNewShopLocation] = useState('');
   const [generatedShopData, setGeneratedShopData] = useState<{ id: string; url: string; qr: string } | null>(null);
@@ -148,9 +157,6 @@ export default function AdminDashboard() {
     }, [])
   );
 
-  // ==========================================
-  // データフェッチ関数
-  // ==========================================
   const fetchArWebSettings = async () => {
     try {
       const { data } = await supabase.from('system_config').select('*').eq('id', 'webar_dynamic_settings').single();
@@ -164,6 +170,18 @@ export default function AdminDashboard() {
         if (c.arActionText) setArActionText(c.arActionText);
         if (c.arDeployMode) setArDeployMode(c.arDeployMode);
         if (c.arScheduledAt) setArScheduledAt(c.arScheduledAt);
+        
+        // ステータス反映
+        if (c.arBaseStats) {
+          setArAssetName(c.arBaseStats.name || ''); setArAssetRarity(c.arBaseStats.rarity || 'N'); setArAssetAttr(c.arBaseStats.element || '無');
+          setArAssetHp(c.arBaseStats.hp?.toString() || '100'); setArAssetAtk(c.arBaseStats.atk?.toString() || '50');
+          setArAssetDef(c.arBaseStats.def?.toString() || '50'); setArAssetSpd(c.arBaseStats.spd?.toString() || '50');
+        }
+        if (c.arWinStats) {
+          setArWinAssetName(c.arWinStats.name || ''); setArWinAssetRarity(c.arWinStats.rarity || 'SR'); setArWinAssetAttr(c.arWinStats.element || '光');
+          setArWinAssetHp(c.arWinStats.hp?.toString() || '500'); setArWinAssetAtk(c.arWinStats.atk?.toString() || '200');
+          setArWinAssetDef(c.arWinStats.def?.toString() || '200'); setArWinAssetSpd(c.arWinStats.spd?.toString() || '200');
+        }
       }
     } catch (e) { console.log('AR設定フェッチ非活性', e); }
   };
@@ -264,9 +282,6 @@ export default function AdminDashboard() {
     setRaritiesList(rars);
   };
 
-  // ==========================================
-  // 画像・ファイルアップロード / AI生成
-  // ==========================================
   const pickImage = async (setter: any) => {
     let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.5, base64: true });
     if (!result.canceled && result.assets[0].base64) {
@@ -429,9 +444,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // ==========================================
-  // 管理アクション関数
-  // ==========================================
   const handleToggleBan = async (userId: string, currentBanStatus: boolean) => {
     const action = currentBanStatus ? 'BAN解除' : 'BAN';
     Alert.alert(`${action}の確認`, `本当にこのユーザーを${action}しますか？`, [
@@ -595,17 +607,14 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // ランダム座標取得ヘルパー
   const getRandomCoords = () => {
     let lat = parseFloat(baseLat) || 35.6983;
     let lng = parseFloat(baseLng) || 139.4130;
 
     if (spawnType === 'nationwide') {
-      // 日本のざっくりとした範囲
-      lat = 24 + Math.random() * 22; // 24 ~ 46
-      lng = 128 + Math.random() * 17; // 128 ~ 145
+      lat = 24 + Math.random() * 22;
+      lng = 128 + Math.random() * 17;
     } else if (spawnType === 'municipality') {
-      // 簡単なモック座標変換 (実際はジオコーディングAPIを使用)
       const mockDict: Record<string, {lat: number, lng: number}> = {
         '東京都': {lat: 35.689, lng: 139.691},
         '大阪府': {lat: 34.686, lng: 135.52},
@@ -613,17 +622,15 @@ export default function AdminDashboard() {
         '福岡県': {lat: 33.606, lng: 130.418},
       };
       const base = mockDict[targetMunicipality] || {lat, lng};
-      lat = base.lat + (Math.random() - 0.5) * 0.2; // 少し広めに散らす
+      lat = base.lat + (Math.random() - 0.5) * 0.2;
       lng = base.lng + (Math.random() - 0.5) * 0.2;
     } else {
-      // 半径基準
       lat += (Math.random() - 0.5) * 0.04;
       lng += (Math.random() - 0.5) * 0.04;
     }
     return { finalLat: lat, finalLng: lng };
   };
 
-  // 即時・大量発生トリガー
   const triggerInstantRandomBoss = async () => {
     setLoading(true);
     try {
@@ -641,7 +648,6 @@ export default function AdminDashboard() {
           
           const { finalLat, finalLng } = getRandomCoords();
 
-          // 負荷軽減のため大量発生時はAI画像生成をスキップして固定画像
           let finalBossUrl = 'https://via.placeholder.com/300x400.png?text=Massive+Boss';
           let finalDropUrl = 'https://via.placeholder.com/300x400.png?text=Massive+Drop';
 
@@ -718,49 +724,60 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // 💡 WebAR動的構成の登録・上書き実行 (確率型クーポン対応)
+  // 💡 WebAR動的構成の登録・上書き実行 (カードステータスも紐付けて保存)
   const handleUpdateArConfig = async () => {
     if (arClientType === 'client_specific' && !arTargetClientId) {
       Alert.alert('エラー', '個別指定時は対象のクライアントUUIDが必要です。');
       return;
     }
     setLoading(true);
+
+    const arBaseStats = {
+      name: arAssetName || 'ARカード', rarity: arAssetRarity, element: arAssetAttr,
+      hp: parseInt(arAssetHp)||100, atk: parseInt(arAssetAtk)||50, def: parseInt(arAssetDef)||50, spd: parseInt(arAssetSpd)||50
+    };
+    
+    const arWinStats = {
+      name: arWinAssetName || '大当りARカード', rarity: arWinAssetRarity, element: arWinAssetAttr,
+      hp: parseInt(arWinAssetHp)||500, atk: parseInt(arWinAssetAtk)||200, def: parseInt(arWinAssetDef)||200, spd: parseInt(arWinAssetSpd)||200
+    };
+
     try {
       if (arClientType === 'client_specific') {
-        // 特定の店舗レコードに対して確率・文言・アセットを一括更新
+        // 個別店舗への紐付け (promo_linksに ar_base_stats, ar_win_statsカラムが存在する想定)
         const { error } = await supabase.from('promo_links').update({
           ar_asset_url: arAssetCustomUrl || null,
           ar_win_asset_url: arWinAssetUrl || null,
           win_rate: parseFloat(arWinRate) || 0,
           ar_action_text_win: arActionTextWin,
           ar_display_mode: arDisplayMode,
-          ar_marker_url: arMarkerCustomUrl || null
+          ar_marker_url: arMarkerCustomUrl || null,
+          ar_base_stats: arBaseStats,
+          ar_win_stats: arWinStats
         }).eq('id', arTargetClientId);
 
         if (error) throw error;
-        Alert.alert('同期成功', `店舗 [${arTargetClientId.substring(0,8)}] の確率・アセット構成を個別同期しました。`);
+        Alert.alert('同期成功', `店舗 [${arTargetClientId.substring(0,8)}] の確率・アセットおよびカードステータスを個別同期しました。`);
       } else {
-        // グローバル設定の更新
+        // グローバル設定への紐付け
         const config_data = {
           arClientType, arTargetClientId: 'ALL',
           arDisplayMode, arAssetCustomUrl, arBtnPlacement, arActionText, arDeployMode,
-          arScheduledAt: arDeployMode === 'scheduled' ? arScheduledAt : null
+          arScheduledAt: arDeployMode === 'scheduled' ? arScheduledAt : null,
+          arBaseStats, arWinStats
         };
         const { error } = await supabase.from('system_config').upsert({ id: 'webar_dynamic_settings', config_data });
         if (error) throw error;
-        Alert.alert('同期成功', 'グローバル一括WebARパラメータを更新しました。ブラウザ側にリアルタイム同期されます。');
+        Alert.alert('同期成功', 'グローバル一括WebARパラメータ(カードステータス含む)を更新しました。');
       }
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // 💡 WebAR: プレビュー表示機能
   const handlePreviewAr = () => {
-    // 💡 変数 WEBAR_BASE_URL を使用してプレビューURLを生成
     const previewUrl = `${WEBAR_BASE_URL}/ar_preview.html?mode=${arDisplayMode}&asset=${encodeURIComponent(arAssetCustomUrl)}&text=${encodeURIComponent(arActionText)}&win_asset=${encodeURIComponent(arWinAssetUrl)}&win_text=${encodeURIComponent(arActionTextWin)}&rate=${arWinRate}`;
     Linking.openURL(previewUrl);
   };
 
-  // 💡 WebAR: 新規店舗・キャンペーンのURL/QR発行処理
   const handleGenerateShopQr = async () => {
     if (!newShopName) {
       Alert.alert('エラー', '店舗名（キャンペーン名）を入力してください。');
@@ -777,8 +794,6 @@ export default function AdminDashboard() {
       if (error) throw error;
 
       const shopId = data.id;
-      
-      // 💡 変数 WEBAR_BASE_URL を使用して本番URLを生成
       const arUrl = `${WEBAR_BASE_URL}/ar.php?shop_id=${shopId}`;
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(arUrl)}`;
 
@@ -1323,7 +1338,7 @@ export default function AdminDashboard() {
               
               {/* 通常アセット */}
               <View style={{backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 16}}>
-                <Text style={styles.label}>ハズレ（通常時）の表示オブジェクト</Text>
+                <Text style={styles.label}>ハズレ（通常時）の表示オブジェクト ＆ カードステータス</Text>
                 <View style={styles.radioGroup}>
                   <TouchableOpacity style={[styles.radioBtn, arAssetMode === 'upload' && styles.activeRadio]} onPress={() => setArAssetMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
                   <TouchableOpacity style={[styles.radioBtn, arAssetMode === 'ai' && styles.activeRadio]} onPress={() => setArAssetMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
@@ -1341,11 +1356,27 @@ export default function AdminDashboard() {
                   </View>
                 )}
                 {arAssetCustomUrl ? <Text style={{fontSize:11, color:'#475569', marginTop: 8}} numberOfLines={1}>登録済: {arAssetCustomUrl}</Text> : null}
+                
+                {/* 💡 通常アセット用カードステータス入力 */}
+                <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#E2E8F0'}}>
+                  <Text style={{fontSize: 12, color: '#475569', fontWeight: 'bold', marginBottom: 6}}>付与されるカードのステータス設定</Text>
+                  <View style={styles.row}>
+                    <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetName} onChangeText={setArAssetName} placeholder="カード名" />
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetRarity} onChangeText={setArAssetRarity} placeholder="レア" />
+                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13}]} value={arAssetAttr} onChangeText={setArAssetAttr} placeholder="属性" />
+                  </View>
+                  <View style={[styles.row, {marginTop: 6}]}>
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetHp} onChangeText={setArAssetHp} placeholder="HP" keyboardType="numeric" />
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetAtk} onChangeText={setArAssetAtk} placeholder="ATK" keyboardType="numeric" />
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetDef} onChangeText={setArAssetDef} placeholder="DEF" keyboardType="numeric" />
+                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13}]} value={arAssetSpd} onChangeText={setArAssetSpd} placeholder="SPD" keyboardType="numeric" />
+                  </View>
+                </View>
               </View>
 
               {/* 当たりアセット */}
               <View style={{backgroundColor: '#FFFBEB', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#FDE68A', marginBottom: 16}}>
-                <Text style={styles.label}>🎉 当たり（当選時）の表示オブジェクト</Text>
+                <Text style={styles.label}>🎉 当たり（当選時）の表示オブジェクト ＆ カードステータス</Text>
                 <View style={styles.radioGroup}>
                   <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'upload' && styles.activeRadio]} onPress={() => setArWinAssetMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
                   <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'ai' && styles.activeRadio]} onPress={() => setArWinAssetMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
@@ -1363,6 +1394,22 @@ export default function AdminDashboard() {
                   </View>
                 )}
                 {arWinAssetUrl ? <Text style={{fontSize:11, color:'#D97706', marginTop: 8}} numberOfLines={1}>登録済: {arWinAssetUrl}</Text> : null}
+
+                {/* 💡 当たりアセット用カードステータス入力 */}
+                <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#FDE68A'}}>
+                  <Text style={{fontSize: 12, color: '#D97706', fontWeight: 'bold', marginBottom: 6}}>付与されるレアカードのステータス設定</Text>
+                  <View style={styles.row}>
+                    <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetName} onChangeText={setArWinAssetName} placeholder="レアカード名" />
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetRarity} onChangeText={setArWinAssetRarity} placeholder="レア" />
+                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAttr} onChangeText={setArWinAssetAttr} placeholder="属性" />
+                  </View>
+                  <View style={[styles.row, {marginTop: 6}]}>
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetHp} onChangeText={setArWinAssetHp} placeholder="HP" keyboardType="numeric" />
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAtk} onChangeText={setArWinAssetAtk} placeholder="ATK" keyboardType="numeric" />
+                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetDef} onChangeText={setArWinAssetDef} placeholder="DEF" keyboardType="numeric" />
+                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetSpd} onChangeText={setArWinAssetSpd} placeholder="SPD" keyboardType="numeric" />
+                  </View>
+                </View>
               </View>
 
               <Text style={styles.label}>💡 クーポン当選確率（%単位。例: 0.1 は 1000分の1）</Text>
