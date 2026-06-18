@@ -12,6 +12,11 @@ import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon,
 
 export default function AdminDashboard() {
   const router = useRouter();
+
+  // 💡 【重要】取得予定のWebAR用ドメイン（サブドメイン含む）のベースURLを定義
+  // ドメインを取得したら、ここを "https://ar.yourdomain.com" などに変更するだけで全体に反映される！
+  const WEBAR_BASE_URL = 'https://snapcard.example.com';
+
   const [activeTab, setActiveTab] = useState('analytics');
   const [loading, setLoading] = useState(false);
 
@@ -750,8 +755,8 @@ export default function AdminDashboard() {
 
   // 💡 WebAR: プレビュー表示機能
   const handlePreviewAr = () => {
-    // 実際にブラウザで確認できるテストURLを発行する
-    const previewUrl = `https://snapcard.example.com/ar_preview.html?mode=${arDisplayMode}&asset=${encodeURIComponent(arAssetCustomUrl)}&text=${encodeURIComponent(arActionText)}&win_asset=${encodeURIComponent(arWinAssetUrl)}&win_text=${encodeURIComponent(arActionTextWin)}&rate=${arWinRate}`;
+    // 💡 変数 WEBAR_BASE_URL を使用してプレビューURLを生成
+    const previewUrl = `${WEBAR_BASE_URL}/ar_preview.html?mode=${arDisplayMode}&asset=${encodeURIComponent(arAssetCustomUrl)}&text=${encodeURIComponent(arActionText)}&win_asset=${encodeURIComponent(arWinAssetUrl)}&win_text=${encodeURIComponent(arActionTextWin)}&rate=${arWinRate}`;
     Linking.openURL(previewUrl);
   };
 
@@ -772,7 +777,9 @@ export default function AdminDashboard() {
       if (error) throw error;
 
       const shopId = data.id;
-      const arUrl = `https://snapcard.example.com/ar.php?shop_id=${shopId}`;
+      
+      // 💡 変数 WEBAR_BASE_URL を使用して本番URLを生成
+      const arUrl = `${WEBAR_BASE_URL}/ar.php?shop_id=${shopId}`;
       const qrUrl = `https://api.qrserver.com/v1/create-qr-code/?size=250x250&data=${encodeURIComponent(arUrl)}`;
 
       setGeneratedShopData({ id: shopId, url: arUrl, qr: qrUrl });
