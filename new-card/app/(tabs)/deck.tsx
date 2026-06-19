@@ -1,11 +1,10 @@
 import React, { useCallback, useState } from 'react';
-import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, SafeAreaView, Alert } from 'react-native';
+import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndicator, Modal, SafeAreaView, Alert, Platform } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { WebView } from 'react-native-webview';
-// 💡 Xシェア用にLinkingとTwitterアイコンを追加
+// 💡 Xシェア用にLinkingを追加（Twitterアイコンのインポートはエラー原因のため削除）
 import * as Linking from 'expo-linking';
-import { Twitter } from 'lucide-react-native';
 
 // デッキの最大枚数
 const MAX_DECK_SIZE = 5;
@@ -80,11 +79,15 @@ export default function DeckScreen() {
     try {
       await Linking.openURL(url);
     } catch (error) {
-      Alert.alert('エラー', 'Xを開けませんでした。');
+      if (Platform.OS === 'web') {
+        window.alert('エラー: Xを開けませんでした。');
+      } else {
+        Alert.alert('エラー', 'Xを開けませんでした。');
+      }
     }
   };
 
-  // 💡 デッキに編成されているカードを抽出し、5枠の配列を生成
+  // デッキに編成されているカードを抽出し、5枠の配列を生成
   const deckCards = cards.filter(c => c.is_active);
   const deckSlots = Array(MAX_DECK_SIZE).fill(null).map((_, index) => deckCards[index] || null);
 
@@ -173,10 +176,10 @@ export default function DeckScreen() {
           </TouchableOpacity>
         )}
 
-        {/* 💡 個別のカードをシェアするボタン */}
+        {/* 💡 アイコンの代わりに「𝕏」の文字を使用しエラーを回避 */}
         <TouchableOpacity style={styles.xShareBtn} onPress={() => shareToX(item)} activeOpacity={0.8}>
-          <Twitter color="#FFFFFF" size={18} style={{ marginRight: 8 }} />
-          <Text style={styles.xShareBtnText}>X でシェアする</Text>
+          <Text style={styles.xIconText}>𝕏</Text>
+          <Text style={styles.xShareBtnText}>でシェアする</Text>
         </TouchableOpacity>
 
         <TouchableOpacity 
@@ -198,7 +201,6 @@ export default function DeckScreen() {
         <Text style={styles.headerSub}>バトルデッキ編成</Text>
       </View>
 
-      {/* 💡 常時表示される「現在のデッキ構成」エリア */}
       <View style={styles.deckSlotsWrapper}>
         <View style={styles.deckSlotsHeader}>
           <Text style={styles.deckSlotsTitle}>現在の部隊</Text>
@@ -251,7 +253,16 @@ export default function DeckScreen() {
             </TouchableOpacity>
           </View>
           {currentArUrl && (
-            <WebView source={{ uri: currentArUrl }} style={{ flex: 1 }} allowsInlineMediaPlayback={true} mediaPlaybackRequiresUserAction={false} />
+            /* 💡 Web環境でのクラッシュ対策としてiframeにフォールバック */
+            Platform.OS === 'web' ? (
+              <iframe 
+                src={currentArUrl} 
+                style={{ flex: 1, width: '100%', height: '100%', border: 'none' }} 
+                allow="camera; microphone"
+              />
+            ) : (
+              <WebView source={{ uri: currentArUrl }} style={{ flex: 1 }} allowsInlineMediaPlayback={true} mediaPlaybackRequiresUserAction={false} />
+            )
           )}
         </SafeAreaView>
       </Modal>
@@ -265,7 +276,6 @@ const styles = StyleSheet.create({
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
   headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '700' },
   
-  // 💡 デッキスロット表示用のスタイル
   deckSlotsWrapper: { backgroundColor: '#FFFFFF', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 3, zIndex: 10 },
   deckSlotsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
   deckSlotsTitle: { fontSize: 14, fontWeight: '900', color: '#0F172A' },
@@ -312,11 +322,11 @@ const styles = StyleSheet.create({
   statLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '800', marginBottom: 4 },
   statValue: { color: '#0F172A', fontSize: 16, fontWeight: '900', fontFamily: 'monospace' },
   
-  // 💡 ARボタンとシェアボタンのスタイル定義
   arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12, zIndex: 1 },
   arBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
 
   xShareBtn: { flexDirection: 'row', backgroundColor: '#0F1419', padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#333333', marginBottom: 12, zIndex: 1 },
+  xIconText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginRight: 8 },
   xShareBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   
   equipBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center', zIndex: 1 },
