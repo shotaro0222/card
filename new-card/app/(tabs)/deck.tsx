@@ -3,6 +3,9 @@ import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndi
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { WebView } from 'react-native-webview';
+// 💡 Xシェア用にLinkingとTwitterアイコンを追加
+import * as Linking from 'expo-linking';
+import { Twitter } from 'lucide-react-native';
 
 // デッキの最大枚数
 const MAX_DECK_SIZE = 5;
@@ -69,6 +72,22 @@ export default function DeckScreen() {
     setArModalVisible(true);
   };
 
+  // 💡 X（Twitter）へのシェア機能
+  const shareToX = async (card: any) => {
+    const text = `「${card.card_name || '名称不明'}」を図鑑に登録中！\n属性: ${card.element || '無'} | レア: ${card.rarity || 'N'}\n#SnapCard`;
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(card.image_url || '')}`;
+    
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      Alert.alert('エラー', 'Xを開けませんでした。');
+    }
+  };
+
+  // 💡 デッキに編成されているカードを抽出し、5枠の配列を生成
+  const deckCards = cards.filter(c => c.is_active);
+  const deckSlots = Array(MAX_DECK_SIZE).fill(null).map((_, index) => deckCards[index] || null);
+
   const renderCard = ({ item }: { item: any }) => {
     const safeLevel = item.level || 1;
     const safeExp = item.exp || 0;
@@ -76,7 +95,6 @@ export default function DeckScreen() {
     const progressPercent = Math.min(100, Math.max(0, (safeExp / nextLevelExp) * 100));
     const isSupport = item.card_role === 'support';
 
-    // 🎨 カスタムデザインのパース（JSONを読み解く）
     let customDesign: any = {};
     try {
       if (item.custom_design) {
@@ -91,12 +109,10 @@ export default function DeckScreen() {
         styles.card, 
         item.is_active && styles.activeCard, 
         item.is_fixed && styles.sponsorCard,
-        // ここから下で、DBから来たデザインJSONの指定を上書き適用します
         customDesign.frameColor && { borderColor: customDesign.frameColor, borderWidth: 4 },
         customDesign.backgroundColor && { backgroundColor: customDesign.backgroundColor }
       ]}>
         
-        {/* ✨ エフェクト指定がある場合（例: {"effect": "sparkle"}）オーバーレイを表示 */}
         {customDesign.effect === 'sparkle' && (
           <View style={styles.sparkleOverlay} pointerEvents="none" />
         )}
@@ -127,7 +143,7 @@ export default function DeckScreen() {
         <View style={styles.levelContainer}>
           <View style={styles.levelHeader}>
             <Text style={styles.levelText}>レベル {safeLevel}</Text>
-            <Text style={styles.expText}>あと {nextLevelExp - safeExp} EXP（{safeExp}/{nextLevelExp}）</Text>
+            <Text style={styles.expText}>あと {nextLevelExp - safeExp} EXP</Text>
           </View>
           <View style={styles.progressBarBg}>
             <View style={[styles.progressBarFill, { width: `${progressPercent}%` }]} />
@@ -157,26 +173,60 @@ export default function DeckScreen() {
           </TouchableOpacity>
         )}
 
+        {/* 💡 個別のカードをシェアするボタン */}
+        <TouchableOpacity style={styles.xShareBtn} onPress={() => shareToX(item)} activeOpacity={0.8}>
+          <Twitter color="#FFFFFF" size={18} style={{ marginRight: 8 }} />
+          <Text style={styles.xShareBtnText}>X でシェアする</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity 
           style={[styles.equipBtn, item.is_active && styles.equippedBtn]} 
           onPress={() => toggleDeckCard(item)}
         >
           <Text style={[styles.equipBtnText, item.is_active && styles.equippedBtnText]}>
-            {item.is_active ? '✅ デッキ編成中（外す）' : '➕ デッキに編成する'}
+            {item.is_active ? '✅ デッキから外す' : '➕ デッキに編成する'}
           </Text>
         </TouchableOpacity>
       </View>
     );
   };
 
-  // デッキ枚数の計算
-  const deckCount = cards.filter(c => c.is_active).length;
-
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
         <Text style={styles.headerTitle}>CARD DECK</Text>
-        <Text style={styles.headerSub}>バトルデッキ編成 ({deckCount} / {MAX_DECK_SIZE}枚)</Text>
+        <Text style={styles.headerSub}>バトルデッキ編成</Text>
+      </View>
+
+      {/* 💡 常時表示される「現在のデッキ構成」エリア */}
+      <View style={styles.deckSlotsWrapper}>
+        <View style={styles.deckSlotsHeader}>
+          <Text style={styles.deckSlotsTitle}>現在の部隊</Text>
+          <Text style={styles.deckSlotsCount}>{deckCards.length} / {MAX_DECK_SIZE}</Text>
+        </View>
+        
+        <View style={styles.slotsContainer}>
+          {deckSlots.map((card, index) => (
+            <TouchableOpacity 
+              key={index} 
+              style={[styles.slot, card ? styles.slotFilled : styles.slotEmpty]}
+              onPress={() => card && toggleDeckCard(card)}
+              disabled={!card}
+              activeOpacity={0.7}
+            >
+              {card ? (
+                <>
+                  <Image source={{ uri: card.image_url }} style={styles.slotImage} />
+                  <View style={styles.slotRemoveBadge}>
+                    <Text style={styles.slotRemoveText}>−</Text>
+                  </View>
+                </>
+              ) : (
+                <Text style={styles.slotEmptyText}>空き</Text>
+              )}
+            </TouchableOpacity>
+          ))}
+        </View>
       </View>
 
       {loading ? (
@@ -211,16 +261,28 @@ export default function DeckScreen() {
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  header: { padding: 20, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#F1F5F9', backgroundColor: '#FFFFFF' },
-  headerTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
-  headerSub: { fontSize: 13, color: '#2563EB', marginTop: 4, fontWeight: '800' },
+  header: { padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
+  headerTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
+  headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '700' },
   
-  // position: 'relative' を追加してオーバーレイを重ねやすくしています
+  // 💡 デッキスロット表示用のスタイル
+  deckSlotsWrapper: { backgroundColor: '#FFFFFF', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 3, zIndex: 10 },
+  deckSlotsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },
+  deckSlotsTitle: { fontSize: 14, fontWeight: '900', color: '#0F172A' },
+  deckSlotsCount: { fontSize: 14, fontWeight: '800', color: '#3B82F6' },
+  slotsContainer: { flexDirection: 'row', justifyContent: 'space-between' },
+  slot: { width: 56, height: 80, borderRadius: 8, justifyContent: 'center', alignItems: 'center', borderWidth: 2 },
+  slotEmpty: { backgroundColor: '#F1F5F9', borderColor: '#E2E8F0', borderStyle: 'dashed' },
+  slotFilled: { backgroundColor: '#0F172A', borderColor: '#3B82F6' },
+  slotEmptyText: { fontSize: 11, color: '#94A3B8', fontWeight: '700' },
+  slotImage: { width: '100%', height: '100%', borderRadius: 6, resizeMode: 'cover' },
+  slotRemoveBadge: { position: 'absolute', top: -6, right: -6, backgroundColor: '#EF4444', width: 20, height: 20, borderRadius: 10, justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#FFFFFF' },
+  slotRemoveText: { color: '#FFFFFF', fontSize: 12, fontWeight: '900', lineHeight: 14 },
+
   card: { position: 'relative', overflow: 'hidden', backgroundColor: '#FFFFFF', padding: 16, borderRadius: 20, marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.05, shadowRadius: 10, elevation: 3 },
   activeCard: { borderColor: '#3B82F6', borderWidth: 2, shadowColor: '#3B82F6', shadowOpacity: 0.15 },
   sponsorCard: { borderColor: '#F59E0B', borderWidth: 2 },
   
-  // 🎨 新規追加：エフェクト用スタイル
   sparkleOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(255, 215, 0, 0.1)', zIndex: 0 },
   darkOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(0, 0, 0, 0.8)', zIndex: 0 },
 
@@ -246,17 +308,21 @@ const styles = StyleSheet.create({
   skillText: { color: '#475569', fontSize: 13, fontWeight: '700', marginLeft: 8, zIndex: 1 },
   
   statsRow: { flexDirection: 'row', justifyContent: 'space-between', marginBottom: 20, zIndex: 1 },
-  statBox: { alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9' },
+  statBox: { alignItems: 'center', backgroundColor: '#F8FAFC', paddingVertical: 8, paddingHorizontal: 16, borderRadius: 12, borderWidth: 1, borderColor: '#F1F5F9', flex: 1, marginHorizontal: 2 },
   statLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '800', marginBottom: 4 },
   statValue: { color: '#0F172A', fontSize: 16, fontWeight: '900', fontFamily: 'monospace' },
+  
+  // 💡 ARボタンとシェアボタンのスタイル定義
+  arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12, zIndex: 1 },
+  arBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
+
+  xShareBtn: { flexDirection: 'row', backgroundColor: '#0F1419', padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#333333', marginBottom: 12, zIndex: 1 },
+  xShareBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   
   equipBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center', zIndex: 1 },
   equipBtnText: { color: '#475569', fontWeight: '800', fontSize: 14 },
   equippedBtn: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1 },
   equippedBtnText: { color: '#2563EB' },
-  
-  arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12, zIndex: 1 },
-  arBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   
   emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 50, fontWeight: '600', fontSize: 14 },
   

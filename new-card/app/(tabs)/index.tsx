@@ -2,10 +2,11 @@ import React, { useState, useCallback, useRef, useEffect } from 'react';
 import { ScrollView, View, Text, TouchableOpacity, StyleSheet, ActivityIndicator, Alert, TextInput, SafeAreaView, Modal, Animated, Easing, Image, Platform, Dimensions } from 'react-native';
 import * as ImagePicker from 'expo-image-picker';
 import * as Location from 'expo-location';
+import * as Linking from 'expo-linking'; // 💡 Xへのシェア用にLinkingを追加
 import { supabase } from '../../lib/supabase';
 import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
-import { Camera, Image as ImageIcon, Zap } from 'lucide-react-native';
+import { Camera, Image as ImageIcon, Zap, Twitter } from 'lucide-react-native'; // 💡 Twitterアイコンを追加
 
 // 💡 先ほど作成したカスタムロゴコンポーネントをインポート
 import SnapCardLogo from '../components/SnapCardLogo';
@@ -130,6 +131,20 @@ export default function ForgeScreen() {
     inputRange: [0, 1],
     outputRange: ['0deg', '360deg']
   });
+
+  // 💡 X（Twitter）へのシェア機能
+  const shareToX = async () => {
+    if (!forgedCardResult) return;
+    
+    const text = `「${forgedCardResult.card_name}」を錬成しました！\n属性: ${forgedCardResult.element} | 戦闘力: ${forgedCardResult.status_total}\n#SnapCard`;
+    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(forgedCardResult.image_url)}`;
+    
+    try {
+      await Linking.openURL(url);
+    } catch (error) {
+      safeAlert('エラー', 'Xを開けませんでした。');
+    }
+  };
 
   const checkLimit = () => {
     if (!isAdmin && !isInfinite && forgeCount >= MAX_FORGE_LIMIT) {
@@ -279,7 +294,7 @@ export default function ForgeScreen() {
         ) : (
           <View style={styles.mainBox}>
             
-            {/* 💡 ここをテキストからSnapCardLogoコンポーネントに差し替えました */}
+            {/* 💡 カスタムロゴコンポーネント */}
             <SnapCardLogo color="#FFFFFF" bgColor="#1E293B" scale={0.9} />
             
             <Text style={styles.instruction}>現実の風景やオブジェクトをカード化</Text>
@@ -348,7 +363,13 @@ export default function ForgeScreen() {
               {forgedCardResult?.card_name}
             </Animated.Text>
 
-            <Animated.View style={{ opacity: nameOpacity, width: '100%', alignItems: 'center' }}>
+            {/* 💡 ボタンをグループ化し、Xシェアボタンを追加 */}
+            <Animated.View style={[styles.closeBtnGroup, { opacity: nameOpacity }]}>
+              <TouchableOpacity style={styles.xShareBtn} onPress={shareToX} activeOpacity={0.8}>
+                <Twitter color="#FFFFFF" size={20} style={{ marginRight: 8 }} />
+                <Text style={styles.xShareBtnText}>X でシェアする</Text>
+              </TouchableOpacity>
+
               <TouchableOpacity style={styles.closeBtn} onPress={() => setShowResultModal(false)} activeOpacity={0.8}>
                 <Text style={styles.closeBtnText}>図鑑に保存する</Text>
               </TouchableOpacity>
@@ -367,9 +388,7 @@ const styles = StyleSheet.create({
   bgDecorCircle2: { position: 'absolute', bottom: -50, left: -100, width: 250, height: 250, borderRadius: 125, backgroundColor: '#1E293B', opacity: 0.5 },
   
   // 上下の余白を確保してコンテンツが端で切れないように調整
-  // content は ScrollView の contentContainerStyle として使う（flex を外す）
   content: { justifyContent: 'flex-start', alignItems: 'center', paddingTop: 40, paddingBottom: 60, zIndex: 10 },
-  // ScrollView 自体のスタイル
   scrollContainer: { flex: 1 },
   
   loadingArea: { alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.8)', padding: 40, borderRadius: 30, borderWidth: 1, borderColor: '#334155' },
@@ -416,6 +435,11 @@ const styles = StyleSheet.create({
   cardOverlayStats: { color: '#94A3B8', fontSize: 12, fontWeight: '800', textAlign: 'center', letterSpacing: 1 },
   
   hugeResultName: { fontSize: 42, fontWeight: '900', textAlign: 'center', marginVertical: 30, textShadowColor: '#000', textShadowOffset: { width: 2, height: 4 }, textShadowRadius: 10, paddingHorizontal: 10, width: '100%' },
+  
+  // 💡 ボタンエリアのスタイル
+  closeBtnGroup: { width: '100%', alignItems: 'center', gap: 15, paddingBottom: 20 },
+  xShareBtn: { flexDirection: 'row', backgroundColor: '#0F1419', paddingVertical: 16, paddingHorizontal: 40, borderRadius: 30, shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.5, shadowRadius: 10, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#333333' },
+  xShareBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
   
   closeBtn: { backgroundColor: '#FFFFFF', paddingVertical: 16, paddingHorizontal: 40, borderRadius: 30, shadowColor: '#FFFFFF', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.3, shadowRadius: 10 },
   closeBtnText: { color: '#0F172A', fontWeight: '900', fontSize: 16, letterSpacing: 1 },
