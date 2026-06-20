@@ -3,8 +3,6 @@ import { View, Text, FlatList, Image, TouchableOpacity, StyleSheet, ActivityIndi
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { WebView } from 'react-native-webview';
-// 💡 Xシェア用にLinkingを追加（Twitterアイコンのインポートはエラー原因のため削除）
-import * as Linking from 'expo-linking';
 
 // デッキの最大枚数
 const MAX_DECK_SIZE = 5;
@@ -69,22 +67,6 @@ export default function DeckScreen() {
   const launchAR = (url: string) => {
     setCurrentArUrl(url);
     setArModalVisible(true);
-  };
-
-  // 💡 X（Twitter）へのシェア機能
-  const shareToX = async (card: any) => {
-    const text = `「${card.card_name || '名称不明'}」を図鑑に登録中！\n属性: ${card.element || '無'} | レア: ${card.rarity || 'N'}\n#SnapCard`;
-    const url = `https://twitter.com/intent/tweet?text=${encodeURIComponent(text)}&url=${encodeURIComponent(card.image_url || '')}`;
-    
-    try {
-      await Linking.openURL(url);
-    } catch (error) {
-      if (Platform.OS === 'web') {
-        window.alert('エラー: Xを開けませんでした。');
-      } else {
-        Alert.alert('エラー', 'Xを開けませんでした。');
-      }
-    }
   };
 
   // デッキに編成されているカードを抽出し、5枠の配列を生成
@@ -175,12 +157,6 @@ export default function DeckScreen() {
             <Text style={styles.arBtnText}>🌐 ARで現実に出現させる</Text>
           </TouchableOpacity>
         )}
-
-        {/* 💡 アイコンの代わりに「𝕏」の文字を使用しエラーを回避 */}
-        <TouchableOpacity style={styles.xShareBtn} onPress={() => shareToX(item)} activeOpacity={0.8}>
-          <Text style={styles.xIconText}>𝕏</Text>
-          <Text style={styles.xShareBtnText}>でシェアする</Text>
-        </TouchableOpacity>
 
         <TouchableOpacity 
           style={[styles.equipBtn, item.is_active && styles.equippedBtn]} 
@@ -324,10 +300,6 @@ const styles = StyleSheet.create({
   
   arBtn: { backgroundColor: '#0F172A', padding: 16, borderRadius: 12, alignItems: 'center', marginBottom: 12, zIndex: 1 },
   arBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
-
-  xShareBtn: { flexDirection: 'row', backgroundColor: '#0F1419', padding: 16, borderRadius: 12, alignItems: 'center', justifyContent: 'center', borderWidth: 1, borderColor: '#333333', marginBottom: 12, zIndex: 1 },
-  xIconText: { color: '#FFFFFF', fontSize: 18, fontWeight: 'bold', marginRight: 8 },
-  xShareBtnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 14 },
   
   equipBtn: { backgroundColor: '#F1F5F9', padding: 16, borderRadius: 12, alignItems: 'center', zIndex: 1 },
   equipBtnText: { color: '#475569', fontWeight: '800', fontSize: 14 },
