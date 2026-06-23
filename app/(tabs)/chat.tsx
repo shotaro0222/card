@@ -199,10 +199,9 @@ export default function ChatTradeScreen() {
     );
   };
 
-// ... existing code ...
   // --- チーム管理アクション ---
   const handleCreateTeam = async () => {
-    console.log('--- チーム設立処理開始 ---'); // ボタンが反応しているか確認
+    console.log('--- チーム設立処理開始 ---'); // ログ出力
     if (!newTeamName.trim()) {
       console.log('チーム名が空のため中断');
       return;
@@ -249,9 +248,6 @@ export default function ChatTradeScreen() {
       setLoading(false);
     }
   };
-
-  const requestJoinTeam = async (teamId: string) => {
-// ... existing code ...
 
   const requestJoinTeam = async (teamId: string) => {
     setLoading(true);
