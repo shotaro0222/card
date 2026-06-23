@@ -199,33 +199,59 @@ export default function ChatTradeScreen() {
     );
   };
 
+// ... existing code ...
   // --- チーム管理アクション ---
   const handleCreateTeam = async () => {
-    if (!newTeamName.trim()) return;
+    console.log('--- チーム設立処理開始 ---'); // ボタンが反応しているか確認
+    if (!newTeamName.trim()) {
+      console.log('チーム名が空のため中断');
+      return;
+    }
+    
     setLoading(true);
     try {
+      console.log('teamsテーブルにデータを挿入中...');
       const { data: teamData, error: teamError } = await supabase
         .from('teams')
         .insert([{ name: newTeamName, description: newTeamDesc }])
         .select()
         .single();
       
-      if (teamError) throw teamError;
+      if (teamError) {
+        console.error('teams挿入エラー:', teamError);
+        throw teamError;
+      }
+      console.log('teams挿入成功:', teamData);
 
-      await supabase
+      console.log('team_membersテーブルにデータを挿入中...');
+      // 修正: team_membersのインサート時のエラーもチェックする
+      const { error: memberError } = await supabase
         .from('team_members')
         .insert([{ team_id: teamData.id, player_id: myId, role: 'leader', status: 'approved' }]);
+
+      if (memberError) {
+        console.error('team_members挿入エラー:', memberError);
+        throw memberError;
+      }
+      console.log('team_members挿入成功');
 
       Alert.alert('成功', 'チームを設立しました！');
       setCreateTeamModalVisible(false);
       setNewTeamName('');
       setNewTeamDesc('');
       initAllData();
-    } catch (err) {
-      Alert.alert('エラー', 'チーム作成に失敗しました');
+    } catch (err: any) {
+      console.error('チーム設立時の例外エラー:', err);
+      // エラーの詳細なメッセージをアラートに出す
+      Alert.alert('エラー', `チーム作成に失敗しました\n${err.message || ''}`);
+    } finally {
+      // 確実にローディングを解除する
+      setLoading(false);
     }
-    setLoading(false);
   };
+
+  const requestJoinTeam = async (teamId: string) => {
+// ... existing code ...
 
   const requestJoinTeam = async (teamId: string) => {
     setLoading(true);
