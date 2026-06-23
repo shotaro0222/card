@@ -1,13 +1,14 @@
-import React, { useState, useCallback } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView, Platform } from 'react-native';
+import React, { useState, useCallback, useEffect } from 'react';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView, Platform, FlatList, Image } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
-import { ShieldAlert, Trophy, Activity, Swords } from 'lucide-react-native';
+import { ShieldAlert, Trophy, Activity, Swords, Map as MapIcon, Flag, Zap, X } from 'lucide-react-native';
 
-// 👇 修正箇所：Web環境でのクラッシュを防ぐため、静的 import から動的 require に変更
+// Web環境でのクラッシュを防ぐ動的インポート
 let MapView: any;
 let Marker: any;
+let Polygon: any;
 let PROVIDER_GOOGLE: any;
 let WebView: any;
 
@@ -15,28 +16,27 @@ if (Platform.OS !== 'web') {
   const Maps = require('react-native-maps');
   MapView = Maps.default;
   Marker = Maps.Marker;
+  Polygon = Maps.Polygon;
   PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
   WebView = require('react-native-webview').WebView;
 } else {
-  // Web版起動時はエラーを回避するためダミーコンポーネントを描画する
   MapView = ({ children }: any) => (
-    <View style={{ flex: 1, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 24 }}>
-      <ShieldAlert color="#64748B" size={32} style={{ marginBottom: 8 }} />
-      <Text style={{ color: '#64748B', fontWeight: 'bold' }}>Webブラウザではマップを表示できません</Text>
-      <Text style={{ color: '#94A3B8', fontSize: 12, marginTop: 4 }}>実機またはシミュレータをご利用ください</Text>
+    <View style={styles.webMapFallback}>
+      <MapIcon color="#64748B" size={32} style={{ marginBottom: 8 }} />
+      <Text style={{ color: '#64748B', fontWeight: 'bold' }}>Web版ではマップを表示できません</Text>
       <View style={{ display: 'none' }}>{children}</View>
     </View>
   );
   Marker = ({ children }: any) => <View>{children}</View>;
+  Polygon = () => <View />;
   WebView = () => (
     <View style={{ flex: 1, backgroundColor: '#0F172A', justifyContent: 'center', alignItems: 'center' }}>
-      <Text style={{ color: '#FFFFFF', fontWeight: 'bold' }}>WebブラウザではARを表示できません</Text>
+      <Text style={{ color: '#FFFFFF' }}>WebブラウザではARを表示できません</Text>
     </View>
   );
 }
-// 👆 修正箇所ここまで
 
-// 💡【爆速処理：属性相性定義テーブル】
+// 属性相性テーブル
 const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = {
   '火': { strong: ['木', 'サイバー', 'プラスチック'], weak: ['水', '黄金', '虚無'] },
   '水': { strong: ['火', '黄金', '資本'], weak: ['雷', 'プラスチック', '大気汚染'] },
@@ -51,81 +51,93 @@ const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = 
 function getDamageMultiplier(attackerEl: string, defenderEl: string): { multiplier: number, label: string } {
   const relation = ELEMENT_RELATIONS[attackerEl];
   if (!relation) return { multiplier: 1.0, label: '' }; 
-  
-  if (relation.strong.includes(defenderEl)) {
-    return { multiplier: 1.5, label: '💥【有利属性】' }; 
-  }
-  if (relation.weak.includes(defenderEl)) {
-    return { multiplier: 0.5, label: '🛡️【不利属性】' };
-  }
+  if (relation.strong.includes(defenderEl)) return { multiplier: 1.5, label: '💥【有利属性】' }; 
+  if (relation.weak.includes(defenderEl)) return { multiplier: 0.5, label: '🛡️【不利属性】' };
   return { multiplier: 1.0, label: '' };
 }
 
 export default function BattleScreen() {
+  const [myId, setMyId] = useState<string | null>(null);
+  const [myProfile, setMyProfile] = useState<any>(null);
+  const [playerStats, setPlayerStats] = useState({ totalWins: 0, bossDefeats: 0 });
   const [battleLog, setBattleLog] = useState<any[]>([]);
   const [isBattling, setIsBattling] = useState(false);
-  const [loadingBoss, setLoadingBoss] = useState(false);
+  
+  // ボス関連
+  const [loadingMap, setLoadingMap] = useState(false);
   const [detectedBoss, setDetectedBoss] = useState<any>(null);
   const [isArModalVisible, setArModalVisible] = useState(false);
   const [arUrl, setArUrl] = useState<string | null>(null);
 
-  const [playerStats, setPlayerStats] = useState({ totalWins: 0, bossDefeats: 0 });
+  // 陣取り（テリトリー）関連
+  const [territories, setTerritories] = useState<any[]>([]);
+  const [startPoint, setStartPoint] = useState<{lat: number, lng: number} | null>(null);
+  const [isTerritoryModalVisible, setTerritoryModalVisible] = useState(false);
+  const [isAttackModalVisible, setAttackModalVisible] = useState(false);
+  const [selectedTerritory, setSelectedTerritory] = useState<any>(null);
+  const [myHighRareCards, setMyHighRareCards] = useState<any[]>([]);
+  const [selectedSacrifices, setSelectedSacrifices] = useState<string[]>([]); // 捧げるカードID（2枚必要）
 
   const [mapRegion, setMapRegion] = useState({
-    latitude: 35.681236,
-    longitude: 139.767125,
-    latitudeDelta: 0.005,
-    longitudeDelta: 0.005,
+    latitude: 35.681236, longitude: 139.767125, latitudeDelta: 0.005, longitudeDelta: 0.005,
   });
+  const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
 
   useFocusEffect(
     useCallback(() => { 
-      checkNearbyBoss(); 
-      fetchPlayerStats(); 
+      initBattleData();
     }, [])
   );
 
-  const fetchPlayerStats = async () => {
+  const initBattleData = async () => {
+    setLoadingMap(true);
     const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data } = await supabase.from('profiles').select('total_wins, boss_defeats').eq('id', user.id).single();
-    if (data) {
-      setPlayerStats({ totalWins: data.total_wins, bossDefeats: data.boss_defeats });
+    if (user) {
+      setMyId(user.id);
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      if (profile) {
+        setMyProfile(profile);
+        setPlayerStats({ totalWins: profile.total_wins, bossDefeats: profile.boss_defeats });
+      }
+      // 陣取り用に捧げられるカード（Lv5以上、または総ステータス300以上の強カード）
+      const { data: cards } = await supabase.from('cards')
+        .select('*')
+        .eq('player_id', user.id)
+        .eq('is_active', true)
+        .or('level.gte.5,status_total.gte.300');
+      if (cards) setMyHighRareCards(cards);
     }
+    await checkLocationAndFetchData();
+    setLoadingMap(false);
   };
 
-  const checkNearbyBoss = async () => {
-    setLoadingBoss(true);
+  const checkLocationAndFetchData = async () => {
     try {
       const locationPerm = await Location.requestForegroundPermissionsAsync();
       if (!locationPerm.granted) return;
       const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude } = location.coords;
-
+      
+      setCurrentLocation({ lat: latitude, lng: longitude });
       setMapRegion(prev => ({ ...prev, latitude, longitude }));
 
+      // 1. ボス検知
       const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true).not('target_lat', 'is', null);
-      if (!campaigns) return;
-
-      const nearbyCampaign = campaigns.find((c: any) => {
-        const dist = getDistance(latitude, longitude, c.target_lat, c.target_lng);
-        return dist <= (c.radius_meters || 100);
-      });
-
-      if (nearbyCampaign) {
-        const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).single();
-        if (boss) {
-          setDetectedBoss({ 
-            ...boss, 
-            campaign_title: nearbyCampaign.title, 
-            sponsor_name: nearbyCampaign.sponsor_name,
-            lat: nearbyCampaign.target_lat,
-            lng: nearbyCampaign.target_lng,
-            element: boss.element || '火' 
-          });
+      let foundBoss = null;
+      if (campaigns) {
+        const nearbyCampaign = campaigns.find((c: any) => getDistance(latitude, longitude, c.target_lat, c.target_lng) <= (c.radius_meters || 100));
+        if (nearbyCampaign) {
+          const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).single();
+          if (boss) foundBoss = { ...boss, campaign_title: nearbyCampaign.title, sponsor_name: nearbyCampaign.sponsor_name, lat: nearbyCampaign.target_lat, lng: nearbyCampaign.target_lng, element: boss.element || '火' };
         }
-      } else { setDetectedBoss(null); }
-    } catch (e) { console.log(e); } finally { setLoadingBoss(false); }
+      }
+      setDetectedBoss(foundBoss);
+
+      // 2. 周辺の陣地（テリトリー）取得
+      const { data: terrData } = await supabase.from('territories').select('*').order('created_at', { ascending: false }).limit(50);
+      if (terrData) setTerritories(terrData);
+
+    } catch (e) { console.log("Map Fetch Error:", e); }
   };
 
   const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -133,77 +145,212 @@ export default function BattleScreen() {
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat/2) * Math.sin(dLat/2) + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLon/2) * Math.sin(dLon/2);
-    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
-    return R * c;
+    return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
   };
 
-  const startPvpBattle = async () => {
+  // ==========================================
+  // 🗺️ 陣取り（テリトリー）アクション
+  // ==========================================
+  const markStartPoint = () => {
+    if (!currentLocation) {
+      Alert.alert('位置情報エラー', '現在地が取得できません。');
+      return;
+    }
+    setStartPoint(currentLocation);
+    Alert.alert('起点マーカー設置', '開始位置を記録しました。別の場所に移動して「陣地を展開」してください。');
+  };
+
+  const openTerritoryModal = () => {
+    if (!startPoint || !currentLocation) return;
+    const dist = getDistance(startPoint.lat, startPoint.lng, currentLocation.lat, currentLocation.lng);
+    if (dist < 10) {
+      Alert.alert('距離が近すぎます', '開始位置から最低10メートルは離れてください。');
+      return;
+    }
+    if (myHighRareCards.length < 2) {
+      Alert.alert('生贄不足', '陣地を展開するには、Lv5以上または高ステータスのカードが「2枚」必要です。');
+      return;
+    }
+    setSelectedSacrifices([]);
+    setTerritoryModalVisible(true);
+  };
+
+  const confirmTerritoryCreation = async () => {
+    if (selectedSacrifices.length !== 2) {
+      Alert.alert('エラー', '開始用と終了用に捧げるカードを「2枚」選んでください。');
+      return;
+    }
+    const card1 = myHighRareCards.find(c => c.id === selectedSacrifices[0]);
+    const card2 = myHighRareCards.find(c => c.id === selectedSacrifices[1]);
+    const totalDefense = card1.status_total + card2.status_total;
+
+    Alert.alert(
+      "最終確認", 
+      `この2枚のカードを犠牲(ロスト)にして、防衛力[${totalDefense}]の陣地を展開しますか？\n※犠牲にしたカードは手持ちから消滅します。`,
+      [
+        { text: "キャンセル", style: "cancel" },
+        { text: "生贄に捧げる", style: "destructive", onPress: async () => {
+            setLoadingMap(true);
+            try {
+              // 1. 陣地データの作成
+              await supabase.from('territories').insert([{
+                player_id: myId,
+                player_name: myProfile?.player_name || '匿名エージェント',
+                start_lat: startPoint?.lat, start_lng: startPoint?.lng,
+                end_lat: currentLocation?.lat, end_lng: currentLocation?.lng,
+                defense_power: totalDefense,
+                card1_name: card1.card_name, card2_name: card2.card_name
+              }]);
+
+              // 2. カードのロスト処理（is_activeをfalseにして非表示化）
+              await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
+
+              Alert.alert('展開完了', 'カードを捧げ、強大な陣地をマップ上に展開しました！');
+              setTerritoryModalVisible(false);
+              setStartPoint(null);
+              initBattleData();
+            } catch (err) {
+              Alert.alert('エラー', '通信に失敗しました。');
+            }
+            setLoadingMap(false);
+        }}
+      ]
+    );
+  };
+
+  // 陣地のタップ判定
+  const handleTerritoryPress = (territory: any) => {
+    setSelectedTerritory(territory);
+    setSelectedSacrifices([]);
+    setAttackModalVisible(true);
+  };
+
+  // 陣地を「より強いカード2枚」で上書き強奪する
+  const overwriteTerritory = async () => {
+    if (selectedSacrifices.length !== 2) {
+      Alert.alert('エラー', '奪うために捧げるカードを「2枚」選んでください。');
+      return;
+    }
+    const c1 = myHighRareCards.find(c => c.id === selectedSacrifices[0]);
+    const c2 = myHighRareCards.find(c => c.id === selectedSacrifices[1]);
+    const myAttackPower = c1.status_total + c2.status_total;
+
+    if (myAttackPower <= selectedTerritory.defense_power) {
+      Alert.alert('戦力不足', `相手の防衛力[${selectedTerritory.defense_power}]に対し、あなたの捧げるカードの力は[${myAttackPower}]です。より強いカードを生贄にしてください。`);
+      return;
+    }
+
+    Alert.alert(
+      "圧倒的制圧", 
+      `2枚のカードを犠牲にして、この陣地を無血開城させますか？`,
+      [
+        { text: "キャンセル", style: "cancel" },
+        { text: "強奪する", style: "destructive", onPress: async () => {
+            setLoadingMap(true);
+            try {
+              await supabase.from('territories').update({
+                player_id: myId, player_name: myProfile?.player_name || '匿名',
+                defense_power: myAttackPower,
+                card1_name: c1.card_name, card2_name: c2.card_name
+              }).eq('id', selectedTerritory.id);
+              await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
+
+              Alert.alert('制圧完了', '圧倒的な財力(カード)で陣地を奪い取りました！');
+              setAttackModalVisible(false);
+              initBattleData();
+            } catch(e) {}
+            setLoadingMap(false);
+        }}
+      ]
+    );
+  };
+
+  // 陣地を「バトル」で奪う
+  const attackTerritoryByBattle = async () => {
+    setAttackModalVisible(false);
     setIsBattling(true);
     setBattleLog([]);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true).single();
+    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).single();
+    
     if (!myCard) {
-      Alert.alert('準備不足', '出撃中のカードがありません。「図鑑」タブからカードを出撃させてください。');
-      setIsBattling(false);
-      return;
+      Alert.alert('出撃不可', '出撃中のメインカードがありません。図鑑から設定してください。');
+      setIsBattling(false); return;
     }
+
+    // 防衛側は、捧げられた2枚の合計ステータスを持つ仮想巨大カード
+    const defStats = Math.floor(selectedTerritory.defense_power / 4);
+    const bossMonster = { 
+      id: 'TERRITORY_DEF', 
+      card_name: `【防衛結界】${selectedTerritory.card1_name} & ${selectedTerritory.card2_name}`, 
+      skill_name: '絶対防壁・テリトリー', 
+      status_hp: defStats * 2, status_atk: defStats, status_def: defStats, status_spd: 50, 
+      level: 10, rarity: '🏰', element: '虚無'
+    };
+    
+    // バトルシミュレーション開始（勝てば破壊）
+    simulateBattle(myCard, bossMonster, false, async (isWin) => {
+      if (isWin) {
+        await supabase.from('territories').delete().eq('id', selectedTerritory.id);
+        Alert.alert("結界破壊！", "見事バトルに勝利し、相手の陣地を破壊しました！");
+        initBattleData();
+      } else {
+        Alert.alert("敗北", "防衛結界の前に敗れ去りました...");
+      }
+    });
+  };
+
+  // ==========================================
+  // ⚔️ 既存バトルシステム (PvP / ボス)
+  // ==========================================
+  const startPvpBattle = async () => {
+    setIsBattling(true); setBattleLog([]);
+    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).single();
+    if (!myCard) { Alert.alert('準備不足', '出撃中のカードがありません。'); setIsBattling(false); return; }
+    
     const minStatus = Math.floor(myCard.status_total * 0.75);
     const maxStatus = Math.floor(myCard.status_total * 1.25);
-    const { data: oppCards } = await supabase.from('cards').select('*').neq('player_id', user.id).eq('is_active', true).gte('status_total', minStatus).lte('status_total', maxStatus).limit(20);
+    const { data: oppCards } = await supabase.from('cards').select('*').neq('player_id', myId).eq('is_active', true).gte('status_total', minStatus).lte('status_total', maxStatus).limit(10);
+    
     if (!oppCards || oppCards.length === 0) {
-      Alert.alert('索敵中', '同格のライバルが見つかりませんでした。時間をおいて再度お試しください。');
-      setIsBattling(false);
-      return;
+      Alert.alert('索敵中', '同格のライバルが見つかりませんでした。');
+      setIsBattling(false); return;
     }
     const oppCard = oppCards[Math.floor(Math.random() * oppCards.length)];
-    simulateBattle(myCard, oppCard, false);
+    simulateBattle(myCard, oppCard, false, async (isWin) => {
+      if (isWin) await handlePvpVictory(myCard.id);
+      else await handlePvpLoss(myCard.id);
+    });
   };
 
   const startBossBattle = async () => {
     if (!detectedBoss) return;
-    setIsBattling(true);
-    setBattleLog([]);
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true).single();
-    if (!myCard) {
-      Alert.alert('エラー', '出撃中のカードがありません。');
-      setIsBattling(false);
-      return;
-    }
+    setIsBattling(true); setBattleLog([]);
+    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).single();
+    if (!myCard) { Alert.alert('エラー', '出撃カードがありません。'); setIsBattling(false); return; }
+    
     const bossMonster = { 
-      id: 'BOSS_NPC', 
-      card_name: `【エリアボス】${detectedBoss.name}`, 
-      skill_name: 'カタストロフィ・レイ', 
-      status_hp: detectedBoss.hp, 
-      status_atk: detectedBoss.atk, 
-      status_def: detectedBoss.def, 
-      status_spd: 40, 
-      level: 10, 
-      rarity: '👑',
-      element: detectedBoss.element || '闇'
+      id: 'BOSS_NPC', card_name: `【エリアボス】${detectedBoss.name}`, skill_name: 'カタストロフィ・レイ', 
+      status_hp: detectedBoss.hp, status_atk: detectedBoss.atk, status_def: detectedBoss.def, status_spd: 40, 
+      level: 10, rarity: '👑', element: detectedBoss.element || '闇'
     };
-    simulateBattle(myCard, bossMonster, true);
+    
+    simulateBattle(myCard, bossMonster, true, async (isWin) => {
+      if (isWin) await handleBossVictory();
+    });
   };
 
   const generateVisualLog = (attacker: any, defender: any, damage: number, skillUsed: string, turn: number, elementLabel: string) => {
-    let prefix = ''; let suffix = ''; let isSpecialStyle = false;
-    if (attacker.status_atk >= 200 || attacker.level >= 15) { prefix = '🔥【限界突破】💥 '; suffix = ' 💥!!!'; isSpecialStyle = true; }
+    let prefix = ''; let suffix = ''; let isSpecial = false;
+    if (attacker.status_atk >= 200 || attacker.level >= 15) { prefix = '🔥【限界突破】💥 '; suffix = ' 💥!!!'; isSpecial = true; }
     else if (attacker.status_atk >= 100 || attacker.level >= 5) { prefix = '⚡ '; suffix = ' !'; }
-    if (attacker.rarity === 'CP' || attacker.rarity === 'P' || attacker.rarity === '★★★★') { prefix = `✨🌟 ${prefix}`; suffix = `${suffix} 🌟✨\n(タイアップ特別演出が発動！)`; isSpecialStyle = true; }
-    
-    const attributeNotice = elementLabel ? `\n${elementLabel}効果発動！` : '';
-
-    return { 
-      text: `[第 ${turn} ターン]\n${prefix}${attacker.card_name}（${attacker.element || '無'}属性）のわざ『${skillUsed}』が炸裂！${attributeNotice}\n${defender.card_name}に ${damage} の痛撃を与えた！`, 
-      isSpecial: isSpecialStyle || elementLabel.includes('有利') 
-    };
+    if (['CP','P','★★★★','👑','🏰'].includes(attacker.rarity)) { prefix = `✨ ${prefix}`; suffix = `${suffix} ✨`; isSpecial = true; }
+    const attrText = elementLabel ? `\n${elementLabel}効果発動！` : '';
+    return { text: `[T-${turn}] ${prefix}${attacker.card_name}の『${skillUsed}』!${attrText}\n${defender.card_name}に ${damage} の痛撃！${suffix}`, isSpecial: isSpecial || elementLabel.includes('有利') };
   };
 
-  const simulateBattle = (p1: any, p2: any, isBossMode: boolean) => {
+  const simulateBattle = (p1: any, p2: any, isBossMode: boolean, callback: (isWin: boolean) => void) => {
     let log: any[] = [];
-    log.push({ text: `🏁 【対戦開始】\n${p1.card_name} [${p1.element || '無'}] (Lv.${p1.level || 1}) \n   VS \n${p2.card_name} [${p2.element || '無'}] (Lv.${p2.level || 1})`, isSpecial: true });
+    log.push({ text: `🏁 【BATTLE START】\n${p1.card_name} [${p1.element || '無'}] \n VS \n${p2.card_name} [${p2.element || '無'}]`, isSpecial: true });
     
     let first = p1.status_spd >= p2.status_spd ? p1 : p2;
     let second = p1.status_spd >= p2.status_spd ? p2 : p1;
@@ -213,121 +360,152 @@ export default function BattleScreen() {
     for (let turn = 1; turn <= 5; turn++) {
       const res1 = getDamageMultiplier(first.element || '無', second.element || '無');
       let dmg1 = Math.floor((Math.max(1, first.status_atk - Math.floor(second.status_def / 2)) + Math.floor(Math.random() * 10)) * res1.multiplier);
-      
       if (first === p1) p2Hp -= dmg1; else p1Hp -= dmg1;
       log.push(generateVisualLog(first, second, dmg1, first.skill_name, turn, res1.label));
-      
-      if (p1Hp <= 0) { winner = p2; break; }
-      if (p2Hp <= 0) { winner = p1; break; }
+      if (p1Hp <= 0 || p2Hp <= 0) { winner = p1Hp <= 0 ? p2 : p1; break; }
 
       const res2 = getDamageMultiplier(second.element || '無', first.element || '無');
       let dmg2 = Math.floor((Math.max(1, second.status_atk - Math.floor(first.status_def / 2)) + Math.floor(Math.random() * 10)) * res2.multiplier);
-      
       if (second === p1) p2Hp -= dmg2; else p1Hp -= dmg2;
       log.push(generateVisualLog(second, first, dmg2, second.skill_name, turn, res2.label));
-      
-      if (p1Hp <= 0) { winner = p2; break; }
-      if (p2Hp <= 0) { winner = p1; break; }
+      if (p1Hp <= 0 || p2Hp <= 0) { winner = p1Hp <= 0 ? p2 : p1; break; }
     }
 
-    if (!winner) { log.push({ text: "⏳ 規定ターン数が経過。決着がつかず引き分け。", isSpecial: false }); }
-    else { log.push({ text: `🏆 【試合終了】\n勝者：${winner.card_name}！`, isSpecial: true }); }
+    if (!winner) log.push({ text: "⏳ 規定ターン経過。引き分け。", isSpecial: false });
+    else log.push({ text: `🏆 決着！ 勝者：${winner.card_name}！`, isSpecial: true });
     
     let currentLogIndex = 0;
-    const interval = setInterval(async () => {
+    const interval = setInterval(() => {
       if (currentLogIndex < log.length) { setBattleLog(prev => [...prev, log[currentLogIndex]]); currentLogIndex++; }
       else {
         clearInterval(interval); setIsBattling(false);
-        if (winner === p1) { if (isBossMode) { await handleBossVictory(); } else { await handlePvpVictory(p1.id); } }
-        else { await handlePvpLoss(p1.id); }
+        callback(winner === p1);
       }
     }, 800);
   };
 
   const handlePvpVictory = async (cardId: string) => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
     const newWins = playerStats.totalWins + 1;
-    await supabase.from('profiles').update({ total_wins: newWins }).eq('id', user.id);
+    await supabase.from('profiles').update({ total_wins: newWins }).eq('id', myId);
     setPlayerStats(prev => ({ ...prev, totalWins: newWins }));
-    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 120 });
-    if (!error && data[0]) {
-      if (data[0].leveled_up) { Alert.alert('🎉 レベルアップ!!!', `出撃カードが レベル ${data[0].new_level} に到達しました！`); }
-      else { Alert.alert('作戦成功', 'バトルに勝利！120 EXPを獲得し、累計勝利数がカウントされました。'); }
-    }
+    const { data } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 120 });
+    if (data && data[0]?.leveled_up) Alert.alert('🎉 レベルアップ!!!', `出撃カードが レベル ${data[0].new_level} に到達しました！`);
   };
 
   const handlePvpLoss = async (cardId: string) => {
-    const { data, error } = await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 30 });
-    if (!error && data[0] && data[0].leveled_up) { Alert.alert('🎉 レベルアップ!', `カードが レベル ${data[0].new_level} に成長しました！`); }
-    else { Alert.alert('敗北', 'バトルに敗れましたが、カードは 30 EXP 獲得しました。'); }
+    await supabase.rpc('gain_card_exp', { target_card_id: cardId, exp_to_add: 30 });
   };
 
   const handleBossVictory = async () => {
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user || !detectedBoss) return;
     const newBossDefeats = playerStats.bossDefeats + 1;
-    await supabase.from('profiles').update({ boss_defeats: newBossDefeats }).eq('id', user.id);
+    await supabase.from('profiles').update({ boss_defeats: newBossDefeats }).eq('id', myId);
     setPlayerStats(prev => ({ ...prev, bossDefeats: newBossDefeats }));
+    if (!detectedBoss?.fixed_cards) return;
     const reward = detectedBoss.fixed_cards;
-    if (!reward) return;
-    await supabase.from('cards').insert([{ player_id: user.id, card_name: reward.card_name, image_url: reward.image_url, feature: reward.stats.feature || "エリアボス討伐の証", skill_name: reward.stats.skill || "レイド・バースト", status_hp: reward.stats.hp, status_atk: reward.stats.atk, status_def: reward.stats.def, status_spd: reward.stats.spd, status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd, rarity: "P", card_type: 'local', is_fixed: true, ar_model_url: reward.ar_model_url, element: detectedBoss.element }]);
-    Alert.alert("👹 ボス討伐完了！", `限定カード「${reward.card_name}」を獲得！`, [
+    await supabase.from('cards').insert([{ player_id: myId, card_name: reward.card_name, image_url: reward.image_url, status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd, rarity: "P", is_fixed: true, element: detectedBoss.element }]);
+    Alert.alert("👹 ボス討伐！", `限定カード「${reward.card_name}」を獲得！`, [
       { text: "閉じる" },
-      { text: "👁️ AR報酬を見る", onPress: () => { if (reward.ar_model_url) { setArUrl(reward.ar_model_url); setArModalVisible(true); } }, style: "destructive" }
+      { text: "AR報酬を見る", onPress: () => { if (reward.ar_model_url) { setArUrl(reward.ar_model_url); setArModalVisible(true); } } }
     ]);
+  };
+
+  // --- カード選択（2枚）トグル用 ---
+  const toggleSacrifice = (id: string) => {
+    if (selectedSacrifices.includes(id)) {
+      setSelectedSacrifices(prev => prev.filter(i => i !== id));
+    } else {
+      if (selectedSacrifices.length >= 2) Alert.alert('制限', '選べる生贄は2枚までです。');
+      else setSelectedSacrifices(prev => [...prev, id]);
+    }
   };
 
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.statsDashboard}>
-        <View style={styles.statItem}>
-          <Trophy color="#F59E0B" size={24} />
-          <Text style={styles.statValue}>{playerStats.totalWins} 人</Text>
-          <Text style={styles.statLabel}>倒したライバル数</Text>
-        </View>
+        <View style={styles.statItem}><Trophy color="#F59E0B" size={20} /><Text style={styles.statValue}>{playerStats.totalWins}</Text><Text style={styles.statLabel}>PvP勝利</Text></View>
         <View style={styles.divider} />
-        <View style={styles.statItem}>
-          <Activity color="#EF4444" size={24} />
-          <Text style={styles.statValue}>{playerStats.bossDefeats} 体</Text>
-          <Text style={styles.statLabel}>討伐したボス数</Text>
-        </View>
+        <View style={styles.statItem}><Activity color="#EF4444" size={20} /><Text style={styles.statValue}>{playerStats.bossDefeats}</Text><Text style={styles.statLabel}>ボス討伐</Text></View>
+        <View style={styles.divider} />
+        <View style={styles.statItem}><Flag color="#3B82F6" size={20} /><Text style={styles.statValue}>{territories.filter(t=>t.player_id===myId).length}</Text><Text style={styles.statLabel}>支配陣地</Text></View>
       </View>
 
       <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 100 }}>
         <View style={styles.section}>
-          <Text style={styles.sectionTitle}>📍 周辺のスポット限定ボス</Text>
-          {loadingBoss ? (
+          <Text style={styles.sectionTitle}>📍 リアルマップ：ボス ＆ 陣取り(テリトリー)</Text>
+          {loadingMap ? (
             <ActivityIndicator size="small" color="#3B82F6" style={{ padding: 20 }} />
           ) : (
             <View style={styles.mapPanel}>
-              <MapView provider={PROVIDER_GOOGLE} style={styles.map} region={mapRegion} showsUserLocation={true} loadingEnabled={true}>
+              <MapView provider={PROVIDER_GOOGLE} style={styles.map} region={mapRegion} showsUserLocation={true}>
+                {/* エリアボス表示 */}
                 {detectedBoss && (
-                  <Marker coordinate={{ latitude: detectedBoss.lat, longitude: detectedBoss.lng }} title={detectedBoss.name} description={`${detectedBoss.sponsor_name} 協賛 [${detectedBoss.element}属性]`}>
+                  <Marker coordinate={{ latitude: detectedBoss.lat, longitude: detectedBoss.lng }} title={detectedBoss.name}>
                     <View style={styles.bossMarker}><Text style={{ fontSize: 24 }}>👹</Text></View>
                   </Marker>
                 )}
+                
+                {/* 起点マーカー（展開前） */}
+                {startPoint && (
+                  <Marker coordinate={startPoint}>
+                    <View style={styles.startMarker}><Flag color="#FFF" size={16}/></View>
+                  </Marker>
+                )}
+
+                {/* 陣地（テリトリー）の描画 */}
+                {territories.map((t) => {
+                  const isMine = t.player_id === myId;
+                  const coords = [
+                    { latitude: t.start_lat, longitude: t.start_lng },
+                    { latitude: t.start_lat, longitude: t.end_lng },
+                    { latitude: t.end_lat, longitude: t.end_lng },
+                    { latitude: t.end_lat, longitude: t.start_lng },
+                  ];
+                  return (
+                    <Polygon 
+                      key={t.id} 
+                      coordinates={coords} 
+                      fillColor={isMine ? 'rgba(59, 130, 246, 0.3)' : 'rgba(239, 68, 68, 0.3)'}
+                      strokeColor={isMine ? '#2563EB' : '#DC2626'}
+                      strokeWidth={2}
+                      tappable={true}
+                      onPress={() => handleTerritoryPress(t)}
+                    />
+                  );
+                })}
               </MapView>
 
+              {/* ボス検知UI */}
               {detectedBoss && (
                 <View style={styles.bossInfoOverlay}>
                   <View style={styles.bossHeader}>
-                    <Text style={styles.sponsorTag}>{detectedBoss.sponsor_name} 協賛 [{detectedBoss.element}属性]</Text>
+                    <Text style={styles.sponsorTag}>{detectedBoss.sponsor_name} [{detectedBoss.element}]</Text>
                     <Text style={styles.bossName}>{detectedBoss.name}</Text>
                   </View>
                   <TouchableOpacity style={[styles.primaryButton, styles.bossAttackBtn, isBattling && styles.disabledButton]} onPress={startBossBattle} disabled={isBattling}>
-                    <Swords color="#FFFFFF" size={20} style={{marginRight: 8}} />
-                    <Text style={styles.btnText}>ボスに挑む</Text>
+                    <Swords color="#FFFFFF" size={18} />
                   </TouchableOpacity>
                 </View>
               )}
 
-              {!detectedBoss && (
-                <View style={styles.emptyOverlay}>
-                  <ShieldAlert color="#FFFFFF" size={28} />
-                  <Text style={styles.emptyText}>周辺に限定ボスはいません。{"\n"}対象の観光地や店舗へ向かいましょう。</Text>
-                </View>
-              )}
+              {/* 陣取り操作パネル */}
+              <View style={styles.territoryControls}>
+                {!startPoint ? (
+                  <TouchableOpacity style={styles.terrBtn} onPress={markStartPoint}>
+                    <Flag color="#FFF" size={18} style={{marginRight: 6}}/>
+                    <Text style={styles.terrBtnText}>現在地を「起点」にする</Text>
+                  </TouchableOpacity>
+                ) : (
+                  <View style={{flexDirection: 'row', gap: 10}}>
+                    <TouchableOpacity style={[styles.terrBtn, {backgroundColor: '#10B981', flex: 1}]} onPress={openTerritoryModal}>
+                      <Zap color="#FFF" size={18} style={{marginRight: 6}}/>
+                      <Text style={styles.terrBtnText}>陣地を展開(終点確定)</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.terrBtn, {backgroundColor: '#64748B', paddingHorizontal: 15}]} onPress={()=>setStartPoint(null)}>
+                      <X color="#FFF" size={18}/>
+                    </TouchableOpacity>
+                  </View>
+                )}
+              </View>
             </View>
           )}
         </View>
@@ -353,49 +531,163 @@ export default function BattleScreen() {
         )}
       </ScrollView>
 
-      <Modal visible={isArModalVisible} animationType="slide" onRequestClose={() => setArModalVisible(false)}>
-        <View style={styles.modalHeader}>
-          <Text style={styles.modalTitle}>🎉 討伐成功AR報酬</Text>
-          <TouchableOpacity onPress={() => setArModalVisible(false)} style={styles.closeBtn}><Text style={styles.closeBtnText}>閉じる</Text></TouchableOpacity>
+      {/* --- 陣地展開（カード生贄）モーダル --- */}
+      <Modal visible={isTerritoryModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalHeader}>陣地の展開（生贄選択）</Text>
+            <Text style={styles.modalDesc}>開始位置と終了位置の楔とするため、高レアカードを「2枚」捧げてください。※捧げたカードは消失し、合算値が防衛力になります。</Text>
+            
+            <FlatList
+              data={myHighRareCards}
+              keyExtractor={item => item.id}
+              numColumns={2}
+              style={{maxHeight: 300, marginBottom: 20}}
+              renderItem={({item}) => (
+                <TouchableOpacity 
+                  style={[styles.miniCard, selectedSacrifices.includes(item.id) && styles.selectedMiniCard]}
+                  onPress={() => toggleSacrifice(item.id)}
+                >
+                  <Image source={{uri: item.image_url}} style={styles.miniCardImg} />
+                  <Text style={styles.miniCardName} numberOfLines={1}>{item.card_name}</Text>
+                  <Text style={styles.miniCardStats}>総戦力: {item.status_total}</Text>
+                </TouchableOpacity>
+              )}
+            />
+            
+            <View style={{flexDirection: 'row', gap: 10}}>
+              <TouchableOpacity style={[styles.cancelBtn, {flex: 1}]} onPress={() => setTerritoryModalVisible(false)}>
+                <Text style={styles.cancelBtnText}>やめる</Text>
+              </TouchableOpacity>
+              <TouchableOpacity 
+                style={[styles.confirmBtn, {flex: 2}, selectedSacrifices.length !== 2 && {backgroundColor: '#94A3B8'}]} 
+                onPress={confirmTerritoryCreation} disabled={selectedSacrifices.length !== 2}
+              >
+                <Text style={styles.confirmBtnText}>2枚を捧げて展開する</Text>
+              </TouchableOpacity>
+            </View>
+          </View>
         </View>
-        {arUrl && <WebView source={{ uri: arUrl }} style={{ flex: 1 }} allowsInlineMediaPlayback mediaPlaybackRequiresUserAction={false} />}
       </Modal>
+
+      {/* --- 陣地強奪・攻撃モーダル --- */}
+      <Modal visible={isAttackModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.modalHeader}>敵陣地の検知</Text>
+            <View style={styles.terrInfoBox}>
+              <Text style={styles.terrOwner}>所有者: {selectedTerritory?.player_name}</Text>
+              <Text style={styles.terrDefense}>防衛力: {selectedTerritory?.defense_power}</Text>
+              <Text style={styles.terrCards}>防衛結界: {selectedTerritory?.card1_name} & {selectedTerritory?.card2_name}</Text>
+            </View>
+
+            {selectedTerritory?.player_id === myId ? (
+              <Text style={styles.modalDesc}>これはあなたの支配領域です。</Text>
+            ) : (
+              <>
+                <Text style={styles.label}>【手段1】武力行使（バトル）</Text>
+                <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: '#0F172A', marginBottom: 20}]} onPress={attackTerritoryByBattle}>
+                  <Text style={styles.confirmBtnText}>出撃カードで結界を破壊する</Text>
+                </TouchableOpacity>
+
+                <Text style={styles.label}>【手段2】圧倒的財力で上書き強奪</Text>
+                <Text style={styles.modalDesc}>相手の防衛力を上回る「2枚のカード」を犠牲にして無血開城させます。</Text>
+                <FlatList
+                  data={myHighRareCards}
+                  keyExtractor={item => item.id}
+                  horizontal
+                  showsHorizontalScrollIndicator={false}
+                  style={{marginBottom: 20}}
+                  renderItem={({item}) => (
+                    <TouchableOpacity 
+                      style={[styles.miniCard, {width: 100, marginRight: 10}, selectedSacrifices.includes(item.id) && styles.selectedMiniCard]}
+                      onPress={() => toggleSacrifice(item.id)}
+                    >
+                      <Image source={{uri: item.image_url}} style={styles.miniCardImg} />
+                      <Text style={styles.miniCardName} numberOfLines={1}>{item.card_name}</Text>
+                    </TouchableOpacity>
+                  )}
+                />
+                <TouchableOpacity 
+                  style={[styles.confirmBtn, {backgroundColor: '#EF4444'}, selectedSacrifices.length !== 2 && {backgroundColor: '#FCA5A5'}]} 
+                  onPress={overwriteTerritory} disabled={selectedSacrifices.length !== 2}
+                >
+                  <Text style={styles.confirmBtnText}>2枚を捧げて強奪する</Text>
+                </TouchableOpacity>
+              </>
+            )}
+
+            <TouchableOpacity style={[styles.cancelBtn, {marginTop: 20}]} onPress={() => setAttackModalVisible(false)}>
+              <Text style={styles.cancelBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={isArModalVisible} animationType="slide"><View style={{flex:1}}><TouchableOpacity onPress={()=>setArModalVisible(false)} style={{padding:20,backgroundColor:'#FFF'}}><Text>閉じる</Text></TouchableOpacity>{arUrl && <WebView source={{uri: arUrl}} style={{flex:1}} />}</View></Modal>
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#F8FAFC' },
-  statsDashboard: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#FFFFFF', paddingVertical: 18, marginHorizontal: 20, marginTop: 20, borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.03, shadowRadius: 8, elevation: 2 },
+  statsDashboard: { flexDirection: 'row', justifyContent: 'space-around', alignItems: 'center', backgroundColor: '#FFFFFF', paddingVertical: 14, marginHorizontal: 16, marginTop: 10, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0', elevation: 2 },
   statItem: { alignItems: 'center', flex: 1 },
-  divider: { width: 1, height: 40, backgroundColor: '#E2E8F0' },
-  statValue: { color: '#0F172A', fontSize: 20, fontWeight: '900', marginTop: 6, fontFamily: 'monospace' },
-  statLabel: { color: '#64748B', fontSize: 11, fontWeight: '700', marginTop: 2 },
+  divider: { width: 1, height: 30, backgroundColor: '#E2E8F0' },
+  statValue: { color: '#0F172A', fontSize: 18, fontWeight: '900', marginTop: 4, fontFamily: 'monospace' },
+  statLabel: { color: '#64748B', fontSize: 10, fontWeight: '700', marginTop: 2 },
   scrollArea: { flex: 1 },
-  section: { padding: 20 },
+  section: { padding: 16 },
   sectionTitle: { color: '#64748B', fontSize: 13, fontWeight: '700', marginBottom: 12, letterSpacing: 1 },
-  mapPanel: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', height: 400, position: 'relative' },
+  mapPanel: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', height: 450, position: 'relative' },
+  webMapFallback: { flex: 1, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   map: { width: '100%', height: '100%' },
+  
   bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.8)', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#EF4444' },
-  bossInfoOverlay: { position: 'absolute', bottom: 15, left: 15, right: 15, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: 14, borderRadius: 18, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation: 3 },
-  bossHeader: { flex: 1, marginRight: 15 },
-  sponsorTag: { color: '#EF4444', fontSize: 11, fontWeight: '800', backgroundColor: '#FFEEEE', paddingVertical: 3, paddingHorizontal: 10, borderRadius: 10, alignSelf: 'flex-start' },
-  bossName: { color: '#1E293B', fontSize: 18, fontWeight: '900', marginTop: 8 },
-  bossAttackBtn: { flex: 0, width: 'auto', paddingHorizontal: 20, height: 50, backgroundColor: '#EF4444' },
-  emptyOverlay: { ...StyleSheet.absoluteFillObject, backgroundColor: 'rgba(15, 23, 42, 0.65)', justifyContent: 'center', alignItems: 'center', padding: 30 },
-  emptyText: { color: '#FFFFFF', fontSize: 14, textAlign: 'center', marginTop: 12, fontWeight: '700', lineHeight: 22 },
-  pvpPanel: { backgroundColor: '#FFFFFF', padding: 24, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0' },
-  primaryButton: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 55, borderRadius: 16, alignItems: 'center', justifyContent: 'center', elevation: 3 },
+  startMarker: { backgroundColor: '#3B82F6', padding: 8, borderRadius: 20, borderWidth: 2, borderColor: '#FFF', elevation: 4 },
+  
+  bossInfoOverlay: { position: 'absolute', top: 15, left: 15, right: 15, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', elevation: 3 },
+  bossHeader: { flex: 1, marginRight: 10 },
+  sponsorTag: { color: '#EF4444', fontSize: 10, fontWeight: '800', backgroundColor: '#FFEEEE', paddingVertical: 2, paddingHorizontal: 8, borderRadius: 8, alignSelf: 'flex-start' },
+  bossName: { color: '#1E293B', fontSize: 15, fontWeight: '900', marginTop: 4 },
+  bossAttackBtn: { flex: 0, paddingHorizontal: 16, height: 44, backgroundColor: '#EF4444', borderRadius: 12 },
+  
+  territoryControls: { position: 'absolute', bottom: 15, left: 15, right: 15 },
+  terrBtn: { flexDirection: 'row', backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 16, justifyContent: 'center', alignItems: 'center', elevation: 4, shadowColor: '#000', shadowOffset:{width:0, height:2}, shadowOpacity: 0.2, shadowRadius: 4 },
+  terrBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
+
+  pvpPanel: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0' },
+  primaryButton: { flexDirection: 'row', backgroundColor: '#3B82F6', width: '100%', height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   disabledButton: { backgroundColor: '#CBD5E1' },
-  btnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 16 },
+  btnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+  
   logSection: { padding: 20, borderTopWidth: 1, borderTopColor: '#E2E8F0', backgroundColor: '#FFFFFF' },
   logSectionTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 15, textAlign: 'center', fontFamily: 'monospace' },
   logBox: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#F1F5F9', padding: 16, borderRadius: 16, marginBottom: 12 },
   specialLogBox: { backgroundColor: '#EFF6FF', borderColor: '#BFDBFE', borderWidth: 1.5 },
   logText: { color: '#334155', fontSize: 14, lineHeight: 22, fontWeight: '500' },
   specialLogText: { color: '#1E40AF', fontWeight: '800' },
-  modalHeader: { height: 60, backgroundColor: '#FFFFFF', flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', paddingHorizontal: 20, borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
-  modalTitle: { color: '#EF4444', fontSize: 16, fontWeight: '800' },
-  closeBtn: { backgroundColor: '#F1F5F9', paddingHorizontal: 16, paddingVertical: 8, borderRadius: 20 },
-  closeBtnText: { color: '#475569', fontWeight: '700', fontSize: 13 }
+
+  // モーダル系
+  modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.7)', justifyContent: 'flex-end' },
+  modalContent: { backgroundColor: '#FFFFFF', padding: 24, borderTopLeftRadius: 28, borderTopRightRadius: 28, maxHeight: '90%' },
+  modalHeader: { color: '#0F172A', fontSize: 18, fontWeight: '900', marginBottom: 8 },
+  modalDesc: { color: '#64748B', fontSize: 13, lineHeight: 20, marginBottom: 16 },
+  label: { color: '#475569', fontSize: 14, fontWeight: '900', marginTop: 10, marginBottom: 8 },
+  
+  terrInfoBox: { backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 20 },
+  terrOwner: { fontSize: 14, fontWeight: '900', color: '#0F172A', marginBottom: 4 },
+  terrDefense: { fontSize: 16, fontWeight: '900', color: '#EF4444', marginBottom: 4 },
+  terrCards: { fontSize: 12, color: '#64748B' },
+
+  miniCard: { flex: 1, margin: 4, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 2, borderColor: 'transparent', alignItems: 'center' },
+  selectedMiniCard: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
+  miniCardImg: { width: '100%', height: 80, borderRadius: 8, marginBottom: 6, resizeMode: 'cover' },
+  miniCardName: { fontSize: 11, fontWeight: '800', color: '#0F172A' },
+  miniCardStats: { fontSize: 10, color: '#64748B', marginTop: 2 },
+  
+  confirmBtn: { backgroundColor: '#3B82F6', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  confirmBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
+  cancelBtn: { backgroundColor: '#F1F5F9', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
+  cancelBtnText: { color: '#475569', fontWeight: '800', fontSize: 15 },
 });

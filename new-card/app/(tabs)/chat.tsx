@@ -2,69 +2,145 @@ import React, { useEffect, useState, useCallback } from 'react';
 import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator, Modal, SafeAreaView, ScrollView, KeyboardAvoidingView, Platform, Image } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
-import { Send, RefreshCcw, X, ArrowRightLeft } from 'lucide-react-native';
+import { Send, RefreshCcw, X, ArrowRightLeft, Globe, Users, Plus, ShieldCheck, LogOut, Info } from 'lucide-react-native';
 
 export default function ChatTradeScreen() {
+  const [myId, setMyId] = useState<string | null>(null);
+  const [myCards, setMyCards] = useState<any[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [activeTab, setActiveTab] = useState<'global' | 'team'>('global');
+
+  // グローバルチャット用ステート
   const [messages, setMessages] = useState<any[]>([]);
   const [inputText, setInputText] = useState('');
-  const [myCards, setMyCards] = useState<any[]>([]);
-  const [myId, setMyId] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  
-  // トレード用ステート
-  const [isModalVisible, setModalVisible] = useState(false);
+
+  // チーム用ステート
+  const [myTeamStatus, setMyTeamStatus] = useState<'pending' | 'approved' | null>(null);
+  const [myTeamRole, setMyTeamRole] = useState<'leader' | 'member' | null>(null);
+  const [myTeamDetails, setMyTeamDetails] = useState<any>(null);
+  const [availableTeams, setAvailableTeams] = useState<any[]>([]);
+  const [teamMessages, setTeamMessages] = useState<any[]>([]);
+  const [pendingRequests, setPendingRequests] = useState<any[]>([]);
+
+  // モーダル制御
+  const [isTradeModalVisible, setTradeModalVisible] = useState(false);
+  const [isCreateTeamModalVisible, setCreateTeamModalVisible] = useState(false);
+  const [isTeamManageModalVisible, setTeamManageModalVisible] = useState(false);
+
+  // トレード・作成用入力ステート
   const [selectedOfferCard, setSelectedOfferCard] = useState<any>(null);
   const [requestedCardName, setRequestedCardName] = useState<string>('');
+  const [newTeamName, setNewTeamName] = useState('');
+  const [newTeamDesc, setNewTeamDesc] = useState('');
 
   useFocusEffect(
     useCallback(() => {
-      initChat();
+      initAllData();
 
-      const messageSubscription = supabase
+      // グローバルチャットのリアルタイム購読
+      const globalSub = supabase
         .channel('public:messages')
         .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages' }, () => {
-          fetchMessages();
+          fetchGlobalMessages();
+        })
+        .subscribe();
+
+      // チームチャットのリアルタイム購読
+      const teamSub = supabase
+        .channel('public:team_messages')
+        .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'team_messages' }, () => {
+          if (myTeamDetails?.id) fetchTeamMessages(myTeamDetails.id);
         })
         .subscribe();
 
       return () => {
-        supabase.removeChannel(messageSubscription);
+        supabase.removeChannel(globalSub);
+        supabase.removeChannel(teamSub);
       };
-    }, [])
+    }, [myTeamDetails?.id])
   );
 
-  const initChat = async () => {
+  const initAllData = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       setMyId(user.id);
-      const { data } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true);
-      if (data) setMyCards(data);
+      const { data: cards } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true);
+      if (cards) setMyCards(cards);
+      
+      await initTeamData(user.id);
     }
-    fetchMessages();
+    fetchGlobalMessages();
   };
 
-  const fetchMessages = async () => {
+  // --- グローバルチャット関連 ---
+  const fetchGlobalMessages = async () => {
     const { data } = await supabase
       .from('messages')
       .select('*, profiles:sender_id(player_name), offered_card:card_offer_id(*)')
       .order('created_at', { ascending: false })
       .limit(50);
-      
-    if (data) {
-      setMessages(data);
+    if (data) setMessages(data);
+  };
+
+  // --- チームデータ関連 ---
+  const initTeamData = async (userId: string) => {
+    const { data: memberData } = await supabase
+      .from('team_members')
+      .select('*, teams(*)')
+      .eq('player_id', userId)
+      .single();
+
+    if (memberData) {
+      setMyTeamStatus(memberData.status);
+      setMyTeamRole(memberData.role);
+      setMyTeamDetails(memberData.teams);
+      if (memberData.status === 'approved') {
+        fetchTeamMessages(memberData.teams.id);
+        if (memberData.role === 'leader') loadPendingRequests(memberData.teams.id);
+      }
+    } else {
+      setMyTeamStatus(null);
+      setMyTeamRole(null);
+      setMyTeamDetails(null);
+      loadAvailableTeams();
     }
   };
 
+  const loadAvailableTeams = async () => {
+    const { data } = await supabase.from('teams').select('*').order('created_at', { ascending: false });
+    if (data) setAvailableTeams(data);
+  };
+
+  const fetchTeamMessages = async (teamId: string) => {
+    const { data } = await supabase
+      .from('team_messages')
+      .select('*, profiles:sender_id(player_name), offered_card:card_offer_id(*)')
+      .eq('team_id', teamId)
+      .order('created_at', { ascending: false })
+      .limit(50);
+    if (data) setTeamMessages(data);
+  };
+
+  const loadPendingRequests = async (teamId: string) => {
+    const { data } = await supabase
+      .from('team_members')
+      .select('*, profiles:player_id(player_name)')
+      .eq('team_id', teamId)
+      .eq('status', 'pending');
+    if (data) setPendingRequests(data);
+  };
+
+  // --- メッセージ・トレード送信 ---
   const sendMessage = async () => {
-    if (!inputText.trim()) return;
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    
+    if (!inputText.trim() || !myId) return;
     const textToSend = inputText;
     setInputText(''); 
-    
-    const { error } = await supabase.from('messages').insert([{ sender_id: user.id, text: textToSend }]);
-    if (error) Alert.alert('送信エラー', error.message);
+
+    if (activeTab === 'global') {
+      await supabase.from('messages').insert([{ sender_id: myId, text: textToSend }]);
+    } else if (activeTab === 'team' && myTeamDetails) {
+      await supabase.from('team_messages').insert([{ team_id: myTeamDetails.id, sender_id: myId, text: textToSend }]);
+    }
   };
 
   const sendTradeOffer = async () => {
@@ -72,25 +148,21 @@ export default function ChatTradeScreen() {
       Alert.alert('エラー', '提案するカードと、欲しいカードの名前を入力してください。');
       return;
     }
-    const { data: { user } } = await supabase.auth.getUser();
-    if (!user) return;
-    
     const offerText = `【トレード募集】\n出: ${selectedOfferCard.card_name}\n求: ${requestedCardName}\n\n条件が合う方、交換お願いします！`;
     
-    await supabase.from('messages').insert([{ 
-      sender_id: user.id, 
-      text: offerText, 
-      card_offer_id: selectedOfferCard.id 
-    }]);
+    if (activeTab === 'global') {
+      await supabase.from('messages').insert([{ sender_id: myId, text: offerText, card_offer_id: selectedOfferCard.id }]);
+    } else if (activeTab === 'team' && myTeamDetails) {
+      await supabase.from('team_messages').insert([{ team_id: myTeamDetails.id, sender_id: myId, text: offerText, card_offer_id: selectedOfferCard.id }]);
+    }
     
-    setModalVisible(false);
+    setTradeModalVisible(false);
     setSelectedOfferCard(null);
     setRequestedCardName('');
   };
 
   const acceptTrade = async (message: any) => {
     if (!myId) return;
-    
     const myOfferCard = myCards[0]; 
     if (!myOfferCard) {
       Alert.alert('エラー', '交換に出せるカードを持っていません。');
@@ -99,18 +171,25 @@ export default function ChatTradeScreen() {
 
     Alert.alert(
       "交換の最終確認", 
-      `あなたの「${myOfferCard.card_name}」と\n相手の「${message.offered_card.card_name}」を交換しますか？\n※この操作は取り消せません。`, 
+      `あなたの「${myOfferCard.card_name}」と\n相手の「${message.offered_card.card_name}」を交換しますか？`, 
       [
         { text: "キャンセル", style: "cancel" },
         { text: "交換を確定する", onPress: async () => {
             setLoading(true);
             try {
+              // カード所有権の交換
               await supabase.from('cards').update({ player_id: myId }).eq('id', message.card_offer_id);
               await supabase.from('cards').update({ player_id: message.sender_id }).eq('id', myOfferCard.id);
-              await supabase.from('messages').delete().eq('id', message.id);
+              
+              // トレードメッセージの削除
+              if (activeTab === 'global') {
+                await supabase.from('messages').delete().eq('id', message.id);
+              } else {
+                await supabase.from('team_messages').delete().eq('id', message.id);
+              }
 
-              Alert.alert('🎉 トレード成立！', 'カードの交換が完了しました。図鑑を確認してください。'); 
-              initChat(); 
+              Alert.alert('🎉 トレード成立！', 'カードの交換が完了しました。'); 
+              initAllData(); 
             } catch (err) {
               Alert.alert('エラー', '通信に失敗しました。');
             }
@@ -120,13 +199,81 @@ export default function ChatTradeScreen() {
     );
   };
 
+  // --- チーム管理アクション ---
+  const handleCreateTeam = async () => {
+    if (!newTeamName.trim()) return;
+    setLoading(true);
+    try {
+      const { data: teamData, error: teamError } = await supabase
+        .from('teams')
+        .insert([{ name: newTeamName, description: newTeamDesc }])
+        .select()
+        .single();
+      
+      if (teamError) throw teamError;
+
+      await supabase
+        .from('team_members')
+        .insert([{ team_id: teamData.id, player_id: myId, role: 'leader', status: 'approved' }]);
+
+      Alert.alert('成功', 'チームを設立しました！');
+      setCreateTeamModalVisible(false);
+      setNewTeamName('');
+      setNewTeamDesc('');
+      initAllData();
+    } catch (err) {
+      Alert.alert('エラー', 'チーム作成に失敗しました');
+    }
+    setLoading(false);
+  };
+
+  const requestJoinTeam = async (teamId: string) => {
+    setLoading(true);
+    await supabase.from('team_members').insert([{ team_id: teamId, player_id: myId, status: 'pending' }]);
+    Alert.alert('申請完了', 'リーダーの承認をお待ちください。');
+    initAllData();
+    setLoading(false);
+  };
+
+  const cancelJoinRequest = async () => {
+    setLoading(true);
+    await supabase.from('team_members').delete().eq('player_id', myId);
+    initAllData();
+    setLoading(false);
+  };
+
+  const leaveTeam = async () => {
+    Alert.alert("チーム脱退", "本当にチームを脱退しますか？", [
+      { text: "キャンセル", style: "cancel" },
+      { text: "脱退する", style: "destructive", onPress: async () => {
+          setLoading(true);
+          await supabase.from('team_members').delete().eq('player_id', myId);
+          setTeamManageModalVisible(false);
+          initAllData();
+          setLoading(false);
+      }}
+    ]);
+  };
+
+  const handleRequest = async (memberId: string, isApprove: boolean) => {
+    setLoading(true);
+    if (isApprove) {
+      await supabase.from('team_members').update({ status: 'approved' }).eq('id', memberId);
+    } else {
+      await supabase.from('team_members').delete().eq('id', memberId);
+    }
+    loadPendingRequests(myTeamDetails.id);
+    setLoading(false);
+  };
+
+  // --- UI レンダリング ---
   const renderMessage = ({ item }: { item: any }) => {
     const isMe = item.sender_id === myId;
     const hasOffer = item.offered_card != null;
 
     return (
       <View style={[styles.msgLine, isMe ? styles.myMsgLine : styles.oppMsgLine]}>
-        {!isMe && <Text style={styles.senderName}>{item.profiles?.player_name || '名もなきエージェント'}</Text>}
+        {!isMe && <Text style={styles.senderName}>{item.profiles?.player_name || '匿名エージェント'}</Text>}
         
         <View style={[styles.msgBox, isMe ? styles.myMsgBox : styles.oppMsgBox, hasOffer && styles.offerBox]}>
           <Text style={[styles.msgText, isMe && styles.myMsgText, hasOffer && !isMe && {color: '#0F172A'}]}>{item.text}</Text>
@@ -136,7 +283,7 @@ export default function ChatTradeScreen() {
               {item.offered_card.image_url ? (
                 <Image source={{ uri: item.offered_card.image_url }} style={styles.offerCardImg} />
               ) : (
-                <View style={styles.offerCardImgPlaceholder}><Text>No Image</Text></View>
+                <View style={styles.offerCardImgPlaceholder}><Text style={{fontSize:10}}>No Img</Text></View>
               )}
               <View style={styles.offerCardInfo}>
                 <Text style={styles.offerCardName}>{item.offered_card.card_name}</Text>
@@ -156,6 +303,74 @@ export default function ChatTradeScreen() {
     );
   };
 
+  const renderTeamSection = () => {
+    if (myTeamStatus === null) {
+      return (
+        <View style={styles.teamDiscoveryContainer}>
+          <TouchableOpacity style={styles.createTeamBtn} onPress={() => setCreateTeamModalVisible(true)}>
+            <Plus color="#FFF" size={24} />
+            <Text style={styles.createTeamBtnText}>新しくチームを設立する</Text>
+          </TouchableOpacity>
+          <Text style={styles.sectionLabel}>募集中のチーム一覧</Text>
+          <FlatList
+            data={availableTeams}
+            keyExtractor={(item) => item.id}
+            contentContainerStyle={{ paddingBottom: 100 }}
+            renderItem={({ item }) => (
+              <View style={styles.teamCard}>
+                <View style={{flex: 1}}>
+                  <Text style={styles.teamCardName}>{item.name}</Text>
+                  <Text style={styles.teamCardDesc}>{item.description || '説明なし'}</Text>
+                </View>
+                <TouchableOpacity style={styles.joinBtn} onPress={() => requestJoinTeam(item.id)}>
+                  <Text style={styles.joinBtnText}>加入申請</Text>
+                </TouchableOpacity>
+              </View>
+            )}
+            ListEmptyComponent={<Text style={styles.emptyText}>現在募集中のチームはありません。</Text>}
+          />
+        </View>
+      );
+    }
+
+    if (myTeamStatus === 'pending') {
+      return (
+        <View style={styles.pendingContainer}>
+          <ActivityIndicator size="large" color="#3B82F6" style={{marginBottom: 20}} />
+          <Text style={styles.pendingTitle}>チーム加入承認待ち</Text>
+          <Text style={styles.pendingDesc}>「{myTeamDetails?.name}」のリーダーからの承認を待っています。</Text>
+          <TouchableOpacity style={styles.cancelReqBtn} onPress={cancelJoinRequest}>
+            <Text style={styles.cancelReqBtnText}>申請を取り消す</Text>
+          </TouchableOpacity>
+        </View>
+      );
+    }
+
+    if (myTeamStatus === 'approved') {
+      return (
+        <>
+          <View style={styles.teamHeaderBar}>
+            <View>
+              <Text style={styles.teamHeaderName}>{myTeamDetails?.name}</Text>
+              <Text style={styles.teamHeaderRole}>{myTeamRole === 'leader' ? '👑 リーダー' : '👤 メンバー'}</Text>
+            </View>
+            <TouchableOpacity style={styles.teamManageBtn} onPress={() => setTeamManageModalVisible(true)}>
+              <Info color="#475569" size={24} />
+            </TouchableOpacity>
+          </View>
+          <FlatList
+            data={teamMessages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderMessage}
+            inverted={true}
+            contentContainerStyle={{ padding: 16 }}
+            showsVerticalScrollIndicator={false}
+          />
+        </>
+      );
+    }
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <KeyboardAvoidingView 
@@ -163,55 +378,70 @@ export default function ChatTradeScreen() {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         keyboardVerticalOffset={Platform.OS === 'ios' ? 90 : 0}
       >
-        
         <View style={styles.header}>
-          <Text style={styles.headerTitle}>GLOBAL TRADE HUB</Text>
-          <Text style={styles.headerSub}>世界中のエージェントとカードを交換</Text>
+          <Text style={styles.headerTitle}>COMMUNICATIONS</Text>
+          <View style={styles.tabContainer}>
+            <TouchableOpacity style={[styles.tab, activeTab === 'global' && styles.activeTab]} onPress={() => setActiveTab('global')}>
+              <Globe size={18} color={activeTab === 'global' ? '#FFFFFF' : '#64748B'}/>
+              <Text style={[styles.tabText, activeTab === 'global' && styles.activeTabText]}>GLOBAL</Text>
+            </TouchableOpacity>
+            <TouchableOpacity style={[styles.tab, activeTab === 'team' && styles.activeTab]} onPress={() => setActiveTab('team')}>
+              <Users size={18} color={activeTab === 'team' ? '#FFFFFF' : '#64748B'}/>
+              <Text style={[styles.tabText, activeTab === 'team' && styles.activeTabText]}>TEAM</Text>
+            </TouchableOpacity>
+          </View>
         </View>
 
-        <FlatList
-          data={messages}
-          keyExtractor={(item) => item.id}
-          renderItem={renderMessage}
-          inverted={true} 
-          contentContainerStyle={{ padding: 16 }}
-          showsVerticalScrollIndicator={false}
-        />
+        {activeTab === 'global' ? (
+          <FlatList
+            data={messages}
+            keyExtractor={(item) => item.id}
+            renderItem={renderMessage}
+            inverted={true} 
+            contentContainerStyle={{ padding: 16 }}
+            showsVerticalScrollIndicator={false}
+          />
+        ) : (
+          renderTeamSection()
+        )}
         
         {loading && (
           <View style={styles.loaderOverlay}>
             <ActivityIndicator size="large" color="#3B82F6" />
-            <Text style={{color:'#FFF', marginTop: 10, fontWeight:'800'}}>トレード処理中...</Text>
+            <Text style={{color:'#FFF', marginTop: 10, fontWeight:'800'}}>通信中...</Text>
           </View>
         )}
 
-        <View style={styles.inputArea}>
-          <TouchableOpacity style={styles.offerBtn} onPress={() => setModalVisible(true)}>
-            <RefreshCcw color="#3B82F6" size={22} />
-          </TouchableOpacity>
-          <TextInput
-            style={styles.input}
-            placeholder="メッセージを送信..."
-            placeholderTextColor="#94A3B8"
-            value={inputText}
-            onChangeText={setInputText}
-            multiline
-            maxLength={200}
-          />
-          <TouchableOpacity style={[styles.sendBtn, !inputText.trim() && {opacity: 0.5}]} onPress={sendMessage} disabled={!inputText.trim()}>
-            <Send color={inputText.trim() ? "#3B82F6" : "#94A3B8"} size={26} />
-          </TouchableOpacity>
-        </View>
+        {/* チャット入力欄 (チーム未所属・承認待ちの時は隠す) */}
+        {(activeTab === 'global' || (activeTab === 'team' && myTeamStatus === 'approved')) && (
+          <View style={styles.inputArea}>
+            <TouchableOpacity style={styles.offerBtn} onPress={() => setTradeModalVisible(true)}>
+              <RefreshCcw color="#3B82F6" size={22} />
+            </TouchableOpacity>
+            <TextInput
+              style={styles.input}
+              placeholder={activeTab === 'global' ? "世界に向けて送信..." : "チームへ送信..."}
+              placeholderTextColor="#94A3B8"
+              value={inputText}
+              onChangeText={setInputText}
+              multiline
+              maxLength={200}
+            />
+            <TouchableOpacity style={[styles.sendBtn, !inputText.trim() && {opacity: 0.5}]} onPress={sendMessage} disabled={!inputText.trim()}>
+              <Send color={inputText.trim() ? "#3B82F6" : "#94A3B8"} size={26} />
+            </TouchableOpacity>
+          </View>
+        )}
       </KeyboardAvoidingView>
 
-      <Modal visible={isModalVisible} animationType="slide" transparent>
+      {/* --- トレード提案モーダル --- */}
+      <Modal visible={isTradeModalVisible} animationType="slide" transparent>
         <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
           <View style={styles.modalContent}>
             <View style={styles.modalHeaderRow}>
               <Text style={styles.modalHeader}>トレード募集を作成</Text>
-              <TouchableOpacity onPress={() => setModalVisible(false)}><X color="#64748B" size={28} /></TouchableOpacity>
+              <TouchableOpacity onPress={() => setTradeModalVisible(false)}><X color="#64748B" size={28} /></TouchableOpacity>
             </View>
-
             <Text style={styles.label}>1. 交換に出すカードを選択</Text>
             {myCards.length === 0 ? (
               <Text style={{color: '#E11D48', marginBottom: 20}}>交換に出せるカードがありません。</Text>
@@ -229,7 +459,6 @@ export default function ChatTradeScreen() {
                 ))}
               </ScrollView>
             )}
-
             <Text style={styles.label}>2. 欲しいカードの条件や名前</Text>
             <TextInput
               style={styles.modalInput}
@@ -238,35 +467,111 @@ export default function ChatTradeScreen() {
               value={requestedCardName}
               onChangeText={setRequestedCardName}
             />
-
             <TouchableOpacity style={styles.confirmBtn} onPress={sendTradeOffer}>
               <Text style={styles.confirmBtnText}>募集をマーケットに送信する</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
       </Modal>
+
+      {/* --- チーム作成モーダル --- */}
+      <Modal visible={isCreateTeamModalVisible} animationType="slide" transparent>
+        <KeyboardAvoidingView style={styles.modalOverlay} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalHeader}>新規チーム設立</Text>
+              <TouchableOpacity onPress={() => setCreateTeamModalVisible(false)}><X color="#64748B" size={28} /></TouchableOpacity>
+            </View>
+            <Text style={styles.label}>チーム名</Text>
+            <TextInput
+              style={styles.modalInput}
+              placeholder="最強のチーム名を入力"
+              placeholderTextColor="#94A3B8"
+              value={newTeamName}
+              onChangeText={setNewTeamName}
+              maxLength={20}
+            />
+            <Text style={styles.label}>活動方針・募集条件など (任意)</Text>
+            <TextInput
+              style={[styles.modalInput, {height: 80}]}
+              placeholder="例: 毎日ログインできる方募集！情報交換メインです。"
+              placeholderTextColor="#94A3B8"
+              value={newTeamDesc}
+              onChangeText={setNewTeamDesc}
+              multiline
+              maxLength={100}
+            />
+            <TouchableOpacity style={[styles.confirmBtn, !newTeamName && {backgroundColor: '#94A3B8'}]} onPress={handleCreateTeam} disabled={!newTeamName}>
+              <Text style={styles.confirmBtnText}>この名前で設立する</Text>
+            </TouchableOpacity>
+          </View>
+        </KeyboardAvoidingView>
+      </Modal>
+
+      {/* --- チーム管理モーダル --- */}
+      <Modal visible={isTeamManageModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <View style={styles.modalHeaderRow}>
+              <Text style={styles.modalHeader}>チーム設定</Text>
+              <TouchableOpacity onPress={() => setTeamManageModalVisible(false)}><X color="#64748B" size={28} /></TouchableOpacity>
+            </View>
+
+            {myTeamRole === 'leader' && (
+              <View style={styles.manageSection}>
+                <Text style={styles.label}>加入申請一覧</Text>
+                {pendingRequests.length === 0 ? (
+                  <Text style={styles.emptyText}>現在申請はありません。</Text>
+                ) : (
+                  pendingRequests.map(req => (
+                    <View key={req.id} style={styles.reqCard}>
+                      <Text style={styles.reqName}>{req.profiles?.player_name || '匿名'}</Text>
+                      <View style={{flexDirection: 'row'}}>
+                        <TouchableOpacity style={[styles.reqBtn, {backgroundColor: '#10B981'}]} onPress={() => handleRequest(req.id, true)}>
+                          <Text style={styles.reqBtnText}>承認</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.reqBtn, {backgroundColor: '#EF4444', marginLeft: 8}]} onPress={() => handleRequest(req.id, false)}>
+                          <Text style={styles.reqBtnText}>拒否</Text>
+                        </TouchableOpacity>
+                      </View>
+                    </View>
+                  ))
+                )}
+              </View>
+            )}
+
+            <TouchableOpacity style={styles.leaveBtn} onPress={leaveTeam}>
+              <LogOut color="#EF4444" size={20} />
+              <Text style={styles.leaveBtnText}>チームを脱退する</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
     </SafeAreaView>
   );
 }
 
 const styles = StyleSheet.create({
-  // 💡 ここが修正の肝です！タブバーに隠れないよう paddingBottom: 85 を追加しました
   container: { flex: 1, backgroundColor: '#F8FAFC', paddingBottom: 85 },
   keyboardAvoid: { flex: 1 },
-  header: { padding: 16, alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#FFFFFF', paddingTop: Platform.OS === 'android' ? 40 : 16 },
-  headerTitle: { fontSize: 16, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
-  headerSub: { fontSize: 11, color: '#64748B', marginTop: 2, fontWeight: '700' },
+  header: { alignItems: 'center', borderBottomWidth: 1, borderBottomColor: '#E2E8F0', backgroundColor: '#FFFFFF', paddingTop: Platform.OS === 'android' ? 40 : 16 },
+  headerTitle: { fontSize: 16, fontWeight: '900', color: '#0F172A', letterSpacing: 1, marginBottom: 12 },
   
+  tabContainer: { flexDirection: 'row', backgroundColor: '#F1F5F9', borderRadius: 12, padding: 4, marginHorizontal: 16, marginBottom: 16, width: '90%' },
+  tab: { flex: 1, flexDirection: 'row', alignItems: 'center', justifyContent: 'center', paddingVertical: 10, borderRadius: 8 },
+  activeTab: { backgroundColor: '#3B82F6', shadowColor: '#3B82F6', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.2, shadowRadius: 4 },
+  tabText: { fontSize: 13, fontWeight: '800', color: '#64748B', marginLeft: 6 },
+  activeTabText: { color: '#FFFFFF' },
+
   msgLine: { marginBottom: 20, maxWidth: '85%' },
   myMsgLine: { alignSelf: 'flex-end', alignItems: 'flex-end' },
   oppMsgLine: { alignSelf: 'flex-start', alignItems: 'flex-start' },
   senderName: { color: '#64748B', fontSize: 11, marginBottom: 6, fontWeight: '800', marginLeft: 4 },
-  
   msgBox: { paddingVertical: 12, paddingHorizontal: 16, borderRadius: 20, maxWidth: '100%' },
   myMsgBox: { backgroundColor: '#3B82F6', borderBottomRightRadius: 4 },
-  oppMsgBox: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 8 },
+  oppMsgBox: { backgroundColor: '#FFFFFF', borderBottomLeftRadius: 4, borderWidth: 1, borderColor: '#E2E8F0' },
   offerBox: { borderColor: '#F59E0B', borderWidth: 2, backgroundColor: '#FFFBEB' },
-  
   msgText: { fontSize: 15, lineHeight: 22, color: '#0F172A', fontWeight: '500' },
   myMsgText: { color: '#FFFFFF' },
 
@@ -281,26 +586,57 @@ const styles = StyleSheet.create({
   input: { flex: 1, backgroundColor: '#F1F5F9', color: '#0F172A', paddingTop: 14, paddingBottom: 14, paddingHorizontal: 18, borderRadius: 24, fontSize: 15, marginHorizontal: 10, maxHeight: 120 },
   offerBtn: { padding: 12, backgroundColor: '#EFF6FF', borderRadius: 24, marginBottom: 4 },
   sendBtn: { padding: 10, marginBottom: 4 },
-  
   acceptBtn: { flexDirection: 'row', backgroundColor: '#F59E0B', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, marginTop: 12, alignItems: 'center', justifyContent: 'center' },
   acceptBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 14 },
   
+  // チーム専用UI
+  teamDiscoveryContainer: { flex: 1, padding: 16 },
+  createTeamBtn: { flexDirection: 'row', backgroundColor: '#3B82F6', padding: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
+  createTeamBtnText: { color: '#FFF', fontSize: 16, fontWeight: '900', marginLeft: 8 },
+  sectionLabel: { fontSize: 14, fontWeight: '900', color: '#475569', marginBottom: 12 },
+  teamCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  teamCardName: { fontSize: 16, fontWeight: '900', color: '#0F172A', marginBottom: 4 },
+  teamCardDesc: { fontSize: 12, color: '#64748B' },
+  joinBtn: { backgroundColor: '#F1F5F9', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
+  joinBtnText: { color: '#3B82F6', fontWeight: '800', fontSize: 13 },
+  emptyText: { color: '#94A3B8', textAlign: 'center', marginTop: 20 },
+
+  pendingContainer: { flex: 1, justifyContent: 'center', alignItems: 'center', padding: 20 },
+  pendingTitle: { fontSize: 20, fontWeight: '900', color: '#0F172A', marginBottom: 8 },
+  pendingDesc: { fontSize: 14, color: '#64748B', textAlign: 'center', marginBottom: 30 },
+  cancelReqBtn: { backgroundColor: '#FEE2E2', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 },
+  cancelReqBtnText: { color: '#EF4444', fontWeight: '800' },
+
+  teamHeaderBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  teamHeaderName: { fontSize: 18, fontWeight: '900', color: '#0F172A' },
+  teamHeaderRole: { fontSize: 12, fontWeight: '700', color: '#64748B', marginTop: 2 },
+  teamManageBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 },
+
+  // モーダル全般
   loaderOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.8)', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
-  
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.7)', justifyContent: 'flex-end' },
-  modalContent: { backgroundColor: '#FFFFFF', padding: 24, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 40 },
+  modalContent: { backgroundColor: '#FFFFFF', padding: 24, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 40, maxHeight: '90%' },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 24 },
   modalHeader: { color: '#0F172A', fontSize: 20, fontWeight: '900' },
   label: { color: '#475569', fontSize: 14, fontWeight: '800', marginBottom: 12 },
-  
+  modalInput: { backgroundColor: '#F8FAFC', color: '#0F172A', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', fontSize: 15, marginBottom: 24 },
+  confirmBtn: { backgroundColor: '#3B82F6', padding: 18, borderRadius: 16, alignItems: 'center' },
+  confirmBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16 },
+
+  // トレードモーダル専用
   cardSelector: { flexDirection: 'row', marginBottom: 24 },
   miniCard: { backgroundColor: '#F8FAFC', padding: 8, borderRadius: 16, marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0', width: 100, alignItems: 'center' },
   selectedMiniCard: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF', borderWidth: 2 },
   miniCardImg: { width: '100%', height: 80, borderRadius: 8, marginBottom: 8, resizeMode: 'cover' },
   miniCardText: { color: '#475569', fontWeight: '800', fontSize: 12 },
   selectedMiniCardText: { color: '#2563EB' },
-  
-  modalInput: { backgroundColor: '#F8FAFC', color: '#0F172A', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', fontSize: 15, marginBottom: 24 },
-  confirmBtn: { backgroundColor: '#3B82F6', padding: 18, borderRadius: 16, alignItems: 'center', shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.3, shadowRadius: 8 },
-  confirmBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16 }
+
+  // チーム管理モーダル専用
+  manageSection: { marginBottom: 30 },
+  reqCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, backgroundColor: '#F8FAFC', borderRadius: 12, marginBottom: 8 },
+  reqName: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
+  reqBtn: { paddingVertical: 8, paddingHorizontal: 16, borderRadius: 8 },
+  reqBtnText: { color: '#FFF', fontWeight: '800', fontSize: 12 },
+  leaveBtn: { flexDirection: 'row', backgroundColor: '#FEE2E2', padding: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  leaveBtnText: { color: '#EF4444', fontSize: 15, fontWeight: '900', marginLeft: 8 }
 });
