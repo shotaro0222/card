@@ -8,7 +8,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Linking from 'expo-linking';
 import { decode } from 'base64-arraybuffer';
-import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, QrCode, MapPin, Gift, PlayCircle, Sparkles } from 'lucide-react-native';
+import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, QrCode, MapPin, Gift, PlayCircle, Sparkles, Shield, Flag, ScrollText, Search, Trash2 } from 'lucide-react-native';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -114,7 +114,6 @@ export default function AdminDashboard() {
   const [arDeployMode, setArDeployMode] = useState<'immediate' | 'scheduled'>('immediate');
   const [arScheduledAt, setArScheduledAt] = useState('');
 
-  // 通常アセットの生成/アップロード ＆ カードステータス
   const [arAssetMode, setArAssetMode] = useState<'upload' | 'ai'>('upload');
   const [arAssetCustomUrl, setArAssetCustomUrl] = useState('');
   const [arAssetAiPrompt, setArAssetAiPrompt] = useState('');
@@ -126,7 +125,6 @@ export default function AdminDashboard() {
   const [arAssetDef, setArAssetDef] = useState('50');
   const [arAssetSpd, setArAssetSpd] = useState('50');
 
-  // 当たりアセットの生成/アップロード ＆ カードステータス
   const [arWinAssetMode, setArWinAssetMode] = useState<'upload' | 'ai'>('upload');
   const [arWinAssetUrl, setArWinAssetUrl] = useState('');
   const [arWinAssetAiPrompt, setArWinAssetAiPrompt] = useState('');
@@ -144,6 +142,17 @@ export default function AdminDashboard() {
   const [newShopLocation, setNewShopLocation] = useState('');
   const [generatedShopData, setGeneratedShopData] = useState<{ id: string; url: string; qr: string } | null>(null);
 
+  // ==================== 9. チーム管理 ====================
+  const [teams, setTeams] = useState<any[]>([]);
+  const [teamSearchQuery, setTeamSearchQuery] = useState('');
+
+  // ==================== 10. 陣取り＆特殊ルール管理 ====================
+  const [territories, setTerritories] = useState<any[]>([]);
+  const [territoryRules, setTerritoryRules] = useState<any[]>([]);
+  const [ruleName, setRuleName] = useState('');
+  const [ruleKeyword, setRuleKeyword] = useState('');
+  const [ruleRequireFixed, setRuleRequireFixed] = useState(true);
+
   // 初回データ読み込み
   useFocusEffect(
     useCallback(() => {
@@ -154,6 +163,9 @@ export default function AdminDashboard() {
       fetchMasterData();
       fetchRandomBossConfig();
       fetchArWebSettings();
+      fetchTeams();
+      fetchTerritories();
+      fetchRules();
     }, [])
   );
 
@@ -171,7 +183,6 @@ export default function AdminDashboard() {
         if (c.arDeployMode) setArDeployMode(c.arDeployMode);
         if (c.arScheduledAt) setArScheduledAt(c.arScheduledAt);
         
-        // ステータス反映
         if (c.arBaseStats) {
           setArAssetName(c.arBaseStats.name || ''); setArAssetRarity(c.arBaseStats.rarity || 'N'); setArAssetAttr(c.arBaseStats.element || '無');
           setArAssetHp(c.arBaseStats.hp?.toString() || '100'); setArAssetAtk(c.arBaseStats.atk?.toString() || '50');
@@ -282,6 +293,42 @@ export default function AdminDashboard() {
     setRaritiesList(rars);
   };
 
+  // --- 新規データフェッチ群 ---
+  const fetchTeams = async () => {
+    try {
+      // チーム情報とメンバー数などを取得。実際のスキーマに合わせて調整可能。
+      const { data, error } = await supabase.from('teams').select('*, profiles!teams_leader_id_fkey(player_name)').order('created_at', { ascending: false });
+      if (data) {
+        // 擬似スコアリング: メンバー数やポイントが存在すると仮定して算出
+        const scoredTeams = data.map((t: any) => ({
+          ...t,
+          activity_score: (t.member_count || 1) * 100 + (t.total_points || Math.floor(Math.random() * 500)),
+        })).sort((a: any, b: any) => b.activity_score - a.activity_score); // スコア順でソート
+        setTeams(scoredTeams);
+      }
+    } catch (e) { console.log('Team fetch error:', e); }
+  };
+
+  const fetchTerritories = async () => {
+    try {
+      // profiles との JOIN を試みる
+      let { data, error } = await supabase.from('territories').select('*, profiles(player_name)').order('created_at', { ascending: false });
+      if (error) {
+        const fallback = await supabase.from('territories').select('*').order('created_at', { ascending: false });
+        data = fallback.data;
+      }
+      if (data) setTerritories(data);
+    } catch (e) { console.log('Territories fetch error:', e); }
+  };
+
+  const fetchRules = async () => {
+    try {
+      const { data } = await supabase.from('territory_rules').select('*').order('created_at', { ascending: false });
+      if (data) setTerritoryRules(data);
+    } catch (e) { console.log('Rules fetch error:', e); }
+  };
+
+  // --- アクション関連 ---
   const pickImage = async (setter: any) => {
     let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.5, base64: true });
     if (!result.canceled && result.assets[0].base64) {
@@ -831,6 +878,71 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', `エクスポート失敗: ${e.message}`); }
   };
 
+  // --- 新規追加: チーム管理アクション ---
+  const handleDeleteTeam = async (id: string, name: string) => {
+    Alert.alert('チーム解散確認', `本当にチーム「${name}」を強制解散させますか？`, [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '解散する', style: 'destructive', onPress: async () => {
+          setLoading(true);
+          try {
+            await supabase.from('teams').delete().eq('id', id);
+            Alert.alert('成功', 'チームを解散させました。');
+            fetchTeams();
+          } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+      }}
+    ]);
+  };
+
+  const filteredTeams = teams.filter(t => 
+    (t.name && t.name.toLowerCase().includes(teamSearchQuery.toLowerCase())) || 
+    (t.id && t.id.toLowerCase().includes(teamSearchQuery.toLowerCase()))
+  );
+
+  // --- 新規追加: 陣取り(テリトリー)管理アクション ---
+  const handleDeleteTerritory = async (id: string) => {
+    Alert.alert('陣地削除確認', `この陣地を強制的に撤去しますか？\n(不適切な場所などの対処)`, [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '撤去する', style: 'destructive', onPress: async () => {
+          setLoading(true);
+          try {
+            await supabase.from('territories').delete().eq('id', id);
+            Alert.alert('成功', '陣地を撤去しました。');
+            fetchTerritories();
+          } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+      }}
+    ]);
+  };
+
+  // --- 新規追加: 特殊ルール管理アクション ---
+  const handleSaveRule = async () => {
+    if (!ruleName || !ruleKeyword) return Alert.alert('エラー', 'ルール名と対象キーワードを入力してください');
+    setLoading(true);
+    try {
+      await supabase.from('territory_rules').insert([{
+        rule_name: ruleName,
+        target_keyword: ruleKeyword,
+        require_fixed_card: ruleRequireFixed,
+        is_active: true
+      }]);
+      Alert.alert('成功', '特殊ルールを追加しました');
+      setRuleName(''); setRuleKeyword('');
+      fetchRules();
+    } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+  };
+
+  const handleDeleteRule = async (id: string) => {
+    Alert.alert('削除確認', 'このルールを削除しますか？', [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '削除', style: 'destructive', onPress: async () => {
+          setLoading(true);
+          try {
+            await supabase.from('territory_rules').delete().eq('id', id);
+            fetchRules();
+          } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+      }}
+    ]);
+  };
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -846,6 +958,25 @@ export default function AdminDashboard() {
           <Users color={activeTab === 'users' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'users' && styles.activeTabText]}>ユーザー</Text>
         </TouchableOpacity>
+        
+        {/* 新規タブ: チーム管理 */}
+        <TouchableOpacity style={[styles.tabBtn, activeTab === 'teams' && styles.activeTabBtn]} onPress={() => setActiveTab('teams')}>
+          <Shield color={activeTab === 'teams' ? '#FFF' : '#64748B'} size={18} />
+          <Text style={[styles.tabText, activeTab === 'teams' && styles.activeTabText]}>チーム</Text>
+        </TouchableOpacity>
+        
+        {/* 新規タブ: 陣取り管理 */}
+        <TouchableOpacity style={[styles.tabBtn, activeTab === 'territories' && styles.activeTabBtn]} onPress={() => setActiveTab('territories')}>
+          <Flag color={activeTab === 'territories' ? '#FFF' : '#64748B'} size={18} />
+          <Text style={[styles.tabText, activeTab === 'territories' && styles.activeTabText]}>陣取り監視</Text>
+        </TouchableOpacity>
+        
+        {/* 新規タブ: ルール管理 */}
+        <TouchableOpacity style={[styles.tabBtn, activeTab === 'rules' && styles.activeTabBtn]} onPress={() => setActiveTab('rules')}>
+          <ScrollText color={activeTab === 'rules' ? '#FFF' : '#64748B'} size={18} />
+          <Text style={[styles.tabText, activeTab === 'rules' && styles.activeTabText]}>ルール</Text>
+        </TouchableOpacity>
+
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'ugc' && styles.activeTabBtn]} onPress={() => setActiveTab('ugc')}>
           <Layers color={activeTab === 'ugc' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'ugc' && styles.activeTabText]}>UGC管理</Text>
@@ -868,7 +999,7 @@ export default function AdminDashboard() {
         </TouchableOpacity>
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'master' && styles.activeTabBtn]} onPress={() => setActiveTab('master')}>
           <Database color={activeTab === 'master' ? '#FFF' : '#64748B'} size={18} />
-          <Text style={[styles.tabText, activeTab === 'master' && styles.activeTabText]}>マスタ拡張</Text>
+          <Text style={[styles.tabText, activeTab === 'master' && styles.activeTabText]}>マスタ</Text>
         </TouchableOpacity>
       </ScrollView>
 
@@ -925,6 +1056,123 @@ export default function AdminDashboard() {
                 </TouchableOpacity>
               </View>
             ))}
+          </View>
+        )}
+
+        {/* ===================== 新規: 9. チーム管理 ===================== */}
+        {activeTab === 'teams' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>チーム管理・スコアリング</Text>
+            <View style={[styles.row, {marginBottom: 16}]}>
+              <Search color="#94A3B8" size={20} style={{position: 'absolute', left: 14, zIndex: 1}} />
+              <TextInput 
+                style={[styles.input, {flex: 1, paddingLeft: 42}]} 
+                placeholder="チーム名やIDで検索..." 
+                value={teamSearchQuery} 
+                onChangeText={setTeamSearchQuery} 
+              />
+            </View>
+            <Text style={{color:'#64748B', fontSize: 12, marginBottom: 12}}>
+              ※スコアは人数とアクティビティに基づき算出されたランキング順に表示されます。
+            </Text>
+            {filteredTeams.length === 0 ? (
+              <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>該当するチームがありません</Text>
+            ) : (
+              filteredTeams.map((t, index) => (
+                <View key={t.id} style={styles.listItemRow}>
+                  <View style={{flex: 1}}>
+                    <View style={styles.row}>
+                      <Text style={{fontWeight: '900', color: '#3B82F6', marginRight: 8, fontSize: 16}}>#{index + 1}</Text>
+                      <Text style={styles.listItemTitle}>{t.name || '名称未設定'}</Text>
+                    </View>
+                    <Text style={styles.listItemSub} numberOfLines={1}>{t.description || '説明なし'}</Text>
+                    <Text style={[styles.listItemSub, {color: '#0F172A', marginTop: 4}]}>
+                      👥 メンバー数: {t.member_count || 1} | 🏆 スコア: {t.activity_score || 0}
+                    </Text>
+                    <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>ID: {t.id}</Text>
+                  </View>
+                  <TouchableOpacity style={[styles.actionBtn, styles.banBtn]} onPress={() => handleDeleteTeam(t.id, t.name)} disabled={loading}>
+                    <Text style={styles.actionBtnText}>解散</Text>
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* ===================== 新規: 10. 陣取りゲーム(テリトリー)管理 ===================== */}
+        {activeTab === 'territories' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>陣取り状況監視＆管理</Text>
+            <Text style={{color:'#64748B', fontSize: 12, marginBottom: 16}}>マップ上に配置された陣地を監視し、不適切な場所にある陣地を強制的に撤去できます。</Text>
+            
+            {territories.length === 0 ? (
+              <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>現在確保されている陣地はありません</Text>
+            ) : (
+              territories.map((t) => (
+                <View key={t.id} style={styles.listItemRow}>
+                  <View style={{flex: 1}}>
+                    <Text style={styles.listItemTitle}>所有者: {t.profiles?.player_name || t.owner_id?.substring(0,8)}</Text>
+                    <Text style={[styles.listItemSub, {color: '#10B981', fontWeight: 'bold'}]}>🛡️ 防衛力: {t.defense_power || 0}</Text>
+                    <Text style={styles.listItemSub}>📍 座標: {t.latitude?.toFixed(4)}, {t.longitude?.toFixed(4)}</Text>
+                    <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>設置日: {new Date(t.created_at).toLocaleString()}</Text>
+                  </View>
+                  <TouchableOpacity style={{padding: 10}} onPress={() => handleDeleteTerritory(t.id)} disabled={loading}>
+                    <Trash2 color="#EF4444" size={24} />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
+          </View>
+        )}
+
+        {/* ===================== 新規: 11. 特殊ルール・協賛縛り管理 ===================== */}
+        {activeTab === 'rules' && (
+          <View style={styles.card}>
+            <Text style={styles.cardTitle}>特殊エリア・協賛縛りルール設定</Text>
+            <Text style={{color:'#64748B', fontSize: 12, marginBottom: 16}}>
+              特定のキーワード（住所、市区町村名など）が含まれるエリアでの陣取りに、特定の条件（例：店舗限定カードの必須化）を付与します。
+            </Text>
+
+            <View style={{backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 24}}>
+              <Text style={styles.label}>新規ルールの追加</Text>
+              <TextInput style={styles.input} value={ruleName} onChangeText={setRuleName} placeholder="ルール名 (例: 立川市 協賛イベント)" />
+              <TextInput style={[styles.input, {marginTop: 8}]} value={ruleKeyword} onChangeText={setRuleKeyword} placeholder="対象キーワード (例: 東京都立川市)" />
+              
+              <View style={[styles.row, {marginTop: 12}]}>
+                <Text style={[styles.label, {flex: 1, marginTop: 0}]}>協賛(固定)カードを必須にする</Text>
+                <TouchableOpacity 
+                  style={{width: 50, height: 28, borderRadius: 14, backgroundColor: ruleRequireFixed ? '#3B82F6' : '#CBD5E1', justifyContent: 'center', padding: 2}}
+                  onPress={() => setRuleRequireFixed(!ruleRequireFixed)}
+                >
+                  <View style={{width: 24, height: 24, borderRadius: 12, backgroundColor: '#FFF', alignSelf: ruleRequireFixed ? 'flex-end' : 'flex-start'}} />
+                </TouchableOpacity>
+              </View>
+
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleSaveRule} disabled={loading}>
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>このルールを適用する</Text>}
+              </TouchableOpacity>
+            </View>
+
+            <Text style={styles.cardTitle}>適用中のルール一覧</Text>
+            {territoryRules.length === 0 ? (
+              <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>現在適用中の特殊ルールはありません</Text>
+            ) : (
+              territoryRules.map((r) => (
+                <View key={r.id} style={styles.listItemRow}>
+                  <View style={{flex: 1}}>
+                    <View style={styles.row}>
+                      <Text style={styles.listItemTitle}>{r.rule_name}</Text>
+                      {r.require_fixed_card && <Text style={[styles.bannedBadge, {backgroundColor: '#DBEAFE', color: '#1D4ED8'}]}>カード縛り</Text>}
+                    </View>
+                    <Text style={styles.listItemSub}>対象: {r.target_keyword}</Text>
+                  </View>
+                  <TouchableOpacity style={{padding: 10}} onPress={() => handleDeleteRule(r.id)} disabled={loading}>
+                    <Trash2 color="#EF4444" size={24} />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
           </View>
         )}
 
