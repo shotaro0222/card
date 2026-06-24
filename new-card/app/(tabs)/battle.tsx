@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from 'react';
+import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView, Platform, FlatList, Image } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
@@ -56,9 +56,38 @@ function getDamageMultiplier(attackerEl: string, defenderEl: string): { multipli
   return { multiplier: 1.0, label: '' };
 }
 
+// 🌟 マップのカスタムスタイル（表示変更用）
+const BOSS_MAP_STYLE = [
+  { "elementType": "geometry", "stylers": [{ "color": "#241010" }] },
+  { "elementType": "labels.text.fill", "stylers": [{ "color": "#8f5a5a" }] },
+  { "elementType": "labels.text.stroke", "stylers": [{ "color": "#241010" }] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#4a1c1c" }] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#0a0202" }] }
+];
+
+const TERRITORY_MAP_STYLE = [
+  { "elementType": "geometry", "stylers": [{ "color": "#0d1b2a" }] },
+  { "elementType": "labels.text.fill", "stylers": [{ "color": "#778da9" }] },
+  { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#1b263b" }] },
+  { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#000000" }] }
+];
+
+// 🌟 HSLカラーをHSLA(透明度付き)に変換するヘルパー
+const makeHsla = (color: string | null, alpha: number) => {
+  if (!color) return null;
+  if (color.startsWith('hsl(')) return color.replace('hsl(', 'hsla(').replace(')', `, ${alpha})`);
+  if (color.startsWith('#')) {
+    const alphaHex = Math.round(alpha * 255).toString(16).padStart(2, '0');
+    return `${color}${alphaHex}`;
+  }
+  return color;
+};
+
 export default function BattleScreen() {
+  const mapRef = useRef<any>(null); // 🌟 マップ制御用のRefを追加
   const [myId, setMyId] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<any>(null);
+  const [myTeam, setMyTeam] = useState<any>(null); // 🌟 所属チーム情報
   const [playerStats, setPlayerStats] = useState({ totalWins: 0, bossDefeats: 0 });
   const [battleLog, setBattleLog] = useState<any[]>([]);
   const [isBattling, setIsBattling] = useState(false);
@@ -68,6 +97,7 @@ export default function BattleScreen() {
   const [detectedBoss, setDetectedBoss] = useState<any>(null);
   const [currentAddress, setCurrentAddress] = useState<string>('現在地を取得中...');
   const [currentPostalCode, setCurrentPostalCode] = useState<string>('');
+  const [mapMode, setMapMode] = useState<'normal' | 'boss' | 'territory'>('normal'); // 🌟 マップの表示モード
   
   // 陣取り関連
   const [territories, setTerritories] = useState<any[]>([]);
@@ -81,8 +111,6 @@ export default function BattleScreen() {
   
   // 特殊ルール（協賛カード限定エリア等）
   const [activeRule, setActiveRule] = useState<any>(null);
-
-  const [mapRegion, setMapRegion] = useState({ latitude: 35.681236, longitude: 139.767125, latitudeDelta: 0.005, longitudeDelta: 0.005 });
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
 
   useFocusEffect(
@@ -99,11 +127,23 @@ export default function BattleScreen() {
         setMyProfile(profile);
         setPlayerStats({ totalWins: profile.total_wins, bossDefeats: profile.boss_defeats });
       }
+
+      // 🌟 チーム情報の取得（陣地の色分け・登録用）
+      const { data: memberData } = await supabase
+        .from('team_members')
+        .select('*, teams(*)')
+        .eq('player_id', user.id)
+        .eq('status', 'approved')
+        .single();
+      if (memberData && memberData.teams) {
+        setMyTeam(memberData.teams);
+      }
+
       const { data: cards } = await supabase.from('cards')
         .select('*')
         .eq('player_id', user.id)
         .eq('is_active', true)
-        .or('level.gte.5,status_total.gte.300,is_fixed.eq.true'); // 特殊カード(is_fixed)も取得
+        .or('level.gte.5,status_total.gte.300,is_fixed.eq.true'); 
       if (cards) setMyHighRareCards(cards);
     }
     await checkLocationAndFetchData();
@@ -116,9 +156,7 @@ export default function BattleScreen() {
       if (!locationPerm.granted) return;
       const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude } = location.coords;
-      
       setCurrentLocation({ lat: latitude, lng: longitude });
-      setMapRegion(prev => ({ ...prev, latitude, longitude }));
 
       // 1. 逆ジオコーディング（住所取得）
       let addressString = '不明なエリア';
@@ -135,7 +173,7 @@ export default function BattleScreen() {
         }
       }
 
-      // 2. 特殊ルールの判定（時間と場所）
+      // 2. 特殊ルールの判定
       await evaluateSpecialRules(addressString, postal);
 
       // 3. ボス検知
@@ -154,6 +192,17 @@ export default function BattleScreen() {
       const { data: terrData } = await supabase.from('territories').select('*').order('created_at', { ascending: false }).limit(50);
       if (terrData) setTerritories(terrData);
 
+      // 🌟 カメラと表示モードの自動調整（ピンチアウト阻害を防ぐため animateToRegion を使用）
+      if (foundBoss) {
+        setMapMode('boss');
+        // ボスがいる場合は少し広域を見せる
+        mapRef.current?.animateToRegion({ latitude, longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 1000);
+      } else {
+        setMapMode('normal');
+        // 平常時は現在地付近をズーム（初回のみ）
+        mapRef.current?.animateToRegion({ latitude, longitude, latitudeDelta: 0.005, longitudeDelta: 0.005 }, 1000);
+      }
+
     } catch (e) { console.log("Map Fetch Error:", e); }
   };
 
@@ -166,17 +215,13 @@ export default function BattleScreen() {
       const currentTimeString = `${now.getHours().toString().padStart(2, '0')}:${now.getMinutes().toString().padStart(2, '0')}:00`;
 
       const matchedRule = rules.find((rule: any) => {
-        // 住所または郵便番号にキーワードが含まれているか
         const matchLocation = address.includes(rule.target_keyword) || postal.includes(rule.target_keyword);
         if (!matchLocation) return false;
-        
-        // 時間帯の判定
         if (rule.start_time && rule.end_time) {
           return currentTimeString >= rule.start_time && currentTimeString <= rule.end_time;
         }
         return true;
       });
-
       setActiveRule(matchedRule || null);
     } catch (e) { console.log("Rule Evaluation Error"); }
   };
@@ -195,7 +240,26 @@ export default function BattleScreen() {
   const markStartPoint = () => {
     if (!currentLocation) return;
     setStartPoint({ lat: currentLocation.lat, lng: currentLocation.lng, address: currentAddress });
+    
+    // 🌟 陣取り開始時にマップスタイルを変更し、カメラを引いて領域を見やすくする
+    setMapMode('territory');
+    mapRef.current?.animateToRegion({ 
+      latitude: currentLocation.lat, longitude: currentLocation.lng, 
+      latitudeDelta: 0.02, longitudeDelta: 0.02 
+    }, 1000);
+
     Alert.alert('起点マーカー設置', `「${currentAddress}」を起点として記録しました。別の場所に移動して陣地を展開してください。`);
+  };
+
+  const cancelStartPoint = () => {
+    setStartPoint(null);
+    setMapMode(detectedBoss ? 'boss' : 'normal');
+    if (currentLocation) {
+      mapRef.current?.animateToRegion({ 
+        latitude: currentLocation.lat, longitude: currentLocation.lng, 
+        latitudeDelta: detectedBoss ? 0.02 : 0.005, longitudeDelta: detectedBoss ? 0.02 : 0.005 
+      }, 1000);
+    }
   };
 
   const openTerritoryModal = () => {
@@ -229,6 +293,10 @@ export default function BattleScreen() {
               await supabase.from('territories').insert([{
                 player_id: myId,
                 player_name: myProfile?.player_name || '匿名エージェント',
+                // 🌟 チーム情報を保存してマップで色分けできるようにする
+                team_id: myTeam?.id || null,
+                team_name: myTeam?.name || '',
+                team_color: myTeam?.team_color || '',
                 start_lat: startPoint?.lat, start_lng: startPoint?.lng,
                 end_lat: currentLocation?.lat, end_lng: currentLocation?.lng,
                 start_address: startPoint?.address,
@@ -239,7 +307,7 @@ export default function BattleScreen() {
               await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
               Alert.alert('展開完了', '強大な陣地をマップ上に展開しました！');
               setTerritoryModalVisible(false);
-              setStartPoint(null);
+              cancelStartPoint(); // モードとカメラを元に戻す
               initBattleData();
             } catch (err) { Alert.alert('エラー', '通信に失敗しました。'); }
             setLoadingMap(false);
@@ -275,6 +343,10 @@ export default function BattleScreen() {
             try {
               await supabase.from('territories').update({
                 player_id: myId, player_name: myProfile?.player_name || '匿名',
+                // 🌟 上書き時に自分のチームカラーで染め上げる
+                team_id: myTeam?.id || null,
+                team_name: myTeam?.name || '',
+                team_color: myTeam?.team_color || '',
                 defense_power: myAttackPower,
                 card1_name: c1.card_name, card2_name: c2.card_name
               }).eq('id', selectedTerritory.id);
@@ -395,12 +467,10 @@ export default function BattleScreen() {
   };
 
   const toggleSacrifice = (item: any) => {
-    // 特殊ルール適用中は、is_fixed が true のカードしか選べない
     if (activeRule && activeRule.require_fixed_card && !item.is_fixed) {
       Alert.alert('ルール違反', `現在このエリアは「${activeRule.rule_name}」の対象です。陣取りには特別な「協賛カード等」が必要です。`);
       return;
     }
-
     if (selectedSacrifices.includes(item.id)) {
       setSelectedSacrifices(prev => prev.filter(i => i !== item.id));
     } else {
@@ -409,9 +479,15 @@ export default function BattleScreen() {
     }
   };
 
+  // 🌟 現在のモードに応じたマップスタイルを取得
+  const getMapStyle = () => {
+    if (mapMode === 'boss') return BOSS_MAP_STYLE;
+    if (mapMode === 'territory') return TERRITORY_MAP_STYLE;
+    return [];
+  };
+
   return (
     <SafeAreaView style={styles.container}>
-      {/* 住所と特殊ルール表示ヘッダー */}
       <View style={styles.addressHeader}>
         <View style={{flexDirection: 'row', alignItems: 'center'}}>
           <MapPin color="#64748B" size={14} style={{marginRight: 4}}/>
@@ -440,7 +516,14 @@ export default function BattleScreen() {
             <ActivityIndicator size="small" color="#3B82F6" style={{ padding: 20 }} />
           ) : (
             <View style={styles.mapPanel}>
-              <MapView provider={PROVIDER_GOOGLE} style={styles.map} region={mapRegion} showsUserLocation={true}>
+              {/* 🌟 regionプロパティを外し、ピンチアウトを可能に。スタイルは動的切り替え */}
+              <MapView 
+                ref={mapRef}
+                provider={PROVIDER_GOOGLE} 
+                style={styles.map} 
+                showsUserLocation={true}
+                customMapStyle={getMapStyle()}
+              >
                 {detectedBoss && (
                   <Marker coordinate={{ latitude: detectedBoss.lat, longitude: detectedBoss.lng }}>
                     <View style={styles.bossMarker}><Text style={{ fontSize: 24 }}>👹</Text></View>
@@ -453,19 +536,36 @@ export default function BattleScreen() {
                 )}
                 {territories.map((t) => {
                   const isMine = t.player_id === myId;
+                  // 🌟 チームカラーの適用（無い場合のフォールバック含む）
+                  const teamColor = t.team_color || (isMine ? '#3B82F6' : '#EF4444');
+                  const teamName = t.team_name || (isMine ? '自陣' : '敵陣');
+                  const fillColor = makeHsla(teamColor, 0.3) || (isMine ? 'rgba(59, 130, 246, 0.3)' : 'rgba(239, 68, 68, 0.3)');
+                  
                   const coords = [
                     { latitude: t.start_lat, longitude: t.start_lng },
                     { latitude: t.start_lat, longitude: t.end_lng },
                     { latitude: t.end_lat, longitude: t.end_lng },
                     { latitude: t.end_lat, longitude: t.start_lng },
                   ];
+                  const centerLat = (t.start_lat + t.end_lat) / 2;
+                  const centerLng = (t.start_lng + t.end_lng) / 2;
+
                   return (
-                    <Polygon 
-                      key={t.id} coordinates={coords} 
-                      fillColor={isMine ? 'rgba(59, 130, 246, 0.3)' : 'rgba(239, 68, 68, 0.3)'}
-                      strokeColor={isMine ? '#2563EB' : '#DC2626'} strokeWidth={2}
-                      tappable={true} onPress={() => handleTerritoryPress(t)}
-                    />
+                    <React.Fragment key={`terr-group-${t.id}`}>
+                      {/* 🌟 陣地の塗りつぶし */}
+                      <Polygon 
+                        coordinates={coords} 
+                        fillColor={fillColor}
+                        strokeColor={teamColor} strokeWidth={2}
+                        tappable={true} onPress={() => handleTerritoryPress(t)}
+                      />
+                      {/* 🌟 陣地中央のチームマーカー */}
+                      <Marker coordinate={{ latitude: centerLat, longitude: centerLng }} onPress={() => handleTerritoryPress(t)}>
+                        <View style={[styles.teamBadge, { backgroundColor: teamColor }]}>
+                          <Text style={styles.teamBadgeText}>{teamName}</Text>
+                        </View>
+                      </Marker>
+                    </React.Fragment>
                   );
                 })}
               </MapView>
@@ -494,7 +594,7 @@ export default function BattleScreen() {
                       <Zap color="#FFF" size={18} style={{marginRight: 6}}/>
                       <Text style={styles.terrBtnText}>陣地を展開(終点確定)</Text>
                     </TouchableOpacity>
-                    <TouchableOpacity style={[styles.terrBtn, {backgroundColor: '#64748B', paddingHorizontal: 15}]} onPress={()=>setStartPoint(null)}>
+                    <TouchableOpacity style={[styles.terrBtn, {backgroundColor: '#64748B', paddingHorizontal: 15}]} onPress={cancelStartPoint}>
                       <X color="#FFF" size={18}/>
                     </TouchableOpacity>
                   </View>
@@ -544,7 +644,6 @@ export default function BattleScreen() {
               numColumns={2}
               style={{maxHeight: 280, marginBottom: 20}}
               renderItem={({item}) => {
-                // 特殊ルール中、通常カードは暗くする
                 const isRestricted = activeRule && activeRule.require_fixed_card && !item.is_fixed;
                 return (
                   <TouchableOpacity 
@@ -647,6 +746,11 @@ const styles = StyleSheet.create({
   map: { width: '100%', height: '100%' },
   bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.8)', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#EF4444' },
   startMarker: { backgroundColor: '#3B82F6', padding: 8, borderRadius: 20, borderWidth: 2, borderColor: '#FFF' },
+  
+  // 🌟 追加: チームマーカー用スタイル
+  teamBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2 },
+  teamBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
+
   bossInfoOverlay: { position: 'absolute', top: 15, left: 15, right: 15, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center' },
   bossHeader: { flex: 1 },
   sponsorTag: { color: '#EF4444', fontSize: 10, fontWeight: '800', backgroundColor: '#FFEEEE', paddingHorizontal: 8, borderRadius: 8, alignSelf: 'flex-start' },

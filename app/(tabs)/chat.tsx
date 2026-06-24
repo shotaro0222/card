@@ -199,9 +199,33 @@ export default function ChatTradeScreen() {
     );
   };
 
+  // --- 🌟 追加機能：チームカラー生成 ---
+  const generateUniqueColor = (existingColors: string[]) => {
+    let newColor = '';
+    let attempts = 0;
+    
+    // 既存色と被らない色が見つかるまで最大1000回試行
+    while (attempts < 1000) {
+      // 視認性の良い色をHSLでランダム生成 (色相:0-359, 彩度:60-100%, 輝度:40-70%)
+      const h = Math.floor(Math.random() * 360);
+      const s = Math.floor(Math.random() * 40) + 60;
+      const l = Math.floor(Math.random() * 30) + 40;
+      newColor = `hsl(${h}, ${s}%, ${l}%)`;
+      
+      // 生成した色が既存の色リストに含まれていなければ採用
+      if (!existingColors.includes(newColor)) {
+        return newColor;
+      }
+      attempts++;
+    }
+    // 試行回数を超えた場合のフォールバック（事実上ほぼ発生しない）
+    const fallbackH = Math.floor(Math.random() * 360);
+    return `hsl(${fallbackH}, 70%, 50%)`;
+  };
+
   // --- チーム管理アクション ---
   const handleCreateTeam = async () => {
-    console.log('--- チーム設立処理開始 ---'); // ログ出力
+    console.log('--- チーム設立処理開始 ---'); 
     if (!newTeamName.trim()) {
       console.log('チーム名が空のため中断');
       return;
@@ -209,10 +233,20 @@ export default function ChatTradeScreen() {
     
     setLoading(true);
     try {
+      // 💡 既存のチームカラーを取得して重複を防ぐ
+      const existingColors = availableTeams.map(t => t.team_color).filter(Boolean);
+      if (myTeamDetails?.team_color) existingColors.push(myTeamDetails.team_color);
+      const newTeamColor = generateUniqueColor(existingColors);
+
       console.log('teamsテーブルにデータを挿入中...');
+      // 💡 Supabaseのteamsテーブルに 'team_color' カラムが追加されている前提です
       const { data: teamData, error: teamError } = await supabase
         .from('teams')
-        .insert([{ name: newTeamName, description: newTeamDesc }])
+        .insert([{ 
+          name: newTeamName, 
+          description: newTeamDesc,
+          team_color: newTeamColor // 生成したカラーを一緒に保存
+        }])
         .select()
         .single();
       
@@ -223,7 +257,6 @@ export default function ChatTradeScreen() {
       console.log('teams挿入成功:', teamData);
 
       console.log('team_membersテーブルにデータを挿入中...');
-      // 修正: team_membersのインサート時のエラーもチェックする
       const { error: memberError } = await supabase
         .from('team_members')
         .insert([{ team_id: teamData.id, player_id: myId, role: 'leader', status: 'approved' }]);
@@ -241,10 +274,8 @@ export default function ChatTradeScreen() {
       initAllData();
     } catch (err: any) {
       console.error('チーム設立時の例外エラー:', err);
-      // エラーの詳細なメッセージをアラートに出す
       Alert.alert('エラー', `チーム作成に失敗しました\n${err.message || ''}`);
     } finally {
-      // 確実にローディングを解除する
       setLoading(false);
     }
   };
@@ -340,7 +371,11 @@ export default function ChatTradeScreen() {
             contentContainerStyle={{ paddingBottom: 100 }}
             renderItem={({ item }) => (
               <View style={styles.teamCard}>
-                <View style={{flex: 1}}>
+                {/* 💡 チームカラーのアイコン表示 */}
+                <View style={[styles.teamColorCircle, { backgroundColor: item.team_color || '#CBD5E1' }]}>
+                  <Text style={styles.teamColorInitials}>{item.name ? item.name.substring(0, 1) : '?'}</Text>
+                </View>
+                <View style={{flex: 1, marginLeft: 12}}>
                   <Text style={styles.teamCardName}>{item.name}</Text>
                   <Text style={styles.teamCardDesc}>{item.description || '説明なし'}</Text>
                 </View>
@@ -372,9 +407,13 @@ export default function ChatTradeScreen() {
       return (
         <>
           <View style={styles.teamHeaderBar}>
-            <View>
-              <Text style={styles.teamHeaderName}>{myTeamDetails?.name}</Text>
-              <Text style={styles.teamHeaderRole}>{myTeamRole === 'leader' ? '👑 リーダー' : '👤 メンバー'}</Text>
+            {/* 💡 自分の所属チームのカラーを表示 */}
+            <View style={styles.teamHeaderLeftArea}>
+              <View style={[styles.teamHeaderColorCircle, { backgroundColor: myTeamDetails?.team_color || '#CBD5E1' }]} />
+              <View style={{ marginLeft: 12 }}>
+                <Text style={styles.teamHeaderName}>{myTeamDetails?.name}</Text>
+                <Text style={styles.teamHeaderRole}>{myTeamRole === 'leader' ? '👑 リーダー' : '👤 メンバー'}</Text>
+              </View>
             </View>
             <TouchableOpacity style={styles.teamManageBtn} onPress={() => setTeamManageModalVisible(true)}>
               <Info color="#475569" size={24} />
@@ -616,7 +655,12 @@ const styles = StyleSheet.create({
   createTeamBtn: { flexDirection: 'row', backgroundColor: '#3B82F6', padding: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
   createTeamBtnText: { color: '#FFF', fontSize: 16, fontWeight: '900', marginLeft: 8 },
   sectionLabel: { fontSize: 14, fontWeight: '900', color: '#475569', marginBottom: 12 },
+  
+  // 💡 追加: チームリスト内のカラーアイコン用スタイル
   teamCard: { backgroundColor: '#FFF', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', flexDirection: 'row', alignItems: 'center', marginBottom: 12 },
+  teamColorCircle: { width: 44, height: 44, borderRadius: 22, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: {width: 0, height: 2}, shadowOpacity: 0.1, shadowRadius: 3 },
+  teamColorInitials: { color: '#FFFFFF', fontSize: 20, fontWeight: '900' },
+  
   teamCardName: { fontSize: 16, fontWeight: '900', color: '#0F172A', marginBottom: 4 },
   teamCardDesc: { fontSize: 12, color: '#64748B' },
   joinBtn: { backgroundColor: '#F1F5F9', paddingVertical: 8, paddingHorizontal: 12, borderRadius: 8 },
@@ -629,7 +673,10 @@ const styles = StyleSheet.create({
   cancelReqBtn: { backgroundColor: '#FEE2E2', paddingVertical: 12, paddingHorizontal: 24, borderRadius: 12 },
   cancelReqBtnText: { color: '#EF4444', fontWeight: '800' },
 
+  // 💡 追加: 自分のチームヘッダー用スタイル
   teamHeaderBar: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', backgroundColor: '#FFF', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0' },
+  teamHeaderLeftArea: { flexDirection: 'row', alignItems: 'center' },
+  teamHeaderColorCircle: { width: 48, height: 48, borderRadius: 24, borderWidth: 3, borderColor: '#F1F5F9' },
   teamHeaderName: { fontSize: 18, fontWeight: '900', color: '#0F172A' },
   teamHeaderRole: { fontSize: 12, fontWeight: '700', color: '#64748B', marginTop: 2 },
   teamManageBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 },
