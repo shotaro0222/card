@@ -1,5 +1,6 @@
 import React, { useState, useCallback } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, TextInput, Image, Platform, ActivityIndicator } from 'react-native';
+import MapView, { Marker, Circle } from 'react-native-maps'; // マップ表示用に追加
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -293,17 +294,24 @@ export default function AdminDashboard() {
     setRaritiesList(rars);
   };
 
-  // --- 新規データフェッチ群 ---
+  // --- 修正: チームデータ取得（エラーフォールバック＆表示名の統一） ---
   const fetchTeams = async () => {
     try {
-      // チーム情報とメンバー数などを取得。実際のスキーマに合わせて調整可能。
-      const { data, error } = await supabase.from('teams').select('*, profiles!teams_leader_id_fkey(player_name)').order('created_at', { ascending: false });
+      let { data, error } = await supabase.from('teams').select('*, profiles(player_name)').order('created_at', { ascending: false });
+      
+      if (error) {
+        // リレーションエラー等が出た場合のフォールバック
+        const fallback = await supabase.from('teams').select('*').order('created_at', { ascending: false });
+        data = fallback.data;
+      }
+      
       if (data) {
-        // 擬似スコアリング: メンバー数やポイントが存在すると仮定して算出
         const scoredTeams = data.map((t: any) => ({
           ...t,
+          // カラム名が 'name' か 'team_name' でブレている可能性への対応
+          display_name: t.name || t.team_name || '名称未設定',
           activity_score: (t.member_count || 1) * 100 + (t.total_points || Math.floor(Math.random() * 500)),
-        })).sort((a: any, b: any) => b.activity_score - a.activity_score); // スコア順でソート
+        })).sort((a: any, b: any) => b.activity_score - a.activity_score);
         setTeams(scoredTeams);
       }
     } catch (e) { console.log('Team fetch error:', e); }
@@ -311,7 +319,6 @@ export default function AdminDashboard() {
 
   const fetchTerritories = async () => {
     try {
-      // profiles との JOIN を試みる
       let { data, error } = await supabase.from('territories').select('*, profiles(player_name)').order('created_at', { ascending: false });
       if (error) {
         const fallback = await supabase.from('territories').select('*').order('created_at', { ascending: false });
@@ -771,7 +778,6 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // 💡 WebAR動的構成の登録・上書き実行 (カードステータスも紐付けて保存)
   const handleUpdateArConfig = async () => {
     if (arClientType === 'client_specific' && !arTargetClientId) {
       Alert.alert('エラー', '個別指定時は対象のクライアントUUIDが必要です。');
@@ -791,7 +797,6 @@ export default function AdminDashboard() {
 
     try {
       if (arClientType === 'client_specific') {
-        // 個別店舗への紐付け (promo_linksに ar_base_stats, ar_win_statsカラムが存在する想定)
         const { error } = await supabase.from('promo_links').update({
           ar_asset_url: arAssetCustomUrl || null,
           ar_win_asset_url: arWinAssetUrl || null,
@@ -806,7 +811,6 @@ export default function AdminDashboard() {
         if (error) throw error;
         Alert.alert('同期成功', `店舗 [${arTargetClientId.substring(0,8)}] の確率・アセットおよびカードステータスを個別同期しました。`);
       } else {
-        // グローバル設定への紐付け
         const config_data = {
           arClientType, arTargetClientId: 'ALL',
           arDisplayMode, arAssetCustomUrl, arBtnPlacement, arActionText, arDeployMode,
@@ -878,7 +882,6 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', `エクスポート失敗: ${e.message}`); }
   };
 
-  // --- 新規追加: チーム管理アクション ---
   const handleDeleteTeam = async (id: string, name: string) => {
     Alert.alert('チーム解散確認', `本当にチーム「${name}」を強制解散させますか？`, [
       { text: 'キャンセル', style: 'cancel' },
@@ -893,12 +896,12 @@ export default function AdminDashboard() {
     ]);
   };
 
+  // 修正: 表示名（display_name）で検索できるように対応
   const filteredTeams = teams.filter(t => 
-    (t.name && t.name.toLowerCase().includes(teamSearchQuery.toLowerCase())) || 
+    (t.display_name && t.display_name.toLowerCase().includes(teamSearchQuery.toLowerCase())) || 
     (t.id && t.id.toLowerCase().includes(teamSearchQuery.toLowerCase()))
   );
 
-  // --- 新規追加: 陣取り(テリトリー)管理アクション ---
   const handleDeleteTerritory = async (id: string) => {
     Alert.alert('陣地削除確認', `この陣地を強制的に撤去しますか？\n(不適切な場所などの対処)`, [
       { text: 'キャンセル', style: 'cancel' },
@@ -913,7 +916,6 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // --- 新規追加: 特殊ルール管理アクション ---
   const handleSaveRule = async () => {
     if (!ruleName || !ruleKeyword) return Alert.alert('エラー', 'ルール名と対象キーワードを入力してください');
     setLoading(true);
@@ -943,6 +945,74 @@ export default function AdminDashboard() {
     ]);
   };
 
+  // ==========================================
+  // ★追加: 陣地のチームカラー取得関数
+  // ==========================================
+  const getTeamColor = (ownerId: string | null) => {
+    if (!ownerId) return 'rgba(100, 116, 139, 0.5)'; // グレー
+    const colors = ['rgba(239, 68, 68, 0.5)', 'rgba(59, 130, 246, 0.5)', 'rgba(16, 185, 129, 0.5)', 'rgba(245, 158, 11, 0.5)', 'rgba(139, 92, 246, 0.5)'];
+    // 簡易的にIDのハッシュから色を割り当てる（将来的にデータベースで色を管理する場合はここを変更）
+    let hash = 0;
+    for (let i = 0; i < ownerId.length; i++) {
+      hash = ownerId.charCodeAt(i) + ((hash << 5) - hash);
+    }
+    return colors[Math.abs(hash) % colors.length];
+  };
+
+  // ==========================================
+  // ★追加: PC（Web環境）用の Leaflet 描画HTML
+  // ==========================================
+  const getLeafletHtml = (territoriesList: any[]) => `
+    <!DOCTYPE html>
+    <html>
+    <head>
+      <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no" />
+      <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+      <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+      <style>
+        body { margin: 0; padding: 0; }
+        #map { width: 100vw; height: 100vh; }
+      </style>
+    </head>
+    <body>
+      <div id="map"></div>
+      <script>
+        var map = L.map('map').setView([${territoriesList.length > 0 && territoriesList[0].latitude ? territoriesList[0].latitude : 35.6983}, ${territoriesList.length > 0 && territoriesList[0].longitude ? territoriesList[0].longitude : 139.4130}], 13);
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+          maxZoom: 19,
+          attribution: '© OpenStreetMap'
+        }).addTo(map);
+
+        var getTeamColor = function(ownerId) {
+          if (!ownerId) return 'rgba(100, 116, 139, 0.5)';
+          var colors = ['rgba(239, 68, 68, 0.5)', 'rgba(59, 130, 246, 0.5)', 'rgba(16, 185, 129, 0.5)', 'rgba(245, 158, 11, 0.5)', 'rgba(139, 92, 246, 0.5)'];
+          var hash = 0;
+          for (var i = 0; i < ownerId.length; i++) {
+            hash = ownerId.charCodeAt(i) + ((hash << 5) - hash);
+          }
+          return colors[Math.abs(hash) % colors.length];
+        };
+
+        var territories = ${JSON.stringify(territoriesList)};
+        territories.forEach(function(t) {
+          if (t.latitude && t.longitude) {
+            var color = getTeamColor(t.owner_id);
+            var borderColor = color.replace('0.5)', '1.0)');
+            L.circle([t.latitude, t.longitude], {
+              color: borderColor,
+              fillColor: color,
+              fillOpacity: 0.5,
+              radius: t.radius || 500
+            }).addTo(map);
+            L.marker([t.latitude, t.longitude]).addTo(map)
+              .bindPopup("<b>所有者: " + (t.profiles?.player_name || (t.owner_id ? t.owner_id.substring(0,8) : '不明')) + "</b><br>防衛力: " + (t.defense_power || 0));
+          }
+        });
+      </script>
+    </body>
+    </html>
+  `;
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.header}>
@@ -959,19 +1029,16 @@ export default function AdminDashboard() {
           <Text style={[styles.tabText, activeTab === 'users' && styles.activeTabText]}>ユーザー</Text>
         </TouchableOpacity>
         
-        {/* 新規タブ: チーム管理 */}
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'teams' && styles.activeTabBtn]} onPress={() => setActiveTab('teams')}>
           <Shield color={activeTab === 'teams' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'teams' && styles.activeTabText]}>チーム</Text>
         </TouchableOpacity>
         
-        {/* 新規タブ: 陣取り管理 */}
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'territories' && styles.activeTabBtn]} onPress={() => setActiveTab('territories')}>
           <Flag color={activeTab === 'territories' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'territories' && styles.activeTabText]}>陣取り監視</Text>
         </TouchableOpacity>
         
-        {/* 新規タブ: ルール管理 */}
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'rules' && styles.activeTabBtn]} onPress={() => setActiveTab('rules')}>
           <ScrollText color={activeTab === 'rules' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'rules' && styles.activeTabText]}>ルール</Text>
@@ -1059,7 +1126,7 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 新規: 9. チーム管理 ===================== */}
+        {/* ===================== 9. チーム管理 ===================== */}
         {activeTab === 'teams' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>チーム管理・スコアリング</Text>
@@ -1083,7 +1150,8 @@ export default function AdminDashboard() {
                   <View style={{flex: 1}}>
                     <View style={styles.row}>
                       <Text style={{fontWeight: '900', color: '#3B82F6', marginRight: 8, fontSize: 16}}>#{index + 1}</Text>
-                      <Text style={styles.listItemTitle}>{t.name || '名称未設定'}</Text>
+                      {/* 修正: display_name を使用 */}
+                      <Text style={styles.listItemTitle}>{t.display_name}</Text>
                     </View>
                     <Text style={styles.listItemSub} numberOfLines={1}>{t.description || '説明なし'}</Text>
                     <Text style={[styles.listItemSub, {color: '#0F172A', marginTop: 4}]}>
@@ -1091,7 +1159,7 @@ export default function AdminDashboard() {
                     </Text>
                     <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>ID: {t.id}</Text>
                   </View>
-                  <TouchableOpacity style={[styles.actionBtn, styles.banBtn]} onPress={() => handleDeleteTeam(t.id, t.name)} disabled={loading}>
+                  <TouchableOpacity style={[styles.actionBtn, styles.banBtn]} onPress={() => handleDeleteTeam(t.id, t.display_name)} disabled={loading}>
                     <Text style={styles.actionBtnText}>解散</Text>
                   </TouchableOpacity>
                 </View>
@@ -1100,12 +1168,68 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 新規: 10. 陣取りゲーム(テリトリー)管理 ===================== */}
+        {/* ===================== 10. 陣取りゲーム(テリトリー)管理 ===================== */}
         {activeTab === 'territories' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>陣取り状況監視＆管理</Text>
-            <Text style={{color:'#64748B', fontSize: 12, marginBottom: 16}}>マップ上に配置された陣地を監視し、不適切な場所にある陣地を強制的に撤去できます。</Text>
+            <Text style={{color:'#64748B', fontSize: 12, marginBottom: 16}}>
+              マップ上に配置された陣地を監視し、不適切な場所にある陣地を強制的に撤去できます。
+              ※PC・モバイルの両方でピンチアウト・ズーム操作による詳細マップ確認が可能です。
+            </Text>
             
+            {/* ★追加: マップ表示ビュー（Web / ネイティブハイブリッド対応） */}
+            <View style={{ height: 400, borderRadius: 12, overflow: 'hidden', marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0' }}>
+              {Platform.OS === 'web' ? (
+                <iframe 
+                  srcDoc={getLeafletHtml(territories)} 
+                  style={{ width: '100%', height: '100%', border: 'none' }} 
+                  title="Territories Map"
+                />
+              ) : (
+                <MapView
+                  style={{ flex: 1 }}
+                  initialRegion={{
+                    latitude: territories.length > 0 && territories[0].latitude ? territories[0].latitude : 35.6983,
+                    longitude: territories.length > 0 && territories[0].longitude ? territories[0].longitude : 139.4130,
+                    latitudeDelta: 0.1,
+                    longitudeDelta: 0.1,
+                  }}
+                  zoomEnabled={true}
+                  scrollEnabled={true}
+                  pitchEnabled={true}
+                >
+                  {territories.map((t) => {
+                    if (t.latitude && t.longitude) {
+                      return (
+                        <Circle
+                          key={`circle-${t.id}`}
+                          center={{ latitude: t.latitude, longitude: t.longitude }}
+                          radius={t.radius || 500}
+                          fillColor={getTeamColor(t.owner_id)}
+                          strokeColor={getTeamColor(t.owner_id).replace('0.5', '1.0')}
+                          strokeWidth={2}
+                        />
+                      );
+                    }
+                    return null;
+                  })}
+                  {territories.map((t) => {
+                    if (t.latitude && t.longitude) {
+                      return (
+                        <Marker
+                          key={`marker-${t.id}`}
+                          coordinate={{ latitude: t.latitude, longitude: t.longitude }}
+                          title={`所有者: ${t.profiles?.player_name || t.owner_id?.substring(0,8)}`}
+                          description={`防衛力: ${t.defense_power || 0}`}
+                        />
+                      );
+                    }
+                    return null;
+                  })}
+                </MapView>
+              )}
+            </View>
+
             {territories.length === 0 ? (
               <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>現在確保されている陣地はありません</Text>
             ) : (
@@ -1126,7 +1250,7 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 新規: 11. 特殊ルール・協賛縛り管理 ===================== */}
+        {/* ===================== 11. 特殊ルール・協賛縛り管理 ===================== */}
         {activeTab === 'rules' && (
           <View style={styles.card}>
             <Text style={styles.cardTitle}>特殊エリア・協賛縛りルール設定</Text>
