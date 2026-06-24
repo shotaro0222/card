@@ -36,23 +36,18 @@ if (Platform.OS !== 'web') {
   );
 }
 
-// 属性相性テーブル
-const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = {
-  '火': { strong: ['木', 'サイバー', 'プラスチック'], weak: ['水', '黄金', '虚無'] },
-  '水': { strong: ['火', '黄金', '資本'], weak: ['雷', 'プラスチック', '大気汚染'] },
-  '雷': { strong: ['水', 'サイバー', '機械'], weak: ['木', '虚無', '時間'] },
-  'サイバー': { strong: ['資本', 'プラスチック', '時間'], weak: ['火', '雷', '混沌'] },
-  '資本': { strong: ['社畜', '黄金', '火'], weak: ['サイバー', '光', '虚無'] },
-  'カフェイン': { strong: ['社畜', 'サイバー', '雷'], weak: ['水', '虚無', '時間'] },
-  '社畜': { strong: ['資本', 'プラスチック', '火'], weak: ['カフェイン', '混沌', '光'] },
-  '虚無': { strong: ['火', '雷', '資本'], weak: ['光', '量子', '時間'] },
-};
+// 🌟 動的属性テーブル用の型定義
+type ElementRelationMap = Record<string, { strong: string[], weak: string[] }>;
 
-function getDamageMultiplier(attackerEl: string, defenderEl: string): { multiplier: number, label: string } {
-  const relation = ELEMENT_RELATIONS[attackerEl];
+// 🌟 DBから取得した相性テーブルを参照して計算するように変更
+function getDamageMultiplier(attackerEl: string, defenderEl: string, relations: ElementRelationMap): { multiplier: number, label: string } {
+  const relation = relations[attackerEl];
+  // 属性がDBに未登録、または無属性の場合は等倍
   if (!relation) return { multiplier: 1.0, label: '' }; 
-  if (relation.strong.includes(defenderEl)) return { multiplier: 1.5, label: '💥【有利】' }; 
-  if (relation.weak.includes(defenderEl)) return { multiplier: 0.5, label: '🛡️【不利】' };
+  
+  if (relation.strong && relation.strong.includes(defenderEl)) return { multiplier: 1.5, label: '💥【有利】' }; 
+  if (relation.weak && relation.weak.includes(defenderEl)) return { multiplier: 0.5, label: '🛡️【不利】' };
+  
   return { multiplier: 1.0, label: '' };
 }
 
@@ -91,6 +86,9 @@ export default function BattleScreen() {
   const [battleLog, setBattleLog] = useState<any[]>([]);
   const [isBattling, setIsBattling] = useState(false);
   
+  // 🌟 DBから取得した属性相性を保持するState
+  const [elementRelations, setElementRelations] = useState<ElementRelationMap>({});
+  
   // マップ・ボス・GPS関連
   const [loadingMap, setLoadingMap] = useState(false);
   const [detectedBoss, setDetectedBoss] = useState<any>(null);
@@ -112,7 +110,7 @@ export default function BattleScreen() {
   const [activeRule, setActiveRule] = useState<any>(null);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
 
-  // 🌟 追加：エフェクト・非同期リザルト用ステート
+  // エフェクト・非同期リザルト用ステート
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [isAsyncResultModalVisible, setAsyncResultModalVisible] = useState(false);
   const [asyncResultData, setAsyncResultData] = useState<any>(null);
@@ -133,6 +131,26 @@ export default function BattleScreen() {
 
   const initBattleData = async () => {
     setLoadingMap(true);
+
+    // 🌟 属性相性テーブルのフェッチ (Supabaseから)
+    try {
+      const { data: relationsData, error: relError } = await supabase.from('element_relations').select('*');
+      if (!relError && relationsData) {
+        const formattedMap: ElementRelationMap = {};
+        relationsData.forEach((row: any) => {
+          formattedMap[row.element_name] = {
+            strong: row.strong_against || [],
+            weak: row.weak_against || []
+          };
+        });
+        setElementRelations(formattedMap);
+      } else {
+        console.warn("属性相性テーブルが取得できませんでした", relError);
+      }
+    } catch(err) {
+      console.warn("属性テーブル取得エラー", err);
+    }
+
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       setMyId(user.id);
@@ -444,13 +462,15 @@ export default function BattleScreen() {
     let p1Hp = p1.status_hp; let p2Hp = p2.status_hp;
 
     for (let turn = 1; turn <= 5; turn++) {
-      const res1 = getDamageMultiplier(first.element || '無', second.element || '無');
+      // 🌟 DBから取得した相性を渡す
+      const res1 = getDamageMultiplier(first.element || '無', second.element || '無', elementRelations);
       let dmg1 = Math.floor((Math.max(1, first.status_atk - Math.floor(second.status_def / 2)) + Math.floor(Math.random() * 10)) * res1.multiplier);
       if (first === p1) p2Hp -= dmg1; else p1Hp -= dmg1;
       log.push({ text: `[T-${turn}] ${first.card_name}の攻撃！\n${dmg1} のダメージ！${res1.label}`, isSpecial: false });
       if (p1Hp <= 0 || p2Hp <= 0) { winner = p1Hp <= 0 ? p2 : p1; break; }
 
-      const res2 = getDamageMultiplier(second.element || '無', first.element || '無');
+      // 🌟 DBから取得した相性を渡す
+      const res2 = getDamageMultiplier(second.element || '無', first.element || '無', elementRelations);
       let dmg2 = Math.floor((Math.max(1, second.status_atk - Math.floor(first.status_def / 2)) + Math.floor(Math.random() * 10)) * res2.multiplier);
       if (second === p1) p2Hp -= dmg2; else p1Hp -= dmg2;
       log.push({ text: `[T-${turn}] ${second.card_name}の攻撃！\n${dmg2} のダメージ！${res2.label}`, isSpecial: false });
@@ -468,7 +488,7 @@ export default function BattleScreen() {
   };
 
   // ==========================================
-  // 🌟 追加：非同期通信でのボス討伐 (クイックバトル)
+  // 🌟 非同期通信でのボス討伐 (クイックバトル)
   // ==========================================
   const startAsyncBossBattle = async () => {
     if (!detectedBoss) return;
@@ -481,10 +501,10 @@ export default function BattleScreen() {
     setIsBattling(true);
     setBattleLog([]);
 
-    // 非同期通信のシミュレーション（意図的な遅延による演出）
+    // 非同期通信のシミュレーション
     await new Promise(resolve => setTimeout(resolve, 2000));
 
-    // デッキ総合力（手持ち上位5枚の合計値などで算出）
+    // デッキ総合力算出
     const sortedCards = [...myHighRareCards].sort((a, b) => b.status_total - a.status_total);
     const topCards = sortedCards.slice(0, 5);
     const myDeckPower = topCards.reduce((sum, card) => sum + card.status_total, 0);
@@ -492,13 +512,11 @@ export default function BattleScreen() {
     // ボス総合力
     const bossPower = detectedBoss.hp + detectedBoss.atk + detectedBoss.def + (detectedBoss.spd || 0);
 
-    // 勝ち負けの判定 (デッキ強さ VS ボスステータス) ＋ 乱数でゆらぎ
     const myFinalPower = Math.floor(myDeckPower * (0.8 + Math.random() * 0.4));
     const bossFinalPower = Math.floor(bossPower * (0.9 + Math.random() * 0.2));
 
     const isWin = myFinalPower >= bossFinalPower;
 
-    // リザルトデータをセット
     setAsyncResultData({
       isWin,
       myDeckPower,
@@ -547,13 +565,12 @@ export default function BattleScreen() {
     return [];
   };
 
-  // 🌟 追加：ボスのステータスによるエフェクト判定
   const getBossFeatureStyle = (boss: any) => {
     const stats = { HP: boss.hp, ATK: boss.atk, DEF: boss.def, SPD: boss.spd || 0 };
     const maxStat = Object.keys(stats).reduce((a, b) => stats[a as keyof typeof stats] > stats[b as keyof typeof stats] ? a : b);
     const total = boss.hp + boss.atk + boss.def + (boss.spd || 0);
     
-    let color = '#EF4444'; // default
+    let color = '#EF4444'; 
     let icon = <Flame color="#FFF" size={24} />;
     let label = '攻撃特化';
 
@@ -675,7 +692,7 @@ export default function BattleScreen() {
                         </TouchableOpacity>
                         <TouchableOpacity style={[styles.bossAsyncBtn, {borderColor: feature.color}]} onPress={startAsyncBossBattle}>
                           <FastZap color={feature.color} size={16} style={{marginRight: 4}}/>
-                          <Text style={[styles.bossBtnText, {color: feature.color}]}>クイックバトル</Text>
+                          <Text style={[styles.bossBtnText, {color: feature.color}]}>デッキ討伐</Text>
                         </TouchableOpacity>
                       </View>
                     )}
@@ -884,13 +901,11 @@ const styles = StyleSheet.create({
   webMapFallback: { flex: 1, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   map: { width: '100%', height: '100%' },
   
-  // 🌟 マーカー・バッジ系
   bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: 5, borderRadius: 30, borderWidth: 3 },
   startMarker: { backgroundColor: '#3B82F6', padding: 8, borderRadius: 20, borderWidth: 2, borderColor: '#FFF' },
   teamBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2 },
   teamBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
 
-  // 🌟 ボス情報・ボタンUI
   bossInfoOverlay: { position: 'absolute', top: 15, left: 15, right: 15, backgroundColor: 'rgba(255, 255, 255, 0.98)', padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0' },
   bossHeader: { marginBottom: 10 },
   sponsorTag: { fontSize: 10, fontWeight: '900', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginRight: 6 },
@@ -940,7 +955,6 @@ const styles = StyleSheet.create({
   cancelBtn: { backgroundColor: '#F1F5F9', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
   cancelBtnText: { color: '#475569', fontWeight: '800', fontSize: 15 },
 
-  // 🌟 追加：非同期リザルト画面用
   resultMatchBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginVertical: 20, padding: 16, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0' },
   resultSide: { flex: 1, alignItems: 'center' },
   resultVS: { fontSize: 20, fontWeight: '900', color: '#94A3B8', fontStyle: 'italic', marginHorizontal: 10 },
