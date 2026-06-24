@@ -1,9 +1,9 @@
 import React, { useState, useCallback, useEffect, useRef } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView, Platform, FlatList, Image } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, ScrollView, Alert, ActivityIndicator, Modal, SafeAreaView, Platform, FlatList, Image, Animated, Easing } from 'react-native';
 import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
-import { ShieldAlert, Trophy, Activity, Swords, Map as MapIcon, Flag, Zap, X, MapPin, Clock } from 'lucide-react-native';
+import { ShieldAlert, Trophy, Activity, Swords, Map as MapIcon, Flag, Zap, X, MapPin, Clock, Flame, Shield, Heart, Zap as FastZap } from 'lucide-react-native';
 
 // Web環境でのクラッシュを防ぐ動的インポート
 let MapView: any;
@@ -56,7 +56,7 @@ function getDamageMultiplier(attackerEl: string, defenderEl: string): { multipli
   return { multiplier: 1.0, label: '' };
 }
 
-// 🌟 マップのカスタムスタイル（表示変更用）
+// マップのカスタムスタイル
 const BOSS_MAP_STYLE = [
   { "elementType": "geometry", "stylers": [{ "color": "#241010" }] },
   { "elementType": "labels.text.fill", "stylers": [{ "color": "#8f5a5a" }] },
@@ -72,7 +72,6 @@ const TERRITORY_MAP_STYLE = [
   { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#000000" }] }
 ];
 
-// 🌟 HSLカラーをHSLA(透明度付き)に変換するヘルパー
 const makeHsla = (color: string | null, alpha: number) => {
   if (!color) return null;
   if (color.startsWith('hsl(')) return color.replace('hsl(', 'hsla(').replace(')', `, ${alpha})`);
@@ -84,10 +83,10 @@ const makeHsla = (color: string | null, alpha: number) => {
 };
 
 export default function BattleScreen() {
-  const mapRef = useRef<any>(null); // 🌟 マップ制御用のRefを追加
+  const mapRef = useRef<any>(null);
   const [myId, setMyId] = useState<string | null>(null);
   const [myProfile, setMyProfile] = useState<any>(null);
-  const [myTeam, setMyTeam] = useState<any>(null); // 🌟 所属チーム情報
+  const [myTeam, setMyTeam] = useState<any>(null);
   const [playerStats, setPlayerStats] = useState({ totalWins: 0, bossDefeats: 0 });
   const [battleLog, setBattleLog] = useState<any[]>([]);
   const [isBattling, setIsBattling] = useState(false);
@@ -97,7 +96,7 @@ export default function BattleScreen() {
   const [detectedBoss, setDetectedBoss] = useState<any>(null);
   const [currentAddress, setCurrentAddress] = useState<string>('現在地を取得中...');
   const [currentPostalCode, setCurrentPostalCode] = useState<string>('');
-  const [mapMode, setMapMode] = useState<'normal' | 'boss' | 'territory'>('normal'); // 🌟 マップの表示モード
+  const [mapMode, setMapMode] = useState<'normal' | 'boss' | 'territory'>('normal');
   
   // 陣取り関連
   const [territories, setTerritories] = useState<any[]>([]);
@@ -109,9 +108,24 @@ export default function BattleScreen() {
   const [myHighRareCards, setMyHighRareCards] = useState<any[]>([]);
   const [selectedSacrifices, setSelectedSacrifices] = useState<string[]>([]);
   
-  // 特殊ルール（協賛カード限定エリア等）
+  // 特殊ルール
   const [activeRule, setActiveRule] = useState<any>(null);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
+
+  // 🌟 追加：エフェクト・非同期リザルト用ステート
+  const pulseAnim = useRef(new Animated.Value(1)).current;
+  const [isAsyncResultModalVisible, setAsyncResultModalVisible] = useState(false);
+  const [asyncResultData, setAsyncResultData] = useState<any>(null);
+
+  useEffect(() => {
+    // ボス出現時などの警告パルスアニメーション
+    Animated.loop(
+      Animated.sequence([
+        Animated.timing(pulseAnim, { toValue: 1.05, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true }),
+        Animated.timing(pulseAnim, { toValue: 1, duration: 600, easing: Easing.inOut(Easing.ease), useNativeDriver: true })
+      ])
+    ).start();
+  }, [pulseAnim]);
 
   useFocusEffect(
     useCallback(() => { initBattleData(); }, [])
@@ -128,7 +142,6 @@ export default function BattleScreen() {
         setPlayerStats({ totalWins: profile.total_wins, bossDefeats: profile.boss_defeats });
       }
 
-      // 🌟 チーム情報の取得（陣地の色分け・登録用）
       const { data: memberData } = await supabase
         .from('team_members')
         .select('*, teams(*)')
@@ -158,7 +171,6 @@ export default function BattleScreen() {
       const { latitude, longitude } = location.coords;
       setCurrentLocation({ lat: latitude, lng: longitude });
 
-      // 1. 逆ジオコーディング（住所取得）
       let addressString = '不明なエリア';
       let postal = '';
       if (Platform.OS !== 'web') {
@@ -173,10 +185,8 @@ export default function BattleScreen() {
         }
       }
 
-      // 2. 特殊ルールの判定
       await evaluateSpecialRules(addressString, postal);
 
-      // 3. ボス検知
       const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true).not('target_lat', 'is', null);
       let foundBoss = null;
       if (campaigns) {
@@ -188,18 +198,14 @@ export default function BattleScreen() {
       }
       setDetectedBoss(foundBoss);
 
-      // 4. 周辺の陣地取得
       const { data: terrData } = await supabase.from('territories').select('*').order('created_at', { ascending: false }).limit(50);
       if (terrData) setTerritories(terrData);
 
-      // 🌟 カメラと表示モードの自動調整（ピンチアウト阻害を防ぐため animateToRegion を使用）
       if (foundBoss) {
         setMapMode('boss');
-        // ボスがいる場合は少し広域を見せる
         mapRef.current?.animateToRegion({ latitude, longitude, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 1000);
       } else {
         setMapMode('normal');
-        // 平常時は現在地付近をズーム（初回のみ）
         mapRef.current?.animateToRegion({ latitude, longitude, latitudeDelta: 0.005, longitudeDelta: 0.005 }, 1000);
       }
 
@@ -240,14 +246,11 @@ export default function BattleScreen() {
   const markStartPoint = () => {
     if (!currentLocation) return;
     setStartPoint({ lat: currentLocation.lat, lng: currentLocation.lng, address: currentAddress });
-    
-    // 🌟 陣取り開始時にマップスタイルを変更し、カメラを引いて領域を見やすくする
     setMapMode('territory');
     mapRef.current?.animateToRegion({ 
       latitude: currentLocation.lat, longitude: currentLocation.lng, 
       latitudeDelta: 0.02, longitudeDelta: 0.02 
     }, 1000);
-
     Alert.alert('起点マーカー設置', `「${currentAddress}」を起点として記録しました。別の場所に移動して陣地を展開してください。`);
   };
 
@@ -293,7 +296,6 @@ export default function BattleScreen() {
               await supabase.from('territories').insert([{
                 player_id: myId,
                 player_name: myProfile?.player_name || '匿名エージェント',
-                // 🌟 チーム情報を保存してマップで色分けできるようにする
                 team_id: myTeam?.id || null,
                 team_name: myTeam?.name || '',
                 team_color: myTeam?.team_color || '',
@@ -307,7 +309,7 @@ export default function BattleScreen() {
               await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
               Alert.alert('展開完了', '強大な陣地をマップ上に展開しました！');
               setTerritoryModalVisible(false);
-              cancelStartPoint(); // モードとカメラを元に戻す
+              cancelStartPoint();
               initBattleData();
             } catch (err) { Alert.alert('エラー', '通信に失敗しました。'); }
             setLoadingMap(false);
@@ -343,7 +345,6 @@ export default function BattleScreen() {
             try {
               await supabase.from('territories').update({
                 player_id: myId, player_name: myProfile?.player_name || '匿名',
-                // 🌟 上書き時に自分のチームカラーで染め上げる
                 team_id: myTeam?.id || null,
                 team_name: myTeam?.name || '',
                 team_color: myTeam?.team_color || '',
@@ -384,7 +385,7 @@ export default function BattleScreen() {
   };
 
   // ==========================================
-  // ⚔️ 既存バトルシステム
+  // ⚔️ 既存バトルシステム (同期・ターン制)
   // ==========================================
   const startPvpBattle = async () => {
     setIsBattling(true); setBattleLog([]);
@@ -417,7 +418,7 @@ export default function BattleScreen() {
     
     const bossMonster = { 
       id: 'BOSS', card_name: `【エリアボス】${detectedBoss.name}`, skill_name: 'カタストロフィ', 
-      status_hp: detectedBoss.hp, status_atk: detectedBoss.atk, status_def: detectedBoss.def, status_spd: 40, 
+      status_hp: detectedBoss.hp, status_atk: detectedBoss.atk, status_def: detectedBoss.def, status_spd: detectedBoss.spd || 40, 
       level: 10, rarity: '👑', element: detectedBoss.element || '闇'
     };
     
@@ -466,6 +467,67 @@ export default function BattleScreen() {
     }, 800);
   };
 
+  // ==========================================
+  // 🌟 追加：非同期通信でのボス討伐 (クイックバトル)
+  // ==========================================
+  const startAsyncBossBattle = async () => {
+    if (!detectedBoss) return;
+    
+    if (myHighRareCards.length === 0) {
+      Alert.alert('デッキエラー', '討伐に派遣できるカードがありません。手持ちにカードを用意してください。');
+      return;
+    }
+
+    setIsBattling(true);
+    setBattleLog([]);
+
+    // 非同期通信のシミュレーション（意図的な遅延による演出）
+    await new Promise(resolve => setTimeout(resolve, 2000));
+
+    // デッキ総合力（手持ち上位5枚の合計値などで算出）
+    const sortedCards = [...myHighRareCards].sort((a, b) => b.status_total - a.status_total);
+    const topCards = sortedCards.slice(0, 5);
+    const myDeckPower = topCards.reduce((sum, card) => sum + card.status_total, 0);
+
+    // ボス総合力
+    const bossPower = detectedBoss.hp + detectedBoss.atk + detectedBoss.def + (detectedBoss.spd || 0);
+
+    // 勝ち負けの判定 (デッキ強さ VS ボスステータス) ＋ 乱数でゆらぎ
+    const myFinalPower = Math.floor(myDeckPower * (0.8 + Math.random() * 0.4));
+    const bossFinalPower = Math.floor(bossPower * (0.9 + Math.random() * 0.2));
+
+    const isWin = myFinalPower >= bossFinalPower;
+
+    // リザルトデータをセット
+    setAsyncResultData({
+      isWin,
+      myDeckPower,
+      myFinalPower,
+      bossPower,
+      bossFinalPower,
+      bossName: detectedBoss.name
+    });
+
+    if (isWin) {
+      const newDefs = playerStats.bossDefeats + 1;
+      await supabase.from('profiles').update({ boss_defeats: newDefs }).eq('id', myId);
+      setPlayerStats(prev => ({ ...prev, bossDefeats: newDefs }));
+      
+      const reward = detectedBoss.fixed_cards;
+      if (reward) {
+        await supabase.from('cards').insert([{ 
+          player_id: myId, card_name: reward.card_name, image_url: reward.image_url, 
+          status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd, 
+          rarity: "P", is_fixed: true, element: detectedBoss.element 
+        }]);
+      }
+    }
+    
+    setIsBattling(false);
+    setAsyncResultModalVisible(true);
+  };
+
+
   const toggleSacrifice = (item: any) => {
     if (activeRule && activeRule.require_fixed_card && !item.is_fixed) {
       Alert.alert('ルール違反', `現在このエリアは「${activeRule.rule_name}」の対象です。陣取りには特別な「協賛カード等」が必要です。`);
@@ -479,11 +541,27 @@ export default function BattleScreen() {
     }
   };
 
-  // 🌟 現在のモードに応じたマップスタイルを取得
   const getMapStyle = () => {
     if (mapMode === 'boss') return BOSS_MAP_STYLE;
     if (mapMode === 'territory') return TERRITORY_MAP_STYLE;
     return [];
+  };
+
+  // 🌟 追加：ボスのステータスによるエフェクト判定
+  const getBossFeatureStyle = (boss: any) => {
+    const stats = { HP: boss.hp, ATK: boss.atk, DEF: boss.def, SPD: boss.spd || 0 };
+    const maxStat = Object.keys(stats).reduce((a, b) => stats[a as keyof typeof stats] > stats[b as keyof typeof stats] ? a : b);
+    const total = boss.hp + boss.atk + boss.def + (boss.spd || 0);
+    
+    let color = '#EF4444'; // default
+    let icon = <Flame color="#FFF" size={24} />;
+    let label = '攻撃特化';
+
+    if (maxStat === 'HP') { color = '#10B981'; icon = <Heart color="#FFF" size={24}/>; label = '体力特化'; }
+    if (maxStat === 'DEF') { color = '#3B82F6'; icon = <Shield color="#FFF" size={24}/>; label = '防御特化'; }
+    if (maxStat === 'SPD') { color = '#F59E0B'; icon = <FastZap color="#FFF" size={24}/>; label = '敏捷特化'; }
+
+    return { color, icon, label, isSuper: total > 2000 };
   };
 
   return (
@@ -516,7 +594,6 @@ export default function BattleScreen() {
             <ActivityIndicator size="small" color="#3B82F6" style={{ padding: 20 }} />
           ) : (
             <View style={styles.mapPanel}>
-              {/* 🌟 regionプロパティを外し、ピンチアウトを可能に。スタイルは動的切り替え */}
               <MapView 
                 ref={mapRef}
                 provider={PROVIDER_GOOGLE} 
@@ -526,7 +603,9 @@ export default function BattleScreen() {
               >
                 {detectedBoss && (
                   <Marker coordinate={{ latitude: detectedBoss.lat, longitude: detectedBoss.lng }}>
-                    <View style={styles.bossMarker}><Text style={{ fontSize: 24 }}>👹</Text></View>
+                    <Animated.View style={[styles.bossMarker, { transform: [{ scale: pulseAnim }], borderColor: getBossFeatureStyle(detectedBoss).color }]}>
+                      <Text style={{ fontSize: 24 }}>👹</Text>
+                    </Animated.View>
                   </Marker>
                 )}
                 {startPoint && (
@@ -536,7 +615,6 @@ export default function BattleScreen() {
                 )}
                 {territories.map((t) => {
                   const isMine = t.player_id === myId;
-                  // 🌟 チームカラーの適用（無い場合のフォールバック含む）
                   const teamColor = t.team_color || (isMine ? '#3B82F6' : '#EF4444');
                   const teamName = t.team_name || (isMine ? '自陣' : '敵陣');
                   const fillColor = makeHsla(teamColor, 0.3) || (isMine ? 'rgba(59, 130, 246, 0.3)' : 'rgba(239, 68, 68, 0.3)');
@@ -552,14 +630,12 @@ export default function BattleScreen() {
 
                   return (
                     <React.Fragment key={`terr-group-${t.id}`}>
-                      {/* 🌟 陣地の塗りつぶし */}
                       <Polygon 
                         coordinates={coords} 
                         fillColor={fillColor}
                         strokeColor={teamColor} strokeWidth={2}
                         tappable={true} onPress={() => handleTerritoryPress(t)}
                       />
-                      {/* 🌟 陣地中央のチームマーカー */}
                       <Marker coordinate={{ latitude: centerLat, longitude: centerLng }} onPress={() => handleTerritoryPress(t)}>
                         <View style={[styles.teamBadge, { backgroundColor: teamColor }]}>
                           <Text style={styles.teamBadgeText}>{teamName}</Text>
@@ -570,17 +646,42 @@ export default function BattleScreen() {
                 })}
               </MapView>
 
-              {detectedBoss && (
-                <View style={styles.bossInfoOverlay}>
-                  <View style={styles.bossHeader}>
-                    <Text style={styles.sponsorTag}>{detectedBoss.sponsor_name} [{detectedBoss.element}]</Text>
-                    <Text style={styles.bossName}>{detectedBoss.name}</Text>
-                  </View>
-                  <TouchableOpacity style={styles.bossAttackBtn} onPress={startBossBattle} disabled={isBattling}>
-                    <Swords color="#FFFFFF" size={18} />
-                  </TouchableOpacity>
-                </View>
-              )}
+              {detectedBoss && (() => {
+                const feature = getBossFeatureStyle(detectedBoss);
+                return (
+                  <Animated.View style={[styles.bossInfoOverlay, feature.isSuper && { transform: [{ scale: pulseAnim }], shadowColor: feature.color, shadowOpacity: 0.8, shadowRadius: 10 }]}>
+                    <View style={styles.bossHeader}>
+                      <View style={{flexDirection: 'row', alignItems: 'center', marginBottom: 4}}>
+                        <Text style={[styles.sponsorTag, {backgroundColor: feature.color, color: '#FFF'}]}>{feature.label}</Text>
+                        <Text style={styles.elementTag}>[{detectedBoss.element}]</Text>
+                        {feature.isSuper && <Text style={styles.superWarning}>⚠️ SUPER BOSS</Text>}
+                      </View>
+                      <Text style={styles.bossName}>{detectedBoss.name}</Text>
+                      <Text style={styles.bossStatsDetail}>
+                        HP:{detectedBoss.hp} ATK:{detectedBoss.atk} DEF:{detectedBoss.def}
+                      </Text>
+                    </View>
+
+                    {isBattling ? (
+                      <View style={{alignItems: 'center', justifyContent: 'center', padding: 10}}>
+                        <ActivityIndicator color={feature.color} />
+                        <Text style={{fontSize: 10, color: feature.color, marginTop: 4, fontWeight: 'bold'}}>通信演算中...</Text>
+                      </View>
+                    ) : (
+                      <View style={styles.bossActionRow}>
+                        <TouchableOpacity style={[styles.bossAttackBtn, {backgroundColor: feature.color}]} onPress={startBossBattle}>
+                          <Swords color="#FFFFFF" size={16} style={{marginRight: 4}}/>
+                          <Text style={styles.bossBtnText}>交戦</Text>
+                        </TouchableOpacity>
+                        <TouchableOpacity style={[styles.bossAsyncBtn, {borderColor: feature.color}]} onPress={startAsyncBossBattle}>
+                          <FastZap color={feature.color} size={16} style={{marginRight: 4}}/>
+                          <Text style={[styles.bossBtnText, {color: feature.color}]}>クイックバトル</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                  </Animated.View>
+                );
+              })()}
 
               <View style={styles.territoryControls}>
                 {!startPoint ? (
@@ -615,7 +716,7 @@ export default function BattleScreen() {
 
         {battleLog.length > 0 && (
           <View style={styles.logSection}>
-            <Text style={styles.logSectionTitle}>⚡ バトル実況ログ</Text>
+            <Text style={styles.logSectionTitle}>⚡ 同期バトル実況ログ</Text>
             {battleLog.map((log, index) => (
               <View key={index} style={[styles.logBox, log.isSpecial && styles.specialLogBox]}>
                 <Text style={[styles.logText, log.isSpecial && styles.specialLogText]}>{log.text}</Text>
@@ -624,6 +725,44 @@ export default function BattleScreen() {
           </View>
         )}
       </ScrollView>
+
+      {/* --- 非同期バトルリザルトモーダル --- */}
+      <Modal visible={isAsyncResultModalVisible} animationType="fade" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { alignItems: 'center' }]}>
+            <Text style={[styles.modalHeader, { fontSize: 24, color: asyncResultData?.isWin ? '#10B981' : '#EF4444' }]}>
+              {asyncResultData?.isWin ? 'MISSION CLEAR!!' : 'MISSION FAILED...'}
+            </Text>
+            
+            <View style={styles.resultMatchBox}>
+              <View style={styles.resultSide}>
+                <Text style={styles.resultLabel}>マイデッキ総合力</Text>
+                <Text style={styles.resultPower}>{asyncResultData?.myDeckPower}</Text>
+                <Text style={styles.resultDetail}>(補正後: {asyncResultData?.myFinalPower})</Text>
+              </View>
+              <Text style={styles.resultVS}>VS</Text>
+              <View style={styles.resultSide}>
+                <Text style={styles.resultLabel}>{asyncResultData?.bossName}</Text>
+                <Text style={styles.resultPower}>{asyncResultData?.bossPower}</Text>
+                <Text style={styles.resultDetail}>(補正後: {asyncResultData?.bossFinalPower})</Text>
+              </View>
+            </View>
+
+            <Text style={styles.resultMessage}>
+              {asyncResultData?.isWin 
+                ? '圧倒的なデッキ戦力により、一瞬でボスを討伐しました！報酬を獲得しました。' 
+                : 'デッキの戦力が及びませんでした...より強力なカードを集めて再挑戦してください。'}
+            </Text>
+
+            <TouchableOpacity 
+              style={[styles.confirmBtn, { width: '100%', marginTop: 20, backgroundColor: asyncResultData?.isWin ? '#10B981' : '#64748B' }]} 
+              onPress={() => setAsyncResultModalVisible(false)}
+            >
+              <Text style={styles.confirmBtnText}>閉じる</Text>
+            </TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
 
       {/* --- 陣地展開モーダル --- */}
       <Modal visible={isTerritoryModalVisible} animationType="slide" transparent>
@@ -744,18 +883,27 @@ const styles = StyleSheet.create({
   mapPanel: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', height: 450, position: 'relative' },
   webMapFallback: { flex: 1, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   map: { width: '100%', height: '100%' },
-  bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.8)', padding: 5, borderRadius: 20, borderWidth: 2, borderColor: '#EF4444' },
-  startMarker: { backgroundColor: '#3B82F6', padding: 8, borderRadius: 20, borderWidth: 2, borderColor: '#FFF' },
   
-  // 🌟 追加: チームマーカー用スタイル
+  // 🌟 マーカー・バッジ系
+  bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: 5, borderRadius: 30, borderWidth: 3 },
+  startMarker: { backgroundColor: '#3B82F6', padding: 8, borderRadius: 20, borderWidth: 2, borderColor: '#FFF' },
   teamBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2 },
   teamBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
 
-  bossInfoOverlay: { position: 'absolute', top: 15, left: 15, right: 15, backgroundColor: 'rgba(255, 255, 255, 0.95)', padding: 12, borderRadius: 16, flexDirection: 'row', alignItems: 'center' },
-  bossHeader: { flex: 1 },
-  sponsorTag: { color: '#EF4444', fontSize: 10, fontWeight: '800', backgroundColor: '#FFEEEE', paddingHorizontal: 8, borderRadius: 8, alignSelf: 'flex-start' },
-  bossName: { color: '#1E293B', fontSize: 15, fontWeight: '900', marginTop: 4 },
-  bossAttackBtn: { paddingHorizontal: 16, height: 44, backgroundColor: '#EF4444', borderRadius: 12, justifyContent: 'center' },
+  // 🌟 ボス情報・ボタンUI
+  bossInfoOverlay: { position: 'absolute', top: 15, left: 15, right: 15, backgroundColor: 'rgba(255, 255, 255, 0.98)', padding: 12, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0' },
+  bossHeader: { marginBottom: 10 },
+  sponsorTag: { fontSize: 10, fontWeight: '900', paddingHorizontal: 6, paddingVertical: 2, borderRadius: 6, marginRight: 6 },
+  elementTag: { fontSize: 10, fontWeight: '800', color: '#64748B', marginRight: 6 },
+  superWarning: { fontSize: 10, fontWeight: '900', color: '#EF4444', fontStyle: 'italic' },
+  bossName: { color: '#0F172A', fontSize: 16, fontWeight: '900', marginTop: 4 },
+  bossStatsDetail: { color: '#64748B', fontSize: 11, fontWeight: '700', marginTop: 2 },
+  
+  bossActionRow: { flexDirection: 'row', gap: 8 },
+  bossAttackBtn: { flex: 1, flexDirection: 'row', height: 40, borderRadius: 10, justifyContent: 'center', alignItems: 'center' },
+  bossAsyncBtn: { flex: 1, flexDirection: 'row', height: 40, borderRadius: 10, borderWidth: 2, backgroundColor: '#FFFFFF', justifyContent: 'center', alignItems: 'center' },
+  bossBtnText: { color: '#FFFFFF', fontSize: 13, fontWeight: '900' },
+
   territoryControls: { position: 'absolute', bottom: 15, left: 15, right: 15 },
   terrBtn: { flexDirection: 'row', backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
   terrBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
@@ -763,6 +911,7 @@ const styles = StyleSheet.create({
   primaryButton: { flexDirection: 'row', width: '100%', height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },
   disabledButton: { backgroundColor: '#CBD5E1' },
   btnText: { color: '#FFFFFF', fontWeight: '800', fontSize: 15 },
+  
   logSection: { padding: 20, backgroundColor: '#FFFFFF' },
   logSectionTitle: { color: '#475569', fontSize: 12, fontWeight: '800', marginBottom: 15, textAlign: 'center' },
   logBox: { backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#F1F5F9', padding: 16, borderRadius: 16, marginBottom: 12 },
@@ -790,4 +939,13 @@ const styles = StyleSheet.create({
   confirmBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
   cancelBtn: { backgroundColor: '#F1F5F9', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
   cancelBtnText: { color: '#475569', fontWeight: '800', fontSize: 15 },
+
+  // 🌟 追加：非同期リザルト画面用
+  resultMatchBox: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', width: '100%', marginVertical: 20, padding: 16, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0' },
+  resultSide: { flex: 1, alignItems: 'center' },
+  resultVS: { fontSize: 20, fontWeight: '900', color: '#94A3B8', fontStyle: 'italic', marginHorizontal: 10 },
+  resultLabel: { fontSize: 11, fontWeight: '800', color: '#64748B', marginBottom: 4, textAlign: 'center' },
+  resultPower: { fontSize: 24, fontWeight: '900', color: '#0F172A' },
+  resultDetail: { fontSize: 10, color: '#94A3B8', marginTop: 2 },
+  resultMessage: { fontSize: 14, color: '#475569', textAlign: 'center', lineHeight: 22, fontWeight: '700' }
 });
