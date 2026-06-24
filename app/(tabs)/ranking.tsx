@@ -23,10 +23,11 @@ export default function RankingScreen() {
 
     try {
       // 2. 各種テーブルからランキング計算に必要なデータを並列で取得
+      // ※400エラーを防ぐため、カラム名を指定せずに全て取得し、JS側で処理します
       const [profilesRes, cardsRes, territoriesRes] = await Promise.all([
-        supabase.from('profiles').select('id, player_name, is_premium, total_wins, total_battles'),
-        supabase.from('cards').select('player_id, rarity'),
-        supabase.from('territories').select('id, owner_id')
+        supabase.from('profiles').select('*'),
+        supabase.from('cards').select('*'),
+        supabase.from('territories').select('*')
       ]);
 
       const allProfiles = profilesRes.data || [];
@@ -41,13 +42,12 @@ export default function RankingScreen() {
         const userId = profile.id;
 
         // --- ① レアリティ保有率の計算 ---
-        // ユーザーが持つ全カード
-        const userCards = allCards.filter((c: any) => c.player_id === userId);
+        // DBのカラム名が player_id か user_id か分からないため両方対応
+        const userCards = allCards.filter((c: any) => c.player_id === userId || c.user_id === userId);
         const totalUserCards = userCards.length;
         
         let rarityScore = 0;
         if (totalUserCards > 0) {
-          // 高レアリティ（UR, SSR, SR）が保有カードの中で占める割合を％で算出
           const highRarityCount = userCards.filter((c: any) => 
             c.rarity === 'UR' || c.rarity === 'SSR' || c.rarity === 'SR'
           ).length;
@@ -55,8 +55,10 @@ export default function RankingScreen() {
         }
 
         // --- ② バトル勝利率の計算 ---
-        const wins = profile.total_wins || 0;
-        const battles = profile.total_battles || wins; // total_battlesが未定義、または0の場合は勝利数を分母にして100%にするか、安全にフォールバック
+        // カラム名が存在しない場合を考慮し、複数の可能性をチェック
+        const wins = profile.total_wins || profile.wins || profile.win_count || 0;
+        const battles = profile.total_battles || profile.battles || profile.battle_count || wins; 
+        
         let winRateScore = 0;
         if (battles > 0) {
           winRateScore = Math.round((wins / battles) * 100);
@@ -65,20 +67,20 @@ export default function RankingScreen() {
         // --- ③ 陣取りトータル占有率の計算 ---
         let territoryShareScore = 0;
         if (totalTerritoryCount > 0) {
-          const userTerritoriesCount = allTerritories.filter((t: any) => t.owner_id === userId).length;
-          // 全陣地に対する自分の陣地の割合（％）
+          // owner_id, user_id, player_id などの可能性を考慮してチェック
+          const userTerritoriesCount = allTerritories.filter((t: any) => 
+            t.owner_id === userId || t.user_id === userId || t.player_id === userId
+          ).length;
           territoryShareScore = Math.round((userTerritoriesCount / totalTerritoryCount) * 100);
         }
 
         // --- 総合ポイントの算出 ---
-        // 3つの要素（各最大100pt換算）の合計、あるいは平均値を総合ptとする設計
-        // ここではバランスよく「レアリティ率(MAX100) + 勝率(MAX100) + 占有率(MAX100)」の合計値を総合ptとしています
         const totalCalculatedScore = rarityScore + winRateScore + territoryShareScore;
 
         return {
           id: userId,
-          player_name: profile.player_name || '名もなき司令官',
-          is_premium: profile.is_premium,
+          player_name: profile.player_name || profile.name || '名もなき司令官',
+          is_premium: profile.is_premium || false,
           calculated_score: totalCalculatedScore,
           details: {
             rarity: rarityScore,
@@ -118,7 +120,6 @@ export default function RankingScreen() {
           </Text>
           {isMe && <Text style={styles.meText}>(あなた)</Text>}
           
-          {/* 内訳のサブテキスト表示を追加（デバッグやユーザーへの親切さ向上） */}
           <Text style={styles.rankDetails}>
             ⭐高レア:{item.details.rarity}% / ⚔️勝率:{item.details.winRate}% / 🗺️占有:{item.details.share}%
           </Text>
