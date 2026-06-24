@@ -114,6 +114,10 @@ export default function AdminDashboard() {
   const [raritiesList, setRaritiesList] = useState<string[]>([]);
   const [newElement, setNewElement] = useState('');
   const [newRarity, setNewRarity] = useState('');
+  
+  // 🌟 追加: 属性相性入力用ステート
+  const [strongAgainstInput, setStrongAgainstInput] = useState('');
+  const [weakAgainstInput, setWeakAgainstInput] = useState('');
 
   const [directTargetGender, setDirectTargetGender] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
   const [directTargetAge, setDirectTargetAge] = useState<'ALL' | 'TEENS' | 'TWENTIES' | 'THIRTIES'>('ALL');
@@ -793,6 +797,52 @@ export default function AdminDashboard() {
         Alert.alert('追加完了', `「${newRarity}」をレアリティに追加しました！`);
       }
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+  };
+
+  // 🌟 追加: 属性と相性をDB(element_relations)とマスタ(system_config)両方に保存する処理
+  const handleAddElementRelation = async () => {
+    if (!newElement.trim()) {
+      Alert.alert('エラー', '属性名を入力してください');
+      return;
+    }
+
+    setLoading(true);
+    
+    // カンマ区切り文字を配列化
+    const strongArray = strongAgainstInput.split(',').map(s => s.trim()).filter(s => s !== '');
+    const weakArray = weakAgainstInput.split(',').map(s => s.trim()).filter(s => s !== '');
+
+    try {
+      // 1. バトル計算用テーブル (element_relations) へのUPSERT
+      const { error: relationError } = await supabase
+        .from('element_relations')
+        .upsert({
+          element_name: newElement.trim(),
+          strong_against: strongArray,
+          weak_against: weakArray
+        }, { onConflict: 'element_name' });
+
+      if (relationError) throw relationError;
+
+      // 2. プルダウン等UI表示用の system_config (elements) にも無ければ追加
+      if (!elementsList.includes(newElement.trim())) {
+        const updated = [...elementsList, newElement.trim()];
+        await supabase.from('system_config').upsert({ id: 'elements', config_data: { list: updated } });
+        setElementsList(updated);
+      }
+
+      Alert.alert('成功', `属性「${newElement}」の相性データを保存・更新しました！`);
+      
+      // 入力フォームクリア
+      setNewElement('');
+      setStrongAgainstInput('');
+      setWeakAgainstInput('');
+
+    } catch (error: any) {
+      Alert.alert('保存エラー', error.message);
+    } finally {
+      setLoading(false);
+    }
   };
 
   const handleUpdateArConfig = async () => {
@@ -1917,15 +1967,44 @@ export default function AdminDashboard() {
         {/* ===================== 7. マスタ拡張 ===================== */}
         {activeTab === 'master' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>データベース拡張 (属性 / レアリティ)</Text>
-            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>システムに新しい属性やレアリティを追加します。</Text>
+            <Text style={styles.cardTitle}>データベース拡張 (属性 / 相性 / レアリティ)</Text>
+            <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>システムに新しい属性や相性、レアリティを追加・更新します。</Text>
             
             <Text style={styles.label}>現在の属性一覧</Text>
             <Text style={styles.listItemSub}>{elementsList.join(' / ')}</Text>
-            <View style={[styles.row, {marginTop: 8, marginBottom: 24}]}>
-              <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={newElement} onChangeText={setNewElement} placeholder="新しい属性を追加 (例: 毒)" />
-              <TouchableOpacity style={[styles.primaryBtn, {marginTop: 0, paddingVertical: 14}]} onPress={() => handleAddMaster('element')}>
-                <Text style={styles.primaryBtnText}>追加</Text>
+            
+            {/* 🌟 属性と相性の入力フォーム */}
+            <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 16, marginTop: 8, marginBottom: 24 }}>
+              <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', marginBottom: 12 }}>■ 新しい属性の追加 / 既存属性の相性更新</Text>
+              
+              <TextInput 
+                style={[styles.input, {marginBottom: 12}]} 
+                value={newElement} 
+                onChangeText={setNewElement} 
+                placeholder="属性名 (例: 毒)" 
+                placeholderTextColor="#94A3B8"
+              />
+              
+              <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4, marginLeft: 2 }}>この属性が有利（ダメージ1.5倍）な属性をカンマ区切りで入力</Text>
+              <TextInput 
+                style={[styles.input, {marginBottom: 12, borderColor: '#FDA4AF'}]} 
+                value={strongAgainstInput} 
+                onChangeText={setStrongAgainstInput} 
+                placeholder="例: 水, 光, 機械" 
+                placeholderTextColor="#94A3B8"
+              />
+              
+              <Text style={{ fontSize: 12, color: '#64748B', marginBottom: 4, marginLeft: 2 }}>この属性が不利（ダメージ0.5倍）な属性をカンマ区切りで入力</Text>
+              <TextInput 
+                style={[styles.input, {marginBottom: 16, borderColor: '#93C5FD'}]} 
+                value={weakAgainstInput} 
+                onChangeText={setWeakAgainstInput} 
+                placeholder="例: 火, 虚無" 
+                placeholderTextColor="#94A3B8"
+              />
+              
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleAddElementRelation} disabled={loading}>
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>属性と相性を保存</Text>}
               </TouchableOpacity>
             </View>
 
@@ -1935,8 +2014,8 @@ export default function AdminDashboard() {
             <Text style={styles.listItemSub}>{raritiesList.join(' / ')}</Text>
             <View style={[styles.row, {marginTop: 8}]}>
               <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={newRarity} onChangeText={setNewRarity} placeholder="新しいレアを追加 (例: EX)" />
-              <TouchableOpacity style={[styles.primaryBtn, {marginTop: 0, paddingVertical: 14}]} onPress={() => handleAddMaster('rarity')}>
-                <Text style={styles.primaryBtnText}>追加</Text>
+              <TouchableOpacity style={[styles.primaryBtn, {marginTop: 0, paddingVertical: 14}]} onPress={() => handleAddMaster('rarity')} disabled={loading}>
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>追加</Text>}
               </TouchableOpacity>
             </View>
           </View>
