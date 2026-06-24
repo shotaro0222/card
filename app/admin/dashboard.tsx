@@ -1,6 +1,20 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, TextInput, Image, Platform, ActivityIndicator } from 'react-native';
-import MapView, { Marker, Circle } from 'react-native-maps'; // マップ表示用に追加
+// ★修正点1: react-native-maps をWeb環境でインポートするとホワイトアウト（クラッシュ）するため、動的requireに変更
+let MapView: any = null;
+let Marker: any = null;
+let Circle: any = null;
+if (Platform.OS !== 'web') {
+  try {
+    const Maps = require('react-native-maps');
+    MapView = Maps.default;
+    Marker = Maps.Marker;
+    Circle = Maps.Circle;
+  } catch (e) {
+    console.log('react-native-maps load error', e);
+  }
+}
+
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect, useRouter } from 'expo-router';
 import * as ImagePicker from 'expo-image-picker';
@@ -150,9 +164,15 @@ export default function AdminDashboard() {
   // ==================== 10. 陣取り＆特殊ルール管理 ====================
   const [territories, setTerritories] = useState<any[]>([]);
   const [territoryRules, setTerritoryRules] = useState<any[]>([]);
+  
+  // ★追加点: 陣取りイベント管理用のステート
   const [ruleName, setRuleName] = useState('');
   const [ruleKeyword, setRuleKeyword] = useState('');
   const [ruleRequireFixed, setRuleRequireFixed] = useState(true);
+  const [ruleEventStart, setRuleEventStart] = useState('');
+  const [ruleEventEnd, setRuleEventEnd] = useState('');
+  const [ruleEventDesc, setRuleEventDesc] = useState('');
+  const [ruleTargetRarity, setRuleTargetRarity] = useState('');
 
   // 初回データ読み込み
   useFocusEffect(
@@ -294,13 +314,11 @@ export default function AdminDashboard() {
     setRaritiesList(rars);
   };
 
-  // --- 修正: チームデータ取得（エラーフォールバック＆表示名の統一） ---
   const fetchTeams = async () => {
     try {
       let { data, error } = await supabase.from('teams').select('*, profiles(player_name)').order('created_at', { ascending: false });
       
       if (error) {
-        // リレーションエラー等が出た場合のフォールバック
         const fallback = await supabase.from('teams').select('*').order('created_at', { ascending: false });
         data = fallback.data;
       }
@@ -308,7 +326,6 @@ export default function AdminDashboard() {
       if (data) {
         const scoredTeams = data.map((t: any) => ({
           ...t,
-          // カラム名が 'name' か 'team_name' でブレている可能性への対応
           display_name: t.name || t.team_name || '名称未設定',
           activity_score: (t.member_count || 1) * 100 + (t.total_points || Math.floor(Math.random() * 500)),
         })).sort((a: any, b: any) => b.activity_score - a.activity_score);
@@ -896,7 +913,6 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // 修正: 表示名（display_name）で検索できるように対応
   const filteredTeams = teams.filter(t => 
     (t.display_name && t.display_name.toLowerCase().includes(teamSearchQuery.toLowerCase())) || 
     (t.id && t.id.toLowerCase().includes(teamSearchQuery.toLowerCase()))
@@ -916,6 +932,7 @@ export default function AdminDashboard() {
     ]);
   };
 
+  // ★修正点2: 陣取りの特殊ルール（イベント）の保存関数を拡張
   const handleSaveRule = async () => {
     if (!ruleName || !ruleKeyword) return Alert.alert('エラー', 'ルール名と対象キーワードを入力してください');
     setLoading(true);
@@ -924,10 +941,16 @@ export default function AdminDashboard() {
         rule_name: ruleName,
         target_keyword: ruleKeyword,
         require_fixed_card: ruleRequireFixed,
+        required_rarity: ruleTargetRarity || null,
+        start_at: ruleEventStart || null,
+        end_at: ruleEventEnd || null,
+        description: ruleEventDesc || null,
         is_active: true
       }]);
-      Alert.alert('成功', '特殊ルールを追加しました');
+      Alert.alert('成功', 'イベント/特殊ルールを追加しました');
       setRuleName(''); setRuleKeyword('');
+      setRuleEventStart(''); setRuleEventEnd('');
+      setRuleEventDesc(''); setRuleTargetRarity('');
       fetchRules();
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
@@ -945,13 +968,9 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // ==========================================
-  // ★追加: 陣地のチームカラー取得関数
-  // ==========================================
   const getTeamColor = (ownerId: string | null) => {
     if (!ownerId) return 'rgba(100, 116, 139, 0.5)'; // グレー
     const colors = ['rgba(239, 68, 68, 0.5)', 'rgba(59, 130, 246, 0.5)', 'rgba(16, 185, 129, 0.5)', 'rgba(245, 158, 11, 0.5)', 'rgba(139, 92, 246, 0.5)'];
-    // 簡易的にIDのハッシュから色を割り当てる（将来的にデータベースで色を管理する場合はここを変更）
     let hash = 0;
     for (let i = 0; i < ownerId.length; i++) {
       hash = ownerId.charCodeAt(i) + ((hash << 5) - hash);
@@ -959,9 +978,6 @@ export default function AdminDashboard() {
     return colors[Math.abs(hash) % colors.length];
   };
 
-  // ==========================================
-  // ★追加: PC（Web環境）用の Leaflet 描画HTML
-  // ==========================================
   const getLeafletHtml = (territoriesList: any[]) => `
     <!DOCTYPE html>
     <html>
@@ -1041,7 +1057,7 @@ export default function AdminDashboard() {
         
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'rules' && styles.activeTabBtn]} onPress={() => setActiveTab('rules')}>
           <ScrollText color={activeTab === 'rules' ? '#FFF' : '#64748B'} size={18} />
-          <Text style={[styles.tabText, activeTab === 'rules' && styles.activeTabText]}>ルール</Text>
+          <Text style={[styles.tabText, activeTab === 'rules' && styles.activeTabText]}>ルール・イベント</Text>
         </TouchableOpacity>
 
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'ugc' && styles.activeTabBtn]} onPress={() => setActiveTab('ugc')}>
@@ -1150,7 +1166,6 @@ export default function AdminDashboard() {
                   <View style={{flex: 1}}>
                     <View style={styles.row}>
                       <Text style={{fontWeight: '900', color: '#3B82F6', marginRight: 8, fontSize: 16}}>#{index + 1}</Text>
-                      {/* 修正: display_name を使用 */}
                       <Text style={styles.listItemTitle}>{t.display_name}</Text>
                     </View>
                     <Text style={styles.listItemSub} numberOfLines={1}>{t.description || '説明なし'}</Text>
@@ -1177,15 +1192,14 @@ export default function AdminDashboard() {
               ※PC・モバイルの両方でピンチアウト・ズーム操作による詳細マップ確認が可能です。
             </Text>
             
-            {/* ★追加: マップ表示ビュー（Web / ネイティブハイブリッド対応） */}
             <View style={{ height: 400, borderRadius: 12, overflow: 'hidden', marginBottom: 20, borderWidth: 1, borderColor: '#E2E8F0' }}>
               {Platform.OS === 'web' ? (
                 <iframe 
                   srcDoc={getLeafletHtml(territories)} 
-                  style={{ width: '100%', height: '100%', border: 'none' }} 
+                  style={{ width: '100%', height: '100%', borderWidth: 0 } as any} 
                   title="Territories Map"
                 />
-              ) : (
+              ) : MapView ? (
                 <MapView
                   style={{ flex: 1 }}
                   initialRegion={{
@@ -1227,6 +1241,8 @@ export default function AdminDashboard() {
                     return null;
                   })}
                 </MapView>
+              ) : (
+                <View style={{flex: 1, justifyContent: 'center', alignItems: 'center'}}><Text>マップの読み込みに失敗しました</Text></View>
               )}
             </View>
 
@@ -1250,20 +1266,32 @@ export default function AdminDashboard() {
           </View>
         )}
 
-        {/* ===================== 11. 特殊ルール・協賛縛り管理 ===================== */}
+        {/* ===================== 11. 特殊ルール・陣取りイベント管理 ===================== */}
         {activeTab === 'rules' && (
           <View style={styles.card}>
-            <Text style={styles.cardTitle}>特殊エリア・協賛縛りルール設定</Text>
+            <Text style={styles.cardTitle}>陣取りイベント・特殊ルール設定</Text>
             <Text style={{color:'#64748B', fontSize: 12, marginBottom: 16}}>
-              特定のキーワード（住所、市区町村名など）が含まれるエリアでの陣取りに、特定の条件（例：店舗限定カードの必須化）を付与します。
+              特定のエリア（キーワード）での陣取りに対し、「期間」や「特定カード/レアリティ」の制限を付与してイベントを作成します。
             </Text>
 
             <View style={{backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 24}}>
-              <Text style={styles.label}>新規ルールの追加</Text>
-              <TextInput style={styles.input} value={ruleName} onChangeText={setRuleName} placeholder="ルール名 (例: 立川市 協賛イベント)" />
+              <Text style={styles.label}>新規ルールの追加 (陣取りイベント管理)</Text>
+              <TextInput style={styles.input} value={ruleName} onChangeText={setRuleName} placeholder="ルール・イベント名 (例: 立川市 夏の陣)" />
               <TextInput style={[styles.input, {marginTop: 8}]} value={ruleKeyword} onChangeText={setRuleKeyword} placeholder="対象キーワード (例: 東京都立川市)" />
               
-              <View style={[styles.row, {marginTop: 12}]}>
+              <Text style={styles.label}>イベント開始日時 / 終了日時 (任意)</Text>
+              <View style={styles.row}>
+                <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={ruleEventStart} onChangeText={setRuleEventStart} placeholder="開始 (例: 2026-06-20T12:00)" />
+                <TextInput style={[styles.input, {flex: 1}]} value={ruleEventEnd} onChangeText={setRuleEventEnd} placeholder="終了 (例: 2026-06-25T23:59)" />
+              </View>
+
+              <Text style={styles.label}>イベント詳細・説明</Text>
+              <TextInput style={[styles.input, {height: 80, textAlignVertical: 'top'}]} value={ruleEventDesc} onChangeText={setRuleEventDesc} placeholder="イベントの詳細内容を記載..." multiline />
+
+              <Text style={styles.label}>参加条件・制限</Text>
+              <TextInput style={[styles.input, {marginBottom: 12}]} value={ruleTargetRarity} onChangeText={setRuleTargetRarity} placeholder="特定のレアリティ限定 (例: UR, 未入力で制限なし)" />
+
+              <View style={[styles.row, {marginTop: 0}]}>
                 <Text style={[styles.label, {flex: 1, marginTop: 0}]}>協賛(固定)カードを必須にする</Text>
                 <TouchableOpacity 
                   style={{width: 50, height: 28, borderRadius: 14, backgroundColor: ruleRequireFixed ? '#3B82F6' : '#CBD5E1', justifyContent: 'center', padding: 2}}
@@ -1274,22 +1302,32 @@ export default function AdminDashboard() {
               </View>
 
               <TouchableOpacity style={styles.primaryBtn} onPress={handleSaveRule} disabled={loading}>
-                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>このルールを適用する</Text>}
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>このルール・イベントを適用する</Text>}
               </TouchableOpacity>
             </View>
 
-            <Text style={styles.cardTitle}>適用中のルール一覧</Text>
+            <Text style={styles.cardTitle}>適用中のルール・イベント一覧</Text>
             {territoryRules.length === 0 ? (
-              <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>現在適用中の特殊ルールはありません</Text>
+              <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>現在適用中のイベントや特殊ルールはありません</Text>
             ) : (
               territoryRules.map((r) => (
                 <View key={r.id} style={styles.listItemRow}>
                   <View style={{flex: 1}}>
                     <View style={styles.row}>
                       <Text style={styles.listItemTitle}>{r.rule_name}</Text>
-                      {r.require_fixed_card && <Text style={[styles.bannedBadge, {backgroundColor: '#DBEAFE', color: '#1D4ED8'}]}>カード縛り</Text>}
                     </View>
-                    <Text style={styles.listItemSub}>対象: {r.target_keyword}</Text>
+                    <View style={[styles.row, {flexWrap: 'wrap', gap: 4, marginTop: 4, marginBottom: 4}]}>
+                      {r.require_fixed_card && <Text style={[styles.bannedBadge, {backgroundColor: '#DBEAFE', color: '#1D4ED8', marginLeft: 0}]}>固定カード必須</Text>}
+                      {r.required_rarity && <Text style={[styles.bannedBadge, {backgroundColor: '#FEF3C7', color: '#D97706', marginLeft: 0}]}>{r.required_rarity}限定</Text>}
+                      {(r.start_at || r.end_at) && <Text style={[styles.bannedBadge, {backgroundColor: '#DCFCE7', color: '#15803D', marginLeft: 0}]}>期間限定</Text>}
+                    </View>
+                    <Text style={styles.listItemSub}>対象エリア: {r.target_keyword}</Text>
+                    {r.description && <Text style={[styles.listItemSub, {marginTop: 4, color: '#475569'}]}>{r.description}</Text>}
+                    {(r.start_at || r.end_at) && (
+                      <Text style={[styles.listItemSub, {marginTop: 4, fontSize: 11, color: '#94A3B8'}]}>
+                        期間: {r.start_at ? new Date(r.start_at).toLocaleString() : '未指定'} 〜 {r.end_at ? new Date(r.end_at).toLocaleString() : '未指定'}
+                      </Text>
+                    )}
                   </View>
                   <TouchableOpacity style={{padding: 10}} onPress={() => handleDeleteRule(r.id)} disabled={loading}>
                     <Trash2 color="#EF4444" size={24} />
