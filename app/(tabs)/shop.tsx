@@ -61,7 +61,7 @@ export default function ShopScreen() {
 
   const buyTickets = async () => {
     const title = isAdmin ? "【無料】チケット追加" : "購入確認";
-    const msg = isAdmin ? "ゴッドモード権限でチケット10枚を無料で追加するぜ！" : "チケット10枚(￥100)を購入しますか？";
+    const msg = isAdmin ? "ゴッドモード権限でチケット10枚を無料で追加するぜ！" : "チケット10枚(￥1,000)を購入しますか？";
 
     Alert.alert(title, msg, [
       { text: "キャンセル", style: "cancel" },
@@ -136,7 +136,7 @@ export default function ShopScreen() {
       <View style={styles.productCard}>
         <View style={styles.productHeader}>
           <Text style={styles.productTitle}>👑 プレミアムパス</Text>
-          <Text style={styles.price}>{isAdmin ? '永久無料' : '￥500 / 月'}</Text>
+          <Text style={styles.price}>{isAdmin ? '永久無料' : '￥2,000 / 月'}</Text>
         </View>
         <Text style={styles.desc}>・1日の錬成回数が【無制限】に！</Text>
         <Text style={styles.desc}>・カードに【好きな名前】を指定可能！</Text>
