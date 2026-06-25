@@ -95,7 +95,7 @@ export default function LoginScreen() {
       {/* 💡 テキストタイトルの代わりにコンポーネントロゴを配置 */}
       <SnapCardLogo color="#0F172A" bgColor="#F8FAFC" scale={1.1} />
       
-      <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
+      <Text style={styles.subtitle}>REAL-PHOTO TCG & DOMINATION GAME</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規登録】' : '【ログイン】'}</Text>
 
