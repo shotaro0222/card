@@ -1,6 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, TextInput, Image, Platform, ActivityIndicator } from 'react-native';
-// ★修正点1: react-native-maps をWeb環境でインポートするとホワイトアウト（クラッシュ）するため、動的requireに変更
+// ★ react-native-maps をWeb環境でインポートするとホワイトアウト（クラッシュ）するため、動的requireに変更
 let MapView: any = null;
 let Marker: any = null;
 let Circle: any = null;
@@ -23,7 +23,7 @@ import * as FileSystem from 'expo-file-system';
 import * as Sharing from 'expo-sharing';
 import * as Linking from 'expo-linking';
 import { decode } from 'base64-arraybuffer';
-import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, QrCode, MapPin, Gift, PlayCircle, Sparkles, Shield, Flag, ScrollText, Search, Trash2 } from 'lucide-react-native';
+import { BarChart3, Users, Store, ShieldAlert, Bell, Upload, Image as ImageIcon, Database, Layers, Download, QrCode, MapPin, Gift, PlayCircle, Sparkles, Shield, Flag, ScrollText, Search, Trash2, Swords } from 'lucide-react-native';
 
 export default function AdminDashboard() {
   const router = useRouter();
@@ -115,7 +115,7 @@ export default function AdminDashboard() {
   const [newElement, setNewElement] = useState('');
   const [newRarity, setNewRarity] = useState('');
   
-  // 🌟 追加: 属性相性入力用ステート
+  // 属性相性入力用ステート
   const [strongAgainstInput, setStrongAgainstInput] = useState('');
   const [weakAgainstInput, setWeakAgainstInput] = useState('');
 
@@ -133,6 +133,10 @@ export default function AdminDashboard() {
   const [arDeployMode, setArDeployMode] = useState<'immediate' | 'scheduled'>('immediate');
   const [arScheduledAt, setArScheduledAt] = useState('');
 
+  // 🌟 新規追加: 報酬タイプ (カード付与 か ボス出現 か)
+  const [arRewardType, setArRewardType] = useState<'card' | 'boss'>('card');
+
+  // カード用ステート
   const [arAssetMode, setArAssetMode] = useState<'upload' | 'ai'>('upload');
   const [arAssetCustomUrl, setArAssetCustomUrl] = useState('');
   const [arAssetAiPrompt, setArAssetAiPrompt] = useState('');
@@ -157,6 +161,16 @@ export default function AdminDashboard() {
   const [arWinAssetDef, setArWinAssetDef] = useState('200');
   const [arWinAssetSpd, setArWinAssetSpd] = useState('200');
 
+  // 🌟 新規追加: ボスバトル報酬用ステート
+  const [arBossMode, setArBossMode] = useState<'upload' | 'ai'>('upload');
+  const [arBossImageUrl, setArBossImageUrl] = useState('');
+  const [arBossAiPrompt, setArBossAiPrompt] = useState('');
+  const [arBossName, setArBossName] = useState('');
+  const [arBossHp, setArBossHp] = useState('1500');
+  const [arBossAtk, setArBossAtk] = useState('100');
+  const [arBossDef, setArBossDef] = useState('50');
+  const [arBossElement, setArBossElement] = useState('闇');
+
   const [newShopName, setNewShopName] = useState('');
   const [newShopLocation, setNewShopLocation] = useState('');
   const [generatedShopData, setGeneratedShopData] = useState<{ id: string; url: string; qr: string } | null>(null);
@@ -169,7 +183,7 @@ export default function AdminDashboard() {
   const [territories, setTerritories] = useState<any[]>([]);
   const [territoryRules, setTerritoryRules] = useState<any[]>([]);
   
-  // ★追加点: 陣取りイベント管理用のステート
+  // 陣取りイベント管理用のステート
   const [ruleName, setRuleName] = useState('');
   const [ruleKeyword, setRuleKeyword] = useState('');
   const [ruleRequireFixed, setRuleRequireFixed] = useState(true);
@@ -207,6 +221,7 @@ export default function AdminDashboard() {
         if (c.arActionText) setArActionText(c.arActionText);
         if (c.arDeployMode) setArDeployMode(c.arDeployMode);
         if (c.arScheduledAt) setArScheduledAt(c.arScheduledAt);
+        if (c.rewardType) setArRewardType(c.rewardType);
         
         if (c.arBaseStats) {
           setArAssetName(c.arBaseStats.name || ''); setArAssetRarity(c.arBaseStats.rarity || 'N'); setArAssetAttr(c.arBaseStats.element || '無');
@@ -217,6 +232,14 @@ export default function AdminDashboard() {
           setArWinAssetName(c.arWinStats.name || ''); setArWinAssetRarity(c.arWinStats.rarity || 'SR'); setArWinAssetAttr(c.arWinStats.element || '光');
           setArWinAssetHp(c.arWinStats.hp?.toString() || '500'); setArWinAssetAtk(c.arWinStats.atk?.toString() || '200');
           setArWinAssetDef(c.arWinStats.def?.toString() || '200'); setArWinAssetSpd(c.arWinStats.spd?.toString() || '200');
+        }
+        if (c.bossSettings) {
+          setArBossName(c.bossSettings.name || '');
+          setArBossImageUrl(c.bossSettings.image_url || '');
+          setArBossHp(c.bossSettings.hp?.toString() || '1500');
+          setArBossAtk(c.bossSettings.atk?.toString() || '100');
+          setArBossDef(c.bossSettings.def?.toString() || '50');
+          setArBossElement(c.bossSettings.element || '闇');
         }
       }
     } catch (e) { console.log('AR設定フェッチ非活性', e); }
@@ -424,7 +447,8 @@ export default function AdminDashboard() {
     return decode(base64);
   };
 
-  const handleUploadArAsset = async (promoId: string, isWinAsset: boolean) => {
+  // 🌟 ARアセットアップロード（種別指定）
+  const handleUploadArAsset = async (promoId: string, assetType: 'base' | 'win' | 'boss') => {
     try {
       const result = Platform.OS === 'web'
         ? await pickWebDocument()
@@ -439,7 +463,8 @@ export default function AdminDashboard() {
       setLoading(true);
 
       const arrayBuffer = await getArrayBufferFromAsset(asset);
-      const fileName = `${promoId}/${Date.now()}_${isWinAsset ? 'win_' : ''}asset_${asset.name}`;
+      const prefix = assetType === 'win' ? 'win_' : assetType === 'boss' ? 'boss_' : '';
+      const fileName = `${promoId}/${Date.now()}_${prefix}asset_${asset.name}`;
       const { error: uploadError } = await supabase.storage
         .from('ar_assets')
         .upload(fileName, arrayBuffer, { contentType: asset.type || asset.mimeType || 'application/octet-stream', upsert: true });
@@ -448,9 +473,12 @@ export default function AdminDashboard() {
 
       const { data: { publicUrl } } = supabase.storage.from('ar_assets').getPublicUrl(fileName);
       
-      if (isWinAsset) {
+      if (assetType === 'win') {
         setArWinAssetUrl(publicUrl);
         Alert.alert('アップロード成功', `🎁 当たり(クーポン)用アセットをアップロードしました`);
+      } else if (assetType === 'boss') {
+        setArBossImageUrl(publicUrl);
+        Alert.alert('アップロード成功', `😈 ボス用アセットをアップロードしました`);
       } else {
         setArAssetCustomUrl(publicUrl);
         Alert.alert('アップロード成功', `通常時の3Dモデル/画像をアップロードしました`);
@@ -462,17 +490,21 @@ export default function AdminDashboard() {
     }
   };
 
-  const handleGenerateArAssetAi = async (isWinAsset: boolean) => {
-    const prompt = isWinAsset ? arWinAssetAiPrompt : arAssetAiPrompt;
+  // 🌟 ARアセットAI生成（種別指定）
+  const handleGenerateArAssetAi = async (assetType: 'base' | 'win' | 'boss') => {
+    const prompt = assetType === 'win' ? arWinAssetAiPrompt : assetType === 'boss' ? arBossAiPrompt : arAssetAiPrompt;
     if (!prompt) return Alert.alert('エラー', 'プロンプトを入力してください');
     
     setLoading(true);
     try {
       const { data } = await supabase.functions.invoke('generate-card-image', { body: { prompt } });
       if (data?.imageUrl) {
-        if (isWinAsset) {
+        if (assetType === 'win') {
           setArWinAssetUrl(data.imageUrl);
           Alert.alert('生成成功', '🎁 当たりアセットをAIで生成しました！');
+        } else if (assetType === 'boss') {
+          setArBossImageUrl(data.imageUrl);
+          Alert.alert('生成成功', '😈 ボスアセットをAIで生成しました！');
         } else {
           setArAssetCustomUrl(data.imageUrl);
           Alert.alert('生成成功', '通常アセットをAIで生成しました！');
@@ -799,7 +831,6 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // 🌟 追加: 属性と相性をDB(element_relations)とマスタ(system_config)両方に保存する処理
   const handleAddElementRelation = async () => {
     if (!newElement.trim()) {
       Alert.alert('エラー', '属性名を入力してください');
@@ -807,13 +838,10 @@ export default function AdminDashboard() {
     }
 
     setLoading(true);
-    
-    // カンマ区切り文字を配列化
     const strongArray = strongAgainstInput.split(',').map(s => s.trim()).filter(s => s !== '');
     const weakArray = weakAgainstInput.split(',').map(s => s.trim()).filter(s => s !== '');
 
     try {
-      // 1. バトル計算用テーブル (element_relations) へのUPSERT
       const { error: relationError } = await supabase
         .from('element_relations')
         .upsert({
@@ -824,7 +852,6 @@ export default function AdminDashboard() {
 
       if (relationError) throw relationError;
 
-      // 2. プルダウン等UI表示用の system_config (elements) にも無ければ追加
       if (!elementsList.includes(newElement.trim())) {
         const updated = [...elementsList, newElement.trim()];
         await supabase.from('system_config').upsert({ id: 'elements', config_data: { list: updated } });
@@ -832,12 +859,7 @@ export default function AdminDashboard() {
       }
 
       Alert.alert('成功', `属性「${newElement}」の相性データを保存・更新しました！`);
-      
-      // 入力フォームクリア
-      setNewElement('');
-      setStrongAgainstInput('');
-      setWeakAgainstInput('');
-
+      setNewElement(''); setStrongAgainstInput(''); setWeakAgainstInput('');
     } catch (error: any) {
       Alert.alert('保存エラー', error.message);
     } finally {
@@ -845,6 +867,7 @@ export default function AdminDashboard() {
     }
   };
 
+  // 🌟 AR設定の同期保存（個別 or グローバル）
   const handleUpdateArConfig = async () => {
     if (arClientType === 'client_specific' && !arTargetClientId) {
       Alert.alert('エラー', '個別指定時は対象のクライアントUUIDが必要です。');
@@ -862,6 +885,15 @@ export default function AdminDashboard() {
       hp: parseInt(arWinAssetHp)||500, atk: parseInt(arWinAssetAtk)||200, def: parseInt(arWinAssetDef)||200, spd: parseInt(arWinAssetSpd)||200
     };
 
+    const bossSettings = {
+      name: arBossName,
+      image_url: arBossImageUrl,
+      hp: parseInt(arBossHp) || 1500,
+      atk: parseInt(arBossAtk) || 100,
+      def: parseInt(arBossDef) || 50,
+      element: arBossElement,
+    };
+
     try {
       if (arClientType === 'client_specific') {
         const { error } = await supabase.from('promo_links').update({
@@ -872,30 +904,37 @@ export default function AdminDashboard() {
           ar_display_mode: arDisplayMode,
           ar_marker_url: arMarkerCustomUrl || null,
           ar_base_stats: arBaseStats,
-          ar_win_stats: arWinStats
+          ar_win_stats: arWinStats,
+          reward_type: arRewardType,
+          boss_name: arBossName,
+          boss_image_url: arBossImageUrl,
+          boss_stats: bossSettings
         }).eq('id', arTargetClientId);
 
         if (error) throw error;
-        Alert.alert('同期成功', `店舗 [${arTargetClientId.substring(0,8)}] の確率・アセットおよびカードステータスを個別同期しました。`);
+        Alert.alert('同期成功', `店舗 [${arTargetClientId.substring(0,8)}] の確率・報酬・アセットおよびカードステータスを個別同期しました。`);
       } else {
         const config_data = {
           arClientType, arTargetClientId: 'ALL',
           arDisplayMode, arAssetCustomUrl, arBtnPlacement, arActionText, arDeployMode,
           arScheduledAt: arDeployMode === 'scheduled' ? arScheduledAt : null,
-          arBaseStats, arWinStats
+          arBaseStats, arWinStats,
+          rewardType: arRewardType,
+          bossSettings
         };
         const { error } = await supabase.from('system_config').upsert({ id: 'webar_dynamic_settings', config_data });
         if (error) throw error;
-        Alert.alert('同期成功', 'グローバル一括WebARパラメータ(カードステータス含む)を更新しました。');
+        Alert.alert('同期成功', 'グローバル一括WebARパラメータ(報酬タイプ・ステータス含む)を更新しました。');
       }
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
   const handlePreviewAr = () => {
-    const previewUrl = `${WEBAR_BASE_URL}/ar_preview.html?mode=${arDisplayMode}&asset=${encodeURIComponent(arAssetCustomUrl)}&text=${encodeURIComponent(arActionText)}&win_asset=${encodeURIComponent(arWinAssetUrl)}&win_text=${encodeURIComponent(arActionTextWin)}&rate=${arWinRate}`;
+    const previewUrl = `${WEBAR_BASE_URL}/ar_preview.html?mode=${arDisplayMode}&reward_type=${arRewardType}&asset=${encodeURIComponent(arAssetCustomUrl)}&text=${encodeURIComponent(arActionText)}&win_asset=${encodeURIComponent(arWinAssetUrl)}&win_text=${encodeURIComponent(arActionTextWin)}&rate=${arWinRate}`;
     Linking.openURL(previewUrl);
   };
 
+  // 🌟 QR発行とURL表示
   const handleGenerateShopQr = async () => {
     if (!newShopName) {
       Alert.alert('エラー', '店舗名（キャンペーン名）を入力してください。');
@@ -982,7 +1021,6 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // ★修正点2: 陣取りの特殊ルール（イベント）の保存関数を拡張
   const handleSaveRule = async () => {
     if (!ruleName || !ruleKeyword) return Alert.alert('エラー', 'ルール名と対象キーワードを入力してください');
     setLoading(true);
@@ -1019,7 +1057,7 @@ export default function AdminDashboard() {
   };
 
   const getTeamColor = (ownerId: string | null) => {
-    if (!ownerId) return 'rgba(100, 116, 139, 0.5)'; // グレー
+    if (!ownerId) return 'rgba(100, 116, 139, 0.5)';
     const colors = ['rgba(239, 68, 68, 0.5)', 'rgba(59, 130, 246, 0.5)', 'rgba(16, 185, 129, 0.5)', 'rgba(245, 158, 11, 0.5)', 'rgba(139, 92, 246, 0.5)'];
     let hash = 0;
     for (let i = 0; i < ownerId.length; i++) {
@@ -1094,22 +1132,18 @@ export default function AdminDashboard() {
           <Users color={activeTab === 'users' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'users' && styles.activeTabText]}>ユーザー</Text>
         </TouchableOpacity>
-        
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'teams' && styles.activeTabBtn]} onPress={() => setActiveTab('teams')}>
           <Shield color={activeTab === 'teams' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'teams' && styles.activeTabText]}>チーム</Text>
         </TouchableOpacity>
-        
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'territories' && styles.activeTabBtn]} onPress={() => setActiveTab('territories')}>
           <Flag color={activeTab === 'territories' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'territories' && styles.activeTabText]}>陣取り監視</Text>
         </TouchableOpacity>
-        
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'rules' && styles.activeTabBtn]} onPress={() => setActiveTab('rules')}>
           <ScrollText color={activeTab === 'rules' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'rules' && styles.activeTabText]}>ルール・イベント</Text>
         </TouchableOpacity>
-
         <TouchableOpacity style={[styles.tabBtn, activeTab === 'ugc' && styles.activeTabBtn]} onPress={() => setActiveTab('ugc')}>
           <Layers color={activeTab === 'ugc' ? '#FFF' : '#64748B'} size={18} />
           <Text style={[styles.tabText, activeTab === 'ugc' && styles.activeTabText]}>UGC管理</Text>
@@ -1745,14 +1779,27 @@ export default function AdminDashboard() {
                 {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>専用URLとQRコードを発行</Text>}
               </TouchableOpacity>
 
+              {/* 💡 ここにアプリ復帰用（ディープリンク）の正しい呼び出し方の警告を明記 */}
               {generatedShopData && (
                 <View style={{ marginTop: 24, padding: 16, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center' }}>
                   <Text style={{ fontSize: 14, fontWeight: '800', color: '#10B981', marginBottom: 12 }}>✨ 登録完了！QRコードが生成されました</Text>
                   <Image source={{ uri: generatedShopData.qr }} style={{ width: 180, height: 180, marginBottom: 12 }} />
+                  
                   <View style={{ width: '100%', backgroundColor: '#FFFFFF', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 12 }}>
-                    <Text style={{ fontSize: 11, color: '#64748B', fontWeight: 'bold' }}>NFC用 URL</Text>
+                    <Text style={{ fontSize: 11, color: '#64748B', fontWeight: 'bold' }}>WebARアクセス用URL (NFCやブラウザ起動用)</Text>
                     <Text style={{ fontSize: 12, color: '#2563EB', marginTop: 4 }} selectable>{generatedShopData.url}</Text>
                   </View>
+
+                  <View style={{ width: '100%', backgroundColor: '#FEF2F2', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#FECACA', marginBottom: 12 }}>
+                    <Text style={{ fontSize: 11, color: '#DC2626', fontWeight: 'bold' }}>⚠️ アプリへの正しい復帰URL（ディープリンク）</Text>
+                    <Text style={{ fontSize: 13, color: '#B91C1C', marginTop: 4, fontWeight: 'bold' }} selectable>
+                      myapp://ar-reward?promo_id={generatedShopData.id}
+                    </Text>
+                    <Text style={{ fontSize: 10, color: '#7F1D1D', marginTop: 6, lineHeight: 14 }}>
+                      ※不正取得防止のため、パラメータに is_win やステータス情報は絶対に付与しないでください。当たりハズレの判定やボス情報の取得は、アプリ側の useARRewardHandler 内で安全に処理されます。
+                    </Text>
+                  </View>
+
                   <View style={{ width: '100%', backgroundColor: '#F1F5F9', padding: 12, borderRadius: 8 }}>
                     <Text style={{ fontSize: 11, color: '#64748B', fontWeight: 'bold' }}>クライアントUUID (下の設定で自動セット済み)</Text>
                     <Text style={{ fontSize: 13, color: '#0F172A', marginTop: 4, fontWeight: '900' }} selectable>{generatedShopData.id}</Text>
@@ -1762,9 +1809,9 @@ export default function AdminDashboard() {
             </View>
 
             <View style={styles.card}>
-              <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト＆確率管理</Text>
+              <Text style={styles.cardTitle}>🌐 クライアント別 WebARオブジェクト＆報酬管理</Text>
               <Text style={{color:'#64748B', fontSize: 13, marginBottom: 16}}>
-                発行したUUIDに対して、表示するオブジェクトやクーポンのドロップ確率を個別に設定します。
+                発行したUUIDに対して、表示するオブジェクトや報酬内容（カード付与 / ボスバトル）を個別に設定します。
               </Text>
 
               <Text style={styles.label}>1. 配信制御範囲の指定</Text>
@@ -1794,91 +1841,139 @@ export default function AdminDashboard() {
 
               <View style={styles.divider} />
 
-              <Text style={[styles.cardTitle, {fontSize: 16, color: '#D97706'}]}><Gift color="#D97706" size={16} style={{top:3}} /> 4. インセンティブ＆アセット（生成/アップロード）</Text>
+              <Text style={[styles.cardTitle, {fontSize: 16, color: '#D97706'}]}><Gift color="#D97706" size={16} style={{top:3}} /> 4. インセンティブ＆アセット設定</Text>
               
-              {/* 通常アセット */}
-              <View style={{backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 16}}>
-                <Text style={styles.label}>ハズレ（通常時）の表示オブジェクト ＆ カードステータス</Text>
-                <View style={styles.radioGroup}>
-                  <TouchableOpacity style={[styles.radioBtn, arAssetMode === 'upload' && styles.activeRadio]} onPress={() => setArAssetMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
-                  <TouchableOpacity style={[styles.radioBtn, arAssetMode === 'ai' && styles.activeRadio]} onPress={() => setArAssetMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
-                </View>
-                {arAssetMode === 'upload' ? (
-                  <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#475569', marginTop: 0 }]} onPress={() => handleUploadArAsset(arTargetClientId, false)} disabled={loading || arClientType === 'global'}>
-                    <Text style={styles.primaryBtnText}>📁 通常オブジェクトをアップロード</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View>
-                    <TextInput style={[styles.input, {marginBottom: 8}]} value={arAssetAiPrompt} onChangeText={setArAssetAiPrompt} placeholder="AI画像生成プロンプトを入力..." />
-                    <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#475569', marginTop: 0 }]} onPress={() => handleGenerateArAssetAi(false)} disabled={loading || arClientType === 'global'}>
-                      <Text style={styles.primaryBtnText}><Sparkles color="#FFF" size={16}/> AIでアセットを生成する</Text>
-                    </TouchableOpacity>
-                  </View>
-                )}
-                {arAssetCustomUrl ? <Text style={{fontSize:11, color:'#475569', marginTop: 8}} numberOfLines={1}>登録済: {arAssetCustomUrl}</Text> : null}
-                
-                {/* 💡 通常アセット用カードステータス入力 */}
-                <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#E2E8F0'}}>
-                  <Text style={{fontSize: 12, color: '#475569', fontWeight: 'bold', marginBottom: 6}}>付与されるカードのステータス設定</Text>
-                  <View style={styles.row}>
-                    <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetName} onChangeText={setArAssetName} placeholder="カード名" />
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetRarity} onChangeText={setArAssetRarity} placeholder="レア" />
-                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13}]} value={arAssetAttr} onChangeText={setArAssetAttr} placeholder="属性" />
-                  </View>
-                  <View style={[styles.row, {marginTop: 6}]}>
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetHp} onChangeText={setArAssetHp} placeholder="HP" keyboardType="numeric" />
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetAtk} onChangeText={setArAssetAtk} placeholder="ATK" keyboardType="numeric" />
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetDef} onChangeText={setArAssetDef} placeholder="DEF" keyboardType="numeric" />
-                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13}]} value={arAssetSpd} onChangeText={setArAssetSpd} placeholder="SPD" keyboardType="numeric" />
-                  </View>
-                </View>
+              {/* 💡 報酬タイプの分岐（カード付与 or ボス出現）を追加 */}
+              <View style={[styles.radioGroup, {marginBottom: 16}]}>
+                <TouchableOpacity style={[styles.radioBtn, arRewardType === 'card' && styles.activeRadio]} onPress={() => setArRewardType('card')}>
+                  <Text style={[styles.radioText, arRewardType === 'card' && styles.activeRadioText]}>🎴 確率でカード付与</Text>
+                </TouchableOpacity>
+                <TouchableOpacity style={[styles.radioBtn, arRewardType === 'boss' && styles.activeRadio]} onPress={() => setArRewardType('boss')}>
+                  <Text style={[styles.radioText, arRewardType === 'boss' && styles.activeRadioText]}>⚔️ ボス出現(バトル)</Text>
+                </TouchableOpacity>
               </View>
 
-              {/* 当たりアセット */}
-              <View style={{backgroundColor: '#FFFBEB', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#FDE68A', marginBottom: 16}}>
-                <Text style={styles.label}>🎉 当たり（当選時）の表示オブジェクト ＆ カードステータス</Text>
-                <View style={styles.radioGroup}>
-                  <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'upload' && styles.activeRadio]} onPress={() => setArWinAssetMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
-                  <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'ai' && styles.activeRadio]} onPress={() => setArWinAssetMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
-                </View>
-                {arWinAssetMode === 'upload' ? (
-                  <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#D97706', marginTop: 0 }]} onPress={() => handleUploadArAsset(arTargetClientId, true)} disabled={loading || arClientType === 'global'}>
-                    <Text style={styles.primaryBtnText}>🎁 当たりオブジェクトをアップロード</Text>
-                  </TouchableOpacity>
-                ) : (
-                  <View>
-                    <TextInput style={[styles.input, {marginBottom: 8}]} value={arWinAssetAiPrompt} onChangeText={setArWinAssetAiPrompt} placeholder="AI画像生成プロンプトを入力..." />
-                    <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#D97706', marginTop: 0 }]} onPress={() => handleGenerateArAssetAi(true)} disabled={loading || arClientType === 'global'}>
-                      <Text style={styles.primaryBtnText}><Sparkles color="#FFF" size={16}/> AIで当たりアセットを生成</Text>
-                    </TouchableOpacity>
+              {arRewardType === 'card' ? (
+                <>
+                  {/* --- カード付与モードのUI --- */}
+                  <View style={{backgroundColor: '#F8FAFC', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 16}}>
+                    <Text style={styles.label}>ハズレ（通常時）の表示オブジェクト ＆ カードステータス</Text>
+                    <View style={styles.radioGroup}>
+                      <TouchableOpacity style={[styles.radioBtn, arAssetMode === 'upload' && styles.activeRadio]} onPress={() => setArAssetMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
+                      <TouchableOpacity style={[styles.radioBtn, arAssetMode === 'ai' && styles.activeRadio]} onPress={() => setArAssetMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
+                    </View>
+                    {arAssetMode === 'upload' ? (
+                      <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#475569', marginTop: 0 }]} onPress={() => handleUploadArAsset(arTargetClientId, 'base')} disabled={loading || arClientType === 'global'}>
+                        <Text style={styles.primaryBtnText}>📁 通常オブジェクトをアップロード</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View>
+                        <TextInput style={[styles.input, {marginBottom: 8}]} value={arAssetAiPrompt} onChangeText={setArAssetAiPrompt} placeholder="AI画像生成プロンプトを入力..." />
+                        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#475569', marginTop: 0 }]} onPress={() => handleGenerateArAssetAi('base')} disabled={loading || arClientType === 'global'}>
+                          <Text style={styles.primaryBtnText}><Sparkles color="#FFF" size={16}/> AIでアセットを生成する</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    {arAssetCustomUrl ? <Text style={{fontSize:11, color:'#475569', marginTop: 8}} numberOfLines={1}>登録済: {arAssetCustomUrl}</Text> : null}
+                    
+                    <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#E2E8F0'}}>
+                      <Text style={{fontSize: 12, color: '#475569', fontWeight: 'bold', marginBottom: 6}}>付与されるカードのステータス設定</Text>
+                      <View style={styles.row}>
+                        <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetName} onChangeText={setArAssetName} placeholder="カード名" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetRarity} onChangeText={setArAssetRarity} placeholder="レア" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13}]} value={arAssetAttr} onChangeText={setArAssetAttr} placeholder="属性" />
+                      </View>
+                      <View style={[styles.row, {marginTop: 6}]}>
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetHp} onChangeText={setArAssetHp} placeholder="HP" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetAtk} onChangeText={setArAssetAtk} placeholder="ATK" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13}]} value={arAssetDef} onChangeText={setArAssetDef} placeholder="DEF" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13}]} value={arAssetSpd} onChangeText={setArAssetSpd} placeholder="SPD" keyboardType="numeric" />
+                      </View>
+                    </View>
                   </View>
-                )}
-                {arWinAssetUrl ? <Text style={{fontSize:11, color:'#D97706', marginTop: 8}} numberOfLines={1}>登録済: {arWinAssetUrl}</Text> : null}
 
-                {/* 💡 当たりアセット用カードステータス入力 */}
-                <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#FDE68A'}}>
-                  <Text style={{fontSize: 12, color: '#D97706', fontWeight: 'bold', marginBottom: 6}}>付与されるレアカードのステータス設定</Text>
-                  <View style={styles.row}>
-                    <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetName} onChangeText={setArWinAssetName} placeholder="レアカード名" />
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetRarity} onChangeText={setArWinAssetRarity} placeholder="レア" />
-                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAttr} onChangeText={setArWinAssetAttr} placeholder="属性" />
+                  <View style={{backgroundColor: '#FFFBEB', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#FDE68A', marginBottom: 16}}>
+                    <Text style={styles.label}>🎉 当たり（当選時）の表示オブジェクト ＆ カードステータス</Text>
+                    <View style={styles.radioGroup}>
+                      <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'upload' && styles.activeRadio]} onPress={() => setArWinAssetMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
+                      <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'ai' && styles.activeRadio]} onPress={() => setArWinAssetMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
+                    </View>
+                    {arWinAssetMode === 'upload' ? (
+                      <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#D97706', marginTop: 0 }]} onPress={() => handleUploadArAsset(arTargetClientId, 'win')} disabled={loading || arClientType === 'global'}>
+                        <Text style={styles.primaryBtnText}>🎁 当たりオブジェクトをアップロード</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View>
+                        <TextInput style={[styles.input, {marginBottom: 8}]} value={arWinAssetAiPrompt} onChangeText={setArWinAssetAiPrompt} placeholder="AI画像生成プロンプトを入力..." />
+                        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#D97706', marginTop: 0 }]} onPress={() => handleGenerateArAssetAi('win')} disabled={loading || arClientType === 'global'}>
+                          <Text style={styles.primaryBtnText}><Sparkles color="#FFF" size={16}/> AIで当たりアセットを生成</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    {arWinAssetUrl ? <Text style={{fontSize:11, color:'#D97706', marginTop: 8}} numberOfLines={1}>登録済: {arWinAssetUrl}</Text> : null}
+
+                    <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#FDE68A'}}>
+                      <Text style={{fontSize: 12, color: '#D97706', fontWeight: 'bold', marginBottom: 6}}>付与されるレアカードのステータス設定</Text>
+                      <View style={styles.row}>
+                        <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetName} onChangeText={setArWinAssetName} placeholder="レアカード名" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetRarity} onChangeText={setArWinAssetRarity} placeholder="レア" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAttr} onChangeText={setArWinAssetAttr} placeholder="属性" />
+                      </View>
+                      <View style={[styles.row, {marginTop: 6}]}>
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetHp} onChangeText={setArWinAssetHp} placeholder="HP" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAtk} onChangeText={setArWinAssetAtk} placeholder="ATK" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetDef} onChangeText={setArWinAssetDef} placeholder="DEF" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetSpd} onChangeText={setArWinAssetSpd} placeholder="SPD" keyboardType="numeric" />
+                      </View>
+                    </View>
                   </View>
-                  <View style={[styles.row, {marginTop: 6}]}>
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetHp} onChangeText={setArWinAssetHp} placeholder="HP" keyboardType="numeric" />
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAtk} onChangeText={setArWinAssetAtk} placeholder="ATK" keyboardType="numeric" />
-                    <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetDef} onChangeText={setArWinAssetDef} placeholder="DEF" keyboardType="numeric" />
-                    <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetSpd} onChangeText={setArWinAssetSpd} placeholder="SPD" keyboardType="numeric" />
+
+                  <Text style={styles.label}>💡 クーポン当選確率（0.0 〜 1.0）</Text>
+                  <TextInput style={styles.input} value={arWinRate} onChangeText={setArWinRate} placeholder="例: 0.1 (10%)" keyboardType="numeric" />
+                </>
+              ) : (
+                <>
+                  {/* --- ボスバトルモードのUI --- */}
+                  <View style={{backgroundColor: '#FEF2F2', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#FECACA', marginBottom: 16}}>
+                    <Text style={[styles.label, {color: '#B91C1C'}]}><Swords color="#B91C1C" size={16} style={{top: 2}}/> ボスの表示オブジェクト ＆ ステータス</Text>
+                    <View style={styles.radioGroup}>
+                      <TouchableOpacity style={[styles.radioBtn, arBossMode === 'upload' && styles.activeRadio]} onPress={() => setArBossMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
+                      <TouchableOpacity style={[styles.radioBtn, arBossMode === 'ai' && styles.activeRadio]} onPress={() => setArBossMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
+                    </View>
+                    {arBossMode === 'upload' ? (
+                      <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#DC2626', marginTop: 0 }]} onPress={() => handleUploadArAsset(arTargetClientId, 'boss')} disabled={loading || arClientType === 'global'}>
+                        <Text style={styles.primaryBtnText}>📁 ボスオブジェクトをアップロード</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View>
+                        <TextInput style={[styles.input, {marginBottom: 8}]} value={arBossAiPrompt} onChangeText={setArBossAiPrompt} placeholder="AI画像生成プロンプトを入力..." />
+                        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#DC2626', marginTop: 0 }]} onPress={() => handleGenerateArAssetAi('boss')} disabled={loading || arClientType === 'global'}>
+                          <Text style={styles.primaryBtnText}><Sparkles color="#FFF" size={16}/> AIでボスアセットを生成する</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    {arBossImageUrl ? <Text style={{fontSize:11, color:'#DC2626', marginTop: 8}} numberOfLines={1}>登録済: {arBossImageUrl}</Text> : null}
+
+                    <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#FECACA'}}>
+                      <Text style={{fontSize: 12, color: '#DC2626', fontWeight: 'bold', marginBottom: 6}}>ボスのステータス設定</Text>
+                      <View style={styles.row}>
+                        <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossName} onChangeText={setArBossName} placeholder="ボス名" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossElement} onChangeText={setArBossElement} placeholder="属性" />
+                      </View>
+                      <View style={[styles.row, {marginTop: 6}]}>
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossHp} onChangeText={setArBossHp} placeholder="HP" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossAtk} onChangeText={setArBossAtk} placeholder="ATK" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossDef} onChangeText={setArBossDef} placeholder="DEF" keyboardType="numeric" />
+                      </View>
+                    </View>
                   </View>
-                </View>
-              </View>
+                </>
+              )}
 
-              <Text style={styles.label}>💡 クーポン当選確率（%単位。例: 0.1 は 1000分の1）</Text>
-              <TextInput style={styles.input} value={arWinRate} onChangeText={setArWinRate} placeholder="例: 0.5" keyboardType="numeric" />
+              <Text style={styles.label}>{arRewardType === 'card' ? '当たり（当選時）のボタンアクション文言' : 'ボス出現時のボタンアクション文言'}</Text>
+              <TextInput style={styles.input} value={arActionTextWin} onChangeText={setArActionTextWin} placeholder={arRewardType === 'card' ? "例: ギョーザ無料券と限定カードをGET！" : "例: ボスに挑戦する！"} />
 
-              <Text style={styles.label}>当たり（当選時）のボタンアクション文言</Text>
-              <TextInput style={styles.input} value={arActionTextWin} onChangeText={setArActionTextWin} placeholder="例: ギョーザ無料券と限定カードをGET！" />
-
-              <Text style={styles.label}>通常時（ハズレ時）のボタンアクション文言</Text>
+              <Text style={styles.label}>{arRewardType === 'card' ? '通常時（ハズレ時）のボタンアクション文言' : 'ボスから逃げる時のボタンアクション文言(任意)'}</Text>
               <TextInput style={styles.input} value={arActionText} onChangeText={setArActionText} placeholder="例: 限定カードをGET！" />
 
               <View style={styles.divider} />
@@ -1916,7 +2011,6 @@ export default function AdminDashboard() {
                 <TextInput style={[styles.input, {marginTop: 8}]} value={arScheduledAt} onChangeText={setArScheduledAt} placeholder="実行日時 (ISO 例: 2026-06-20T12:00)" />
               )}
 
-              {/* 💡 新機能：プレビューボタン */}
               <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#3B82F6', marginTop: 20, flexDirection: 'row', justifyContent: 'center'}]} onPress={handlePreviewAr}>
                 <PlayCircle color="#FFF" size={20} style={{marginRight: 8}} />
                 <Text style={styles.primaryBtnText}>本番反映前にブラウザでプレビュー確認</Text>
@@ -1973,7 +2067,6 @@ export default function AdminDashboard() {
             <Text style={styles.label}>現在の属性一覧</Text>
             <Text style={styles.listItemSub}>{elementsList.join(' / ')}</Text>
             
-            {/* 🌟 属性と相性の入力フォーム */}
             <View style={{ backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#E2E8F0', borderRadius: 12, padding: 16, marginTop: 8, marginBottom: 24 }}>
               <Text style={{ fontSize: 13, fontWeight: 'bold', color: '#334155', marginBottom: 12 }}>■ 新しい属性の追加 / 既存属性の相性更新</Text>
               
