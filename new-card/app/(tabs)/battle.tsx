@@ -4,7 +4,7 @@ import * as Location from 'expo-location';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { ShieldAlert, Trophy, Activity, Swords, Map as MapIcon, Flag, Zap, X, MapPin, Clock, Flame, Shield, Heart, Zap as FastZap, Scan, Camera as CameraIcon } from 'lucide-react-native';
-import { CameraView, useCameraPermissions } from 'expo-camera'; // 🌟 Expo Cameraのインポート
+import { CameraView, useCameraPermissions } from 'expo-camera';
 
 // Web環境でのクラッシュを防ぐ動的インポート
 let MapView: any;
@@ -542,7 +542,8 @@ export default function BattleScreen() {
         <View style={styles.statItem}><Flag color="#3B82F6" size={20} /><Text style={styles.statValue}>{territories.filter(t=>t.player_id===myId).length}</Text><Text style={styles.statLabel}>支配陣地</Text></View>
       </View>
 
-      <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 100 }}>
+      {/* 🌟 ARボタンと被らないようにスクロールの下部余白(paddingBottom)を増やしました */}
+      <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 150 }}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📍 リアルマップ：陣取り(テリトリー) ＆ ボス</Text>
           {loadingMap ? (
@@ -615,7 +616,6 @@ export default function BattleScreen() {
                             <Text style={[styles.bossBtnText, {color: feature.color}]}>デッキ討伐</Text>
                           </TouchableOpacity>
                         </View>
-                        {/* 🌟 案2: ボスのパネルからダイレクトにWebARへ遷移するボタン */}
                         <TouchableOpacity 
                           style={[styles.bossArBtn, { backgroundColor: '#10B981' }]} 
                           onPress={() => openWebAR(`https://example.com/ar?boss_id=${detectedBoss.id}`)}
@@ -672,7 +672,7 @@ export default function BattleScreen() {
         )}
       </ScrollView>
 
-      {/* 🌟 案1: フローティングアクションボタン（ARスキャン） */}
+      {/* 🌟 修正：ARスキャンボタンの位置を上に持ち上げ、タブバーに隠れないように調整 */}
       <TouchableOpacity 
         style={styles.floatingArBtn}
         onPress={() => setCampaignModalVisible(true)}
@@ -702,7 +702,8 @@ export default function BattleScreen() {
                   <TouchableOpacity style={styles.campaignItem} onPress={() => setSelectedCampaign(item)}>
                     <Text style={styles.campaignTitle}>{item.title}</Text>
                     <Text style={styles.campaignSponsor}>{item.sponsor_name}</Text>
-                    <Text style={styles.campaignDescPreview} numberOfLines={2}>{item.description || '現地でQRを読み込んで探索しよう！'}</Text>
+                    {/* 🌟 本番環境用にテキストを最適化 */}
+                    <Text style={styles.campaignDescPreview} numberOfLines={2}>{item.description || '現地でマーカーを見つけて専用コンテンツを探索しよう！'}</Text>
                   </TouchableOpacity>
                 )}
                 ListEmptyComponent={<Text style={styles.emptyText}>現在近くで開催中のキャンペーンはありません。</Text>}
@@ -713,12 +714,16 @@ export default function BattleScreen() {
                   <Text style={styles.backBtnText}>← 一覧に戻る</Text>
                 </TouchableOpacity>
                 <Text style={styles.campaignDetailTitle}>{selectedCampaign.title}</Text>
-                <Text style={styles.campaignDetailSponsor}>協賛: {selectedCampaign.sponsor_name}</Text>
+                {/* 🌟 スポンサーの有無に応じた表示分岐を追加 */}
+                <Text style={styles.campaignDetailSponsor}>
+                  {selectedCampaign.sponsor_name ? `主催・協賛: ${selectedCampaign.sponsor_name}` : '公式イベント'}
+                </Text>
                 
                 <View style={styles.campaignDetailBox}>
+                  {/* 🌟 モックアップ文章を削除し、本番向けの汎用テキストに変更 */}
                   <Text style={styles.campaignDetailDesc}>
-                    対象の店舗や施設に設置されている専用の「ARマーカー（QRコード）」を見つけましょう！{"\n\n"}
-                    スキャナーを起動してコードを読み取ると、現実世界にアイテムやボスが出現します。
+                    対象の店舗やイベント会場に設置された専用の「ARマーカー（QRコード）」を探しましょう！{"\n\n"}
+                    スキャナーを起動してマーカーを読み取ると、現実世界に限定アイテムやボスが出現し、バトルや報酬獲得のアクションが発生します。
                   </Text>
                 </View>
                 
@@ -950,8 +955,8 @@ const styles = StyleSheet.create({
   resultPower: { fontSize: 24, fontWeight: '900', color: '#0F172A' },
   resultMessage: { fontSize: 14, color: '#475569', textAlign: 'center', lineHeight: 22, fontWeight: '700' },
 
-  // 🌟 キャンペーン・スキャナー関連スタイル
-  floatingArBtn: { position: 'absolute', bottom: 20, right: 20, backgroundColor: '#10B981', width: 68, height: 68, borderRadius: 34, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 6, elevation: 6 },
+  // 🌟 キャンペーン・スキャナー関連のスタイル（ボトム位置などを調整）
+  floatingArBtn: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#10B981', width: 68, height: 68, borderRadius: 34, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 6, elevation: 6, zIndex: 10 },
   floatingArBtnText: { color: '#FFF', fontSize: 10, fontWeight: '900', marginTop: 2 },
   campaignItem: { backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
   campaignTitle: { fontSize: 16, fontWeight: '900', color: '#0F172A', marginBottom: 6 },
