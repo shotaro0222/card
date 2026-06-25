@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator, Image } from 'react-native';
+import { View, Text, TextInput, TouchableOpacity, StyleSheet, Alert, ScrollView, ActivityIndicator } from 'react-native';
 import { supabase } from '../lib/supabase';
 import { useRouter } from 'expo-router';
 
-// 💡 カスタムロゴコンポーネントをインポート
+// ロゴコンポーネント
 import SnapCardLogo from './components/SnapCardLogo';
 
 export default function LoginScreen() {
@@ -91,11 +91,9 @@ export default function LoginScreen() {
 
   return (
     <ScrollView style={styles.scrollContainer} contentContainerStyle={styles.container}>
-      
-      {/* 💡 テキストタイトルの代わりにコンポーネントロゴを配置 */}
-      <SnapCardLogo color="#0F172A" bgColor="#F8FAFC" scale={1.1} />
-      
-      <Text style={styles.subtitle}>REAL-PHOTO TCG & DOMINATION GAME</Text>
+      {/* タイトルをテキストからロゴコンポーネントへ差し替え */}
+      <SnapCardLogo color="#0F172A" bgColor="#F8FAFC" scale={1.2} />
+      <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
       <Text style={styles.formTitle}>{isSignUp ? '【新規登録】' : '【ログイン】'}</Text>
 
@@ -119,7 +117,7 @@ export default function LoginScreen() {
 
       {isSignUp && (
         <View style={styles.demoSection}>
-          <Text style={styles.sectionTitle}>プロファイル</Text>
+          <Text style={styles.sectionTitle}>司令官プロファイル（マーケティング割付用）</Text>
           
           <TextInput
             style={styles.input}
@@ -178,7 +176,7 @@ export default function LoginScreen() {
         <>
           {!isSignUp ? (
             <TouchableOpacity style={styles.button} onPress={signInWithEmail}>
-              <Text style={styles.buttonText}>ログイン</Text>
+              <Text style={styles.buttonText}>ゲートを開放してログイン</Text>
             </TouchableOpacity>
           ) : (
             <TouchableOpacity style={[styles.button, { backgroundColor: '#10b981' }]} onPress={signUpWithEmail}>
@@ -188,7 +186,7 @@ export default function LoginScreen() {
 
           <TouchableOpacity style={styles.toggleLink} onPress={() => setIsSignUp(!isSignUp)}>
             <Text style={styles.toggleLinkText}>
-              {isSignUp ? 'すでにアカウントをお持ちの方（ログインへ）' : '新しく登録する（新規作成へ）'}
+              {isSignUp ? 'すでにアカウントをお持ちの方（ログインへ）' : '新しく軍勢を登録する（新規作成へ）'}
             </Text>
           </TouchableOpacity>
         </>
@@ -200,7 +198,7 @@ export default function LoginScreen() {
 const styles = StyleSheet.create({
   scrollContainer: { flex: 1, backgroundColor: '#F8FAFC' },
   container: { padding: 24, justifyContent: 'center', paddingTop: 80, paddingBottom: 40 },
-  
+  title: { fontSize: 40, fontWeight: '900', color: '#0F172A', textAlign: 'center', letterSpacing: 2, marginBottom: 5 },
   subtitle: { fontSize: 12, color: '#64748B', textAlign: 'center', marginBottom: 40, fontWeight: '700' },
   formTitle: { color: '#475569', fontSize: 16, fontWeight: '800', textAlign: 'center', marginBottom: 24 },
   

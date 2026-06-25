@@ -95,7 +95,7 @@ export default function LoginScreen() {
       <SnapCardLogo color="#0F172A" bgColor="#F8FAFC" scale={1.2} />
       <Text style={styles.subtitle}>REAL-PHOTO TCG & MARKETING PLATFORM</Text>
 
-      <Text style={styles.formTitle}>{isSignUp ? '【新規軍勢登録】' : '【闘技場潜入ゲート】'}</Text>
+      <Text style={styles.formTitle}>{isSignUp ? '【新規登録】' : '【ログイン】'}</Text>
 
       <TextInput
         style={styles.input}
