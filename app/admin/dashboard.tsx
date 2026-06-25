@@ -475,7 +475,7 @@ export default function AdminDashboard() {
       
       if (assetType === 'win') {
         setArWinAssetUrl(publicUrl);
-        Alert.alert('アップロード成功', `🎁 当たり(クーポン)用アセットをアップロードしました`);
+        Alert.alert('アップロード成功', `🎁 報酬用アセットをアップロードしました`);
       } else if (assetType === 'boss') {
         setArBossImageUrl(publicUrl);
         Alert.alert('アップロード成功', `😈 ボス用アセットをアップロードしました`);
@@ -501,7 +501,7 @@ export default function AdminDashboard() {
       if (data?.imageUrl) {
         if (assetType === 'win') {
           setArWinAssetUrl(data.imageUrl);
-          Alert.alert('生成成功', '🎁 当たりアセットをAIで生成しました！');
+          Alert.alert('生成成功', '🎁 報酬アセットをAIで生成しました！');
         } else if (assetType === 'boss') {
           setArBossImageUrl(data.imageUrl);
           Alert.alert('生成成功', '😈 ボスアセットをAIで生成しました！');
@@ -636,24 +636,41 @@ export default function AdminDashboard() {
             return true;
           });
 
-          const cardsToInsert = matched.map((p: any) => ({
-            player_id: p.id, card_name: `【特典】${cName}`, image_url: finalCardImageUrl, feature: `運営直配布`,
-            skill_name: cardDataToInsert.skill_name, status_hp: cardDataToInsert.status_hp || 100,
-            status_atk: cardDataToInsert.status_atk || 50, status_def: cardDataToInsert.status_def || 50,
-            status_spd: cardDataToInsert.status_spd || 50, status_total: cardDataToInsert.status_total || 300,
-            rarity: cRarity, element: cAttr, is_active: true
+          // 🚨【修正箇所】: 直接 cards テーブルに入れるのではなく、rewards（報酬ボックス）に入れるように変更
+          const rewardsToInsert = matched.map((p: any) => ({
+            player_id: p.id,
+            title: `🎁 運営からのプレゼント: ${cName}`,
+            description: `【属性: ${cAttr} / レアリティ: ${cRarity}】の限定カードが届きました！`,
+            reward_type: 'card',
+            reward_data: {
+              card_name: `【特典】${cName || '名もなき特権カード'}`,
+              image_url: finalCardImageUrl,
+              feature: `運営直配布`,
+              skill_name: cardDataToInsert.skill_name,
+              status_hp: cardDataToInsert.status_hp,
+              status_atk: cardDataToInsert.status_atk,
+              status_def: cardDataToInsert.status_def,
+              status_spd: cardDataToInsert.status_spd,
+              status_total: cardDataToInsert.status_total,
+              rarity: cRarity || 'SR',
+              element: cAttr || '火'
+            },
+            is_claimed: false
           }));
 
-          if (cardsToInsert.length > 0) {
-            await supabase.from('cards').insert(cardsToInsert);
+          if (rewardsToInsert.length > 0) {
+            const { error: rewardError } = await supabase.from('rewards').insert(rewardsToInsert);
+            if (rewardError) throw rewardError;
+
+            // お知らせメッセージも送信
             const messages = matched.map((p: any) => ({
-              sender_id: 'SYSTEM', text: `🎁 特典を配布しました: ${cName}`,
+              sender_id: 'SYSTEM', text: `🎁 報酬ボックスにプレゼントが届いています: ${cName}`,
               metadata: { type: 'direct_gift', card_name: cName, fixed_card_id: insertedFixed?.id || null, recipient_id: p.id }
             }));
             await supabase.from('messages').insert(messages);
           }
         }
-        Alert.alert('成功', '特権カードを生成・登録しました！');
+        Alert.alert('成功', '条件に合致するユーザーの「報酬ボックス」に特権カードを配布しました！');
       }
       setCName(''); setCImage(''); setCPackageImage(''); setCAiPrompt(''); setPackDesc('');
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
@@ -685,6 +702,8 @@ export default function AdminDashboard() {
       }]).select().single();
       if (campError) throw campError;
 
+      // 💡 ここは「設定」を保存する場所なので、固定カード情報(fixed_cards)として登録しておき、
+      // 実際のバトル画面等で勝利したときに `rewards` テーブルへ挿入する仕組みになります。
       await supabase.from('fixed_cards').insert([{
         card_name: dropCardName || `【撃破報酬】${bName}`, trigger_type: 'boss_drop', image_url: finalDropCardUrl, sponsor_id: campData.id,
         stats: { element: dropCardAttr, rarity: dropCardRarity, hp: 100, atk: 50, def: 50, spd: 50 }
@@ -695,7 +714,7 @@ export default function AdminDashboard() {
         element: bElement, image_url: finalBossImageUrl, trigger_campaign_id: campData.id
       }]);
 
-      Alert.alert('成功', 'ボスとドロップカードをマップに配置しました！');
+      Alert.alert('成功', 'ボスとドロップカードをマップに配置しました！\n(討伐報酬はプレイヤー側のアプリで処理されます)');
       fetchBosses();
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
@@ -778,6 +797,7 @@ export default function AdminDashboard() {
           }]).select().single();
           if (campError) throw campError;
 
+          // 💡 ここも設定の保存のみ
           await supabase.from('fixed_cards').insert([{
             card_name: `【戦果】${randomName}の結晶核`, trigger_type: 'boss_drop', image_url: finalDropUrl, sponsor_id: campData.id,
             stats: { element: randomElement, rarity: randomRarity, hp: 100, atk: 60, def: 40, spd: 80 }
@@ -880,6 +900,7 @@ export default function AdminDashboard() {
       hp: parseInt(arAssetHp)||100, atk: parseInt(arAssetAtk)||50, def: parseInt(arAssetDef)||50, spd: parseInt(arAssetSpd)||50
     };
     
+    // 💡 ボス勝利時の報酬カードとしても利用される
     const arWinStats = {
       name: arWinAssetName || '大当りARカード', rarity: arWinAssetRarity, element: arWinAssetAttr,
       hp: parseInt(arWinAssetHp)||500, atk: parseInt(arWinAssetAtk)||200, def: parseInt(arWinAssetDef)||200, spd: parseInt(arWinAssetSpd)||200
@@ -1843,7 +1864,6 @@ export default function AdminDashboard() {
 
               <Text style={[styles.cardTitle, {fontSize: 16, color: '#D97706'}]}><Gift color="#D97706" size={16} style={{top:3}} /> 4. インセンティブ＆アセット設定</Text>
               
-              {/* 💡 報酬タイプの分岐（カード付与 or ボス出現）を追加 */}
               <View style={[styles.radioGroup, {marginBottom: 16}]}>
                 <TouchableOpacity style={[styles.radioBtn, arRewardType === 'card' && styles.activeRadio]} onPress={() => setArRewardType('card')}>
                   <Text style={[styles.radioText, arRewardType === 'card' && styles.activeRadioText]}>🎴 確率でカード付与</Text>
@@ -1964,6 +1984,43 @@ export default function AdminDashboard() {
                         <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossHp} onChangeText={setArBossHp} placeholder="HP" keyboardType="numeric" />
                         <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossAtk} onChangeText={setArBossAtk} placeholder="ATK" keyboardType="numeric" />
                         <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arBossDef} onChangeText={setArBossDef} placeholder="DEF" keyboardType="numeric" />
+                      </View>
+                    </View>
+                  </View>
+
+                  {/* 🌟 追加：ボス討伐報酬カードの設定UI */}
+                  <View style={{backgroundColor: '#F0FDF4', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#BBF7D0', marginBottom: 16}}>
+                    <Text style={[styles.label, {color: '#15803D'}]}><Gift color="#15803D" size={16} style={{top: 2}}/> ボス討伐報酬カードの画像 ＆ ステータス</Text>
+                    <View style={styles.radioGroup}>
+                      <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'upload' && styles.activeRadio]} onPress={() => setArWinAssetMode('upload')}><Text style={styles.radioText}>アップロード</Text></TouchableOpacity>
+                      <TouchableOpacity style={[styles.radioBtn, arWinAssetMode === 'ai' && styles.activeRadio]} onPress={() => setArWinAssetMode('ai')}><Text style={styles.radioText}>AI生成</Text></TouchableOpacity>
+                    </View>
+                    {arWinAssetMode === 'upload' ? (
+                      <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#10B981', marginTop: 0 }]} onPress={() => handleUploadArAsset(arTargetClientId, 'win')} disabled={loading || arClientType === 'global'}>
+                        <Text style={styles.primaryBtnText}>📁 報酬カード画像をアップロード</Text>
+                      </TouchableOpacity>
+                    ) : (
+                      <View>
+                        <TextInput style={[styles.input, {marginBottom: 8}]} value={arWinAssetAiPrompt} onChangeText={setArWinAssetAiPrompt} placeholder="AI画像生成プロンプトを入力..." />
+                        <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#10B981', marginTop: 0 }]} onPress={() => handleGenerateArAssetAi('win')} disabled={loading || arClientType === 'global'}>
+                          <Text style={styles.primaryBtnText}><Sparkles color="#FFF" size={16}/> AIで報酬カード画像を生成</Text>
+                        </TouchableOpacity>
+                      </View>
+                    )}
+                    {arWinAssetUrl ? <Text style={{fontSize:11, color:'#10B981', marginTop: 8}} numberOfLines={1}>登録済: {arWinAssetUrl}</Text> : null}
+
+                    <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#BBF7D0'}}>
+                      <Text style={{fontSize: 12, color: '#166534', fontWeight: 'bold', marginBottom: 6}}>報酬カードのステータス設定</Text>
+                      <View style={styles.row}>
+                        <TextInput style={[styles.input, {flex: 2, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetName} onChangeText={setArWinAssetName} placeholder="カード名" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetRarity} onChangeText={setArWinAssetRarity} placeholder="レア" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAttr} onChangeText={setArWinAssetAttr} placeholder="属性" />
+                      </View>
+                      <View style={[styles.row, {marginTop: 6}]}>
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetHp} onChangeText={setArWinAssetHp} placeholder="HP" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetAtk} onChangeText={setArWinAssetAtk} placeholder="ATK" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, marginRight: 4, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetDef} onChangeText={setArWinAssetDef} placeholder="DEF" keyboardType="numeric" />
+                        <TextInput style={[styles.input, {flex: 1, height: 40, fontSize: 13, backgroundColor: '#FFF'}]} value={arWinAssetSpd} onChangeText={setArWinAssetSpd} placeholder="SPD" keyboardType="numeric" />
                       </View>
                     </View>
                   </View>
