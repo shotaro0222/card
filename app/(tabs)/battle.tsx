@@ -422,9 +422,31 @@ export default function BattleScreen() {
         const newDefs = playerStats.bossDefeats + 1;
         await supabase.from('profiles').update({ boss_defeats: newDefs }).eq('id', myId);
         setPlayerStats(prev => ({ ...prev, bossDefeats: newDefs }));
+        
         const reward = detectedBoss.fixed_cards;
-        if(reward) await supabase.from('cards').insert([{ player_id: myId, card_name: reward.card_name, image_url: reward.image_url, status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd, rarity: "P", is_fixed: true, element: detectedBoss.element }]);
-        Alert.alert("👹 ボス討伐！", `限定カードを獲得！`);
+        if (reward) {
+          // 🌟 ボス討伐報酬を rewards テーブルに送るように変更
+          await supabase.from('rewards').insert([{ 
+            player_id: myId, 
+            title: `🎁 ボス討伐報酬: ${reward.card_name}`,
+            description: `エリアボス「${detectedBoss.name}」を見事討伐した報酬の限定カードです！`,
+            reward_type: 'card',
+            reward_data: {
+              card_name: reward.card_name,
+              image_url: reward.image_url,
+              status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd,
+              status_hp: reward.stats.hp,
+              status_atk: reward.stats.atk,
+              status_def: reward.stats.def,
+              status_spd: reward.stats.spd,
+              rarity: reward.stats.rarity || 'P',
+              element: detectedBoss.element || '火',
+              is_fixed: true
+            },
+            is_claimed: false
+          }]);
+        }
+        Alert.alert("👹 ボス討伐！", `限定カードを獲得しました！\n「報酬」ボックスから受け取ってください。`);
       }
     });
   };
@@ -482,8 +504,30 @@ export default function BattleScreen() {
       const newDefs = playerStats.bossDefeats + 1;
       await supabase.from('profiles').update({ boss_defeats: newDefs }).eq('id', myId);
       setPlayerStats(prev => ({ ...prev, bossDefeats: newDefs }));
+      
       const reward = detectedBoss.fixed_cards;
-      if (reward) await supabase.from('cards').insert([{ player_id: myId, card_name: reward.card_name, image_url: reward.image_url, status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd, rarity: "P", is_fixed: true, element: detectedBoss.element }]);
+      if (reward) {
+        // 🌟 デッキ討伐での報酬も rewards テーブルに送るように変更
+        await supabase.from('rewards').insert([{ 
+            player_id: myId, 
+            title: `🎁 デッキ討伐報酬: ${reward.card_name}`,
+            description: `エリアボス「${detectedBoss.name}」をデッキの力で討伐した報酬の限定カードです！`,
+            reward_type: 'card',
+            reward_data: {
+              card_name: reward.card_name,
+              image_url: reward.image_url,
+              status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd,
+              status_hp: reward.stats.hp,
+              status_atk: reward.stats.atk,
+              status_def: reward.stats.def,
+              status_spd: reward.stats.spd,
+              rarity: reward.stats.rarity || 'P',
+              element: detectedBoss.element || '火',
+              is_fixed: true
+            },
+            is_claimed: false
+        }]);
+      }
     }
     
     setIsBattling(false); setAsyncResultModalVisible(true);
@@ -801,7 +845,7 @@ export default function BattleScreen() {
                 <Text style={styles.resultPower}>{asyncResultData?.bossPower}</Text>
               </View>
             </View>
-            <Text style={styles.resultMessage}>{asyncResultData?.isWin ? '圧倒的なデッキ戦力により、ボスを討伐しました！' : 'デッキの戦力が及びませんでした...'}</Text>
+            <Text style={styles.resultMessage}>{asyncResultData?.isWin ? '圧倒的なデッキ戦力により、ボスを討伐しました！\n討伐報酬は「報酬」ボックスに送られました。' : 'デッキの戦力が及びませんでした...'}</Text>
             <TouchableOpacity style={[styles.confirmBtn, { width: '100%', marginTop: 20, backgroundColor: asyncResultData?.isWin ? '#10B981' : '#64748B' }]} onPress={() => setAsyncResultModalVisible(false)}><Text style={styles.confirmBtnText}>閉じる</Text></TouchableOpacity>
           </View>
         </View>
