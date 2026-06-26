@@ -7,7 +7,7 @@ import { decode } from 'base64-arraybuffer';
 import { useFocusEffect, useRouter } from 'expo-router';
 import { Camera, Image as ImageIcon, Zap, Gift } from 'lucide-react-native';
 
-// 💡 先ほど作成したカスタムロゴコンポーネントをインポート
+// 💡 カスタムロゴコンポーネントをインポート
 import SnapCardLogo from '../components/SnapCardLogo';
 
 const { width, height } = Dimensions.get('window');
@@ -51,6 +51,15 @@ export default function ForgeScreen() {
 
   const router = useRouter();
 
+  // 今日の日付を「YYYY-MM-DD」形式で取得する関数
+  const getTodayString = () => {
+    const now = new Date();
+    const year = now.getFullYear();
+    const month = String(now.getMonth() + 1).padStart(2, '0');
+    const day = String(now.getDate()).padStart(2, '0');
+    return `${year}-${month}-${day}`;
+  };
+
   useFocusEffect(
     useCallback(() => {
       fetchCampaigns();
@@ -74,11 +83,23 @@ export default function ForgeScreen() {
     try {
       const { data: { user } } = await supabase.auth.getUser();
       if (user) {
-        const { data: profile } = await supabase.from('profiles').select('forge_count, is_infinite_forge, is_admin').eq('id', user.id).single();
+        // last_forge_date も一緒に取得
+        const { data: profile } = await supabase.from('profiles').select('forge_count, is_infinite_forge, is_admin, last_forge_date').eq('id', user.id).single();
         if (profile) {
-          setForgeCount(profile.forge_count || 0);
           setIsInfinite(profile.is_infinite_forge || false);
           setIsAdmin(profile.is_admin || false);
+
+          const today = getTodayString();
+          let currentCount = profile.forge_count || 0;
+
+          // 最後に生成した日付が今日でなければ、回数を0にリセットする
+          if (profile.last_forge_date !== today) {
+            currentCount = 0;
+            // データベースもリセット（次回からすぐに反映されるように）
+            await supabase.from('profiles').update({ forge_count: 0, last_forge_date: today }).eq('id', user.id);
+          }
+
+          setForgeCount(currentCount);
         }
       }
     } catch (e) {
@@ -344,9 +365,11 @@ export default function ForgeScreen() {
 
       if (insertError) throw new Error(`DB保存失敗: ${insertError.message}`);
 
+      // 生成回数の更新と、今日の日付をDBに記録
       if (!isAdmin && !isInfinite) {
         const newCount = forgeCount + 1;
-        await supabase.from('profiles').update({ forge_count: newCount }).eq('id', user.id);
+        const today = getTodayString();
+        await supabase.from('profiles').update({ forge_count: newCount, last_forge_date: today }).eq('id', user.id);
         setForgeCount(newCount);
       }
 
