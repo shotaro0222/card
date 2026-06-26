@@ -125,21 +125,61 @@ export default function ChatTradeScreen() {
 
   // --- チーム状況確認 / 管理用データロード ---
   const loadPendingRequests = async (teamId: string) => {
-    const { data } = await supabase
+    // 💡 リレーション（結合）エラーが起きても確実にデータを取得・表示するための安全な処理
+    const { data, error } = await supabase
       .from('team_members')
       .select('*, profiles:player_id(player_name)')
       .eq('team_id', teamId)
       .eq('status', 'pending');
-    if (data) setPendingRequests(data);
+
+    if (error) {
+      console.log('JOIN fetch error (pending):', error);
+      // 結合なしで単体取得するフォールバック
+      const { data: fallbackData } = await supabase.from('team_members').select('*').eq('team_id', teamId).eq('status', 'pending');
+      
+      if (fallbackData && fallbackData.length > 0) {
+        const playerIds = fallbackData.map(d => d.player_id);
+        const { data: profs } = await supabase.from('profiles').select('id, player_name').in('id', playerIds);
+        
+        const mergedData = fallbackData.map(d => ({
+          ...d,
+          profiles: profs?.find(p => p.id === d.player_id) || null
+        }));
+        setPendingRequests(mergedData);
+      } else {
+        setPendingRequests([]);
+      }
+    } else if (data) {
+      setPendingRequests(data);
+    }
   };
 
   const loadApprovedMembers = async (teamId: string) => {
-    const { data } = await supabase
+    const { data, error } = await supabase
       .from('team_members')
       .select('*, profiles:player_id(player_name)')
       .eq('team_id', teamId)
       .eq('status', 'approved');
-    if (data) setApprovedMembers(data);
+
+    if (error) {
+      console.log('JOIN fetch error (approved):', error);
+      const { data: fallbackData } = await supabase.from('team_members').select('*').eq('team_id', teamId).eq('status', 'approved');
+      
+      if (fallbackData && fallbackData.length > 0) {
+        const playerIds = fallbackData.map(d => d.player_id);
+        const { data: profs } = await supabase.from('profiles').select('id, player_name').in('id', playerIds);
+        
+        const mergedData = fallbackData.map(d => ({
+          ...d,
+          profiles: profs?.find(p => p.id === d.player_id) || null
+        }));
+        setApprovedMembers(mergedData);
+      } else {
+        setApprovedMembers([]);
+      }
+    } else if (data) {
+      setApprovedMembers(data);
+    }
   };
 
   const openTeamManageModal = () => {
@@ -249,7 +289,6 @@ export default function ChatTradeScreen() {
       if (myTeamDetails?.team_color) existingColors.push(myTeamDetails.team_color);
       const newTeamColor = generateUniqueColor(existingColors);
 
-      // 💡 leader_id を追加して登録
       const { data: teamData, error: teamError } = await supabase
         .from('teams')
         .insert([{ 
@@ -283,8 +322,16 @@ export default function ChatTradeScreen() {
 
   const requestJoinTeam = async (teamId: string) => {
     setLoading(true);
-    await supabase.from('team_members').insert([{ team_id: teamId, player_id: myId, status: 'pending' }]);
-    Alert.alert('申請完了', 'リーダーの承認をお待ちください。');
+    // 💡 role: 'member' を明示してエラーを防ぐ。エラー時もアラートを出すように修正。
+    const { error } = await supabase
+      .from('team_members')
+      .insert([{ team_id: teamId, player_id: myId, status: 'pending', role: 'member' }]);
+      
+    if (error) {
+      Alert.alert('申請エラー', error.message);
+    } else {
+      Alert.alert('申請完了', 'リーダーの承認をお待ちください。');
+    }
     initAllData();
     setLoading(false);
   };
@@ -312,12 +359,14 @@ export default function ChatTradeScreen() {
   const handleRequest = async (memberId: string, isApprove: boolean) => {
     setLoading(true);
     if (isApprove) {
-      await supabase.from('team_members').update({ status: 'approved' }).eq('id', memberId);
+      const { error } = await supabase.from('team_members').update({ status: 'approved', role: 'member' }).eq('id', memberId);
+      if (error) Alert.alert('エラー', error.message);
     } else {
       await supabase.from('team_members').delete().eq('id', memberId);
     }
-    loadPendingRequests(myTeamDetails.id);
-    loadApprovedMembers(myTeamDetails.id);
+    // 💡 状態をすぐに同期させるために await を追加
+    await loadPendingRequests(myTeamDetails.id);
+    await loadApprovedMembers(myTeamDetails.id);
     setLoading(false);
   };
 
@@ -327,7 +376,7 @@ export default function ChatTradeScreen() {
       { text: "脱退させる", style: "destructive", onPress: async () => {
           setLoading(true);
           await supabase.from('team_members').delete().eq('id', memberId);
-          loadApprovedMembers(myTeamDetails.id);
+          await loadApprovedMembers(myTeamDetails.id);
           setLoading(false);
       }}
     ]);
@@ -393,7 +442,6 @@ export default function ChatTradeScreen() {
                   <Text style={styles.teamCardDesc}>{item.description || '説明なし'}</Text>
                 </View>
 
-                {/* 💡 自分がリーダーの場合は申請ボタンの代わりにバッジを表示 */}
                 {item.leader_id === myId ? (
                   <View style={styles.myTeamBadge}>
                     <Text style={styles.myTeamBadgeText}>あなたのチーム</Text>
@@ -435,7 +483,6 @@ export default function ChatTradeScreen() {
                 <Text style={styles.teamHeaderRole}>{myTeamRole === 'leader' ? '👑 リーダー' : '👤 メンバー'}</Text>
               </View>
             </View>
-            {/* 💡 リーダーもメンバーも同じ設定ボタンから状況（メンバー一覧など）を確認可能 */}
             <TouchableOpacity style={styles.teamManageBtn} onPress={openTeamManageModal}>
               <Info color="#475569" size={24} />
             </TouchableOpacity>
@@ -494,7 +541,7 @@ export default function ChatTradeScreen() {
           </View>
         )}
 
-        {/* チャット入力欄 (チーム未所属・承認待ちの時は隠す) */}
+        {/* チャット入力欄 */}
         {(activeTab === 'global' || (activeTab === 'team' && myTeamStatus === 'approved')) && (
           <View style={styles.inputArea}>
             <TouchableOpacity style={styles.offerBtn} onPress={() => setTradeModalVisible(true)}>
@@ -614,7 +661,6 @@ export default function ChatTradeScreen() {
                         <Text style={[styles.reqName, member.role === 'leader' && {color: '#D97706'}]}>{member.profiles?.player_name || '匿名'}</Text>
                       </View>
                       
-                      {/* リーダーのみ他のメンバーを強制脱退できる */}
                       {myTeamRole === 'leader' && member.role !== 'leader' && (
                         <TouchableOpacity style={styles.kickBtn} onPress={() => kickMember(member.id, member.profiles?.player_name)}>
                           <UserMinus color="#EF4444" size={16} />
@@ -650,7 +696,6 @@ export default function ChatTradeScreen() {
                 </View>
               )}
 
-              {/* 脱退ボタン (リーダーが脱退した場合の権限委譲などは別途必要ですが、今回は既存ロジック通り) */}
               <TouchableOpacity style={styles.leaveBtn} onPress={leaveTeam}>
                 <LogOut color="#EF4444" size={20} />
                 <Text style={styles.leaveBtnText}>チームを脱退する</Text>
@@ -702,7 +747,6 @@ const styles = StyleSheet.create({
   acceptBtn: { flexDirection: 'row', backgroundColor: '#F59E0B', paddingVertical: 12, paddingHorizontal: 16, borderRadius: 12, marginTop: 12, alignItems: 'center', justifyContent: 'center' },
   acceptBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 14 },
   
-  // チーム専用UI
   teamDiscoveryContainer: { flex: 1, padding: 16 },
   createTeamBtn: { flexDirection: 'row', backgroundColor: '#3B82F6', padding: 16, borderRadius: 16, justifyContent: 'center', alignItems: 'center', marginBottom: 24 },
   createTeamBtnText: { color: '#FFF', fontSize: 16, fontWeight: '900', marginLeft: 8 },
@@ -734,7 +778,6 @@ const styles = StyleSheet.create({
   teamHeaderRole: { fontSize: 12, fontWeight: '700', color: '#64748B', marginTop: 2 },
   teamManageBtn: { padding: 8, backgroundColor: '#F1F5F9', borderRadius: 8 },
 
-  // モーダル全般
   loaderOverlay: { position: 'absolute', top: 0, left: 0, right: 0, bottom: 0, backgroundColor: 'rgba(15,23,42,0.8)', justifyContent: 'center', alignItems: 'center', zIndex: 999 },
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.7)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#FFFFFF', padding: 24, borderTopLeftRadius: 28, borderTopRightRadius: 28, paddingBottom: 40, maxHeight: '90%' },
@@ -745,7 +788,6 @@ const styles = StyleSheet.create({
   confirmBtn: { backgroundColor: '#3B82F6', padding: 18, borderRadius: 16, alignItems: 'center' },
   confirmBtnText: { color: '#FFFFFF', fontWeight: '900', fontSize: 16 },
 
-  // トレードモーダル専用
   cardSelector: { flexDirection: 'row', marginBottom: 24 },
   miniCard: { backgroundColor: '#F8FAFC', padding: 8, borderRadius: 16, marginRight: 12, borderWidth: 1, borderColor: '#E2E8F0', width: 100, alignItems: 'center' },
   selectedMiniCard: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF', borderWidth: 2 },
@@ -753,7 +795,6 @@ const styles = StyleSheet.create({
   miniCardText: { color: '#475569', fontWeight: '800', fontSize: 12 },
   selectedMiniCardText: { color: '#2563EB' },
 
-  // チーム管理モーダル専用
   manageSection: { marginBottom: 30 },
   reqCard: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', padding: 12, backgroundColor: '#F8FAFC', borderRadius: 12, marginBottom: 8 },
   reqName: { fontSize: 15, fontWeight: '800', color: '#0F172A' },
