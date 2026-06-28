@@ -1,5 +1,5 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator, Modal, SafeAreaView, ScrollView, KeyboardAvoidingView, Platform, Image } from 'react-native';
+import { View, Text, StyleSheet, FlatList, TextInput, TouchableOpacity, Alert, ActivityIndicator, Modal, SafeAreaView, ScrollView, KeyboardAvoidingView, Platform, Image, Keyboard } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { Send, RefreshCcw, X, ArrowRightLeft, Globe, Users, Plus, ShieldCheck, LogOut, Info, Crown, UserMinus } from 'lucide-react-native';
@@ -210,17 +210,29 @@ export default function ChatTradeScreen() {
       Alert.alert('エラー', '提案するカードと、欲しいカードの名前を入力してください。');
       return;
     }
-    const offerText = `【トレード募集】\n出: ${selectedOfferCard.card_name}\n求: ${requestedCardName}\n\n条件が合う方、交換お願いします！`;
     
-    if (activeTab === 'global') {
-      await supabase.from('messages').insert([{ sender_id: myId, text: offerText, card_offer_id: selectedOfferCard.id }]);
-    } else if (activeTab === 'team' && myTeamDetails) {
-      await supabase.from('team_messages').insert([{ team_id: myTeamDetails.id, sender_id: myId, text: offerText, card_offer_id: selectedOfferCard.id }]);
+    Keyboard.dismiss();
+    setLoading(true);
+    
+    try {
+      const offerText = `【トレード募集】\n出: ${selectedOfferCard.card_name}\n求: ${requestedCardName}\n\n条件が合う方、交換お願いします！`;
+      
+      if (activeTab === 'global') {
+        const { error } = await supabase.from('messages').insert([{ sender_id: myId, text: offerText, card_offer_id: selectedOfferCard.id }]);
+        if (error) throw error;
+      } else if (activeTab === 'team' && myTeamDetails) {
+        const { error } = await supabase.from('team_messages').insert([{ team_id: myTeamDetails.id, sender_id: myId, text: offerText, card_offer_id: selectedOfferCard.id }]);
+        if (error) throw error;
+      }
+      
+      setTradeModalVisible(false);
+      setSelectedOfferCard(null);
+      setRequestedCardName('');
+    } catch (err: any) {
+      Alert.alert('エラー', `送信に失敗しました\n${err.message || ''}`);
+    } finally {
+      setLoading(false);
     }
-    
-    setTradeModalVisible(false);
-    setSelectedOfferCard(null);
-    setRequestedCardName('');
   };
 
   const acceptTrade = async (message: any) => {
@@ -282,8 +294,14 @@ export default function ChatTradeScreen() {
   // --- チーム管理アクション ---
   const handleCreateTeam = async () => {
     if (!newTeamName.trim()) return;
+    if (!myId) {
+      Alert.alert('エラー', 'ユーザー情報が取得できません。');
+      return;
+    }
     
+    Keyboard.dismiss();
     setLoading(true);
+    
     try {
       const existingColors = availableTeams.map(t => t.team_color).filter(Boolean);
       if (myTeamDetails?.team_color) existingColors.push(myTeamDetails.team_color);
@@ -596,8 +614,12 @@ export default function ChatTradeScreen() {
               value={requestedCardName}
               onChangeText={setRequestedCardName}
             />
-            <TouchableOpacity style={styles.confirmBtn} onPress={sendTradeOffer}>
-              <Text style={styles.confirmBtnText}>募集をマーケットに送信する</Text>
+            <TouchableOpacity 
+              style={[styles.confirmBtn, (!selectedOfferCard || !requestedCardName.trim() || loading) && {backgroundColor: '#94A3B8'}]} 
+              onPress={sendTradeOffer}
+              disabled={!selectedOfferCard || !requestedCardName.trim() || loading}
+            >
+              <Text style={styles.confirmBtnText}>{loading ? '送信中...' : '募集をマーケットに送信する'}</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
@@ -630,8 +652,12 @@ export default function ChatTradeScreen() {
               multiline
               maxLength={100}
             />
-            <TouchableOpacity style={[styles.confirmBtn, !newTeamName && {backgroundColor: '#94A3B8'}]} onPress={handleCreateTeam} disabled={!newTeamName}>
-              <Text style={styles.confirmBtnText}>この名前で設立する</Text>
+            <TouchableOpacity 
+              style={[styles.confirmBtn, (!newTeamName.trim() || loading) && {backgroundColor: '#94A3B8'}]} 
+              onPress={handleCreateTeam} 
+              disabled={!newTeamName.trim() || loading}
+            >
+              <Text style={styles.confirmBtnText}>{loading ? '設立中...' : 'この名前で設立する'}</Text>
             </TouchableOpacity>
           </View>
         </KeyboardAvoidingView>
