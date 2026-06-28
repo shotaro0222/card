@@ -1,11 +1,20 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Image } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, Image, TouchableOpacity, Modal, ScrollView } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
+import { X } from 'lucide-react-native';
 
 export default function EventsScreen() {
-  const [events, setEvents] = useState<any[]>([]);
+  const [allEvents, setAllEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+
+  // ページネーション用のステート
+  const [currentPage, setCurrentPage] = useState(1);
+  const ITEMS_PER_PAGE = 10;
+
+  // モーダル（詳細表示）用のステート
+  const [modalVisible, setModalVisible] = useState(false);
+  const [selectedEvent, setSelectedEvent] = useState<any>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -15,6 +24,7 @@ export default function EventsScreen() {
 
   const fetchEvents = async () => {
     setLoading(true);
+    setCurrentPage(1); // データ再取得時に1ページ目に戻す
 
     try {
       // 1. ユーザー情報を取得
@@ -25,7 +35,6 @@ export default function EventsScreen() {
       }
 
       // 2. ユーザーのプロフィール（性別、年齢、地域）を取得
-      // ※セグメント（ターゲット）配信の判定に使用します
       const { data: profile } = await supabase
         .from('profiles')
         .select('gender, age, location')
@@ -46,12 +55,10 @@ export default function EventsScreen() {
       if (data) {
         // 4. ユーザーの属性に合わせてお知らせをフィルタリング
         const filteredData = data.filter((ann: any) => {
-          // プロフィールが取得できない場合は、全体向け（ALL）のみ表示する
           if (!profile) {
             return ann.target_gender === 'ALL' && ann.target_age === 'ALL' && (!ann.target_location || ann.target_location === '');
           }
 
-          // 性別フィルター
           if (ann.target_gender && ann.target_gender !== 'ALL') {
             const isMale = profile.gender === 'male' || profile.gender === '男性';
             const isFemale = profile.gender === 'female' || profile.gender === '女性';
@@ -59,7 +66,6 @@ export default function EventsScreen() {
             if (ann.target_gender === 'FEMALE' && !isFemale) return false;
           }
 
-          // 年代フィルター
           if (ann.target_age && ann.target_age !== 'ALL') {
             const age = parseInt(profile.age) || 0;
             if (ann.target_age === 'TEENS' && !(age > 0 && age < 20)) return false;
@@ -67,7 +73,6 @@ export default function EventsScreen() {
             if (ann.target_age === 'THIRTIES' && !(age >= 30)) return false;
           }
 
-          // エリアフィルター（登録されている地域が含まれているか）
           if (ann.target_location && ann.target_location !== '') {
             if (!profile.location || !profile.location.includes(ann.target_location)) return false;
           }
@@ -75,7 +80,7 @@ export default function EventsScreen() {
           return true;
         });
 
-        setEvents(filteredData);
+        setAllEvents(filteredData);
       }
     } catch (err) {
       console.log('お知らせ取得エラー:', err);
@@ -84,44 +89,49 @@ export default function EventsScreen() {
     }
   };
 
+  // お知らせタップ時の処理
+  const handleEventPress = (item: any) => {
+    setSelectedEvent(item);
+    setModalVisible(true);
+  };
+
+  // モーダルを閉じる処理
+  const closeModal = () => {
+    setModalVisible(false);
+    setSelectedEvent(null);
+  };
+
+  // 一覧の各アイテム（タイトルのみ表示）
   const renderEvent = ({ item }: { item: any }) => (
-    <View style={styles.eventCard}>
+    <TouchableOpacity style={styles.eventCard} onPress={() => handleEventPress(item)} activeOpacity={0.7}>
       <View style={styles.header}>
-        <Text style={styles.title}>{item.title}</Text>
+        <Text style={styles.title} numberOfLines={1}>{item.title}</Text>
         <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString('ja-JP')}</Text>
       </View>
-      {/* ※ announcementsテーブルに画像URLカラムを追加した場合はここで表示可能 */}
-      {item.image_url && (
-        <Image source={{ uri: item.image_url }} style={styles.image} />
-      )}
-      <Text style={styles.description}>{item.body}</Text>
-    </View>
+    </TouchableOpacity>
   );
 
-  return (
-    <View style={styles.container}>
-      {loading ? (
-        <ActivityIndicator size="large" color="#f87171" style={{ marginTop: 50 }} />
-      ) : (
-        <FlatList
-          data={events}
-          keyExtractor={(item) => item.id}
-          renderItem={renderEvent}
-          contentContainerStyle={{ padding: 15 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>現在届いているお知らせはありません。</Text>}
-        />
-      )}
-    </View>
-  );
-}
+  // ページネーションの計算
+  const displayEvents = allEvents.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
+  const totalPages = Math.ceil(allEvents.length / ITEMS_PER_PAGE);
 
-const styles = StyleSheet.create({
-  container: { flex: 1, backgroundColor: '#020617' },
-  eventCard: { backgroundColor: '#0f172a', borderRadius: 12, padding: 15, marginBottom: 15, borderWidth: 1, borderColor: '#334155' },
-  header: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start', marginBottom: 10 },
-  title: { color: '#f87171', fontSize: 18, fontWeight: 'bold', flex: 1, marginRight: 10 },
-  date: { color: '#64748b', fontSize: 12 },
-  image: { width: '100%', height: 150, borderRadius: 8, marginBottom: 10, backgroundColor: '#000' },
-  description: { color: '#cbd5e1', fontSize: 14, lineHeight: 22 },
-  emptyText: { color: '#64748b', textAlign: 'center', marginTop: 50 }
-});
+  // リスト最下部のページネーションボタン
+  const renderPagination = () => {
+    if (allEvents.length <= ITEMS_PER_PAGE) return null;
+
+    return (
+      <View style={styles.paginationContainer}>
+        <TouchableOpacity 
+          style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
+          disabled={currentPage === 1}
+          onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+        >
+          <Text style={[styles.pageButtonText, currentPage === 1 && styles.pageButtonTextDisabled]}>前へ</Text>
+        </TouchableOpacity>
+
+        <Text style={styles.pageInfo}>{currentPage} / {totalPages}</Text>
+
+        <TouchableOpacity 
+          style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
+          disabled={currentPage === totalPages}
+          onPress={() => setCurrentPage(prev => Math.min(Normally I can help with things like this, but I don't seem to have access to that content. You can try again or ask me for something else.
