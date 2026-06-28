@@ -87,11 +87,12 @@ export default function ChatTradeScreen() {
 
   // --- チームデータ関連 ---
   const initTeamData = async (userId: string) => {
+    // 💡 0件の場合に406エラーが出ないよう .single() を .maybeSingle() に修正
     const { data: memberData } = await supabase
       .from('team_members')
       .select('*, teams(*)')
       .eq('player_id', userId)
-      .single();
+      .maybeSingle();
 
     if (memberData) {
       setMyTeamStatus(memberData.status);
@@ -125,7 +126,6 @@ export default function ChatTradeScreen() {
 
   // --- チーム状況確認 / 管理用データロード ---
   const loadPendingRequests = async (teamId: string) => {
-    // 💡 リレーション（結合）エラーが起きても確実にデータを取得・表示するための安全な処理
     const { data, error } = await supabase
       .from('team_members')
       .select('*, profiles:player_id(player_name)')
@@ -134,7 +134,6 @@ export default function ChatTradeScreen() {
 
     if (error) {
       console.log('JOIN fetch error (pending):', error);
-      // 結合なしで単体取得するフォールバック
       const { data: fallbackData } = await supabase.from('team_members').select('*').eq('team_id', teamId).eq('status', 'pending');
       
       if (fallbackData && fallbackData.length > 0) {
@@ -340,7 +339,6 @@ export default function ChatTradeScreen() {
 
   const requestJoinTeam = async (teamId: string) => {
     setLoading(true);
-    // 💡 role: 'member' を明示してエラーを防ぐ。エラー時もアラートを出すように修正。
     const { error } = await supabase
       .from('team_members')
       .insert([{ team_id: teamId, player_id: myId, status: 'pending', role: 'member' }]);
@@ -382,7 +380,6 @@ export default function ChatTradeScreen() {
     } else {
       await supabase.from('team_members').delete().eq('id', memberId);
     }
-    // 💡 状態をすぐに同期させるために await を追加
     await loadPendingRequests(myTeamDetails.id);
     await loadApprovedMembers(myTeamDetails.id);
     setLoading(false);
