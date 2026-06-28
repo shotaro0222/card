@@ -103,6 +103,7 @@ export default function AdminDashboard() {
   const [massiveEndAt, setMassiveEndAt] = useState('');
 
   // ==================== 6. お知らせ配信 ====================
+  const [announcements, setAnnouncements] = useState<any[]>([]); // 🌟 お知らせ履歴用のステートを追加
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
   const [targetGender, setTargetGender] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
@@ -205,8 +206,17 @@ export default function AdminDashboard() {
       fetchTeams();
       fetchTerritories();
       fetchRules();
+      fetchAnnouncements(); // 🌟 履歴読み込み処理を追加
     }, [])
   );
+
+  // 🌟 追加機能：お知らせ履歴の読み込み
+  const fetchAnnouncements = async () => {
+    try {
+      const { data } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(50);
+      if (data) setAnnouncements(data);
+    } catch (e) { console.log('Announcements fetch error:', e); }
+  };
 
   const fetchArWebSettings = async () => {
     try {
@@ -816,20 +826,69 @@ export default function AdminDashboard() {
     } catch (err: any) { Alert.alert('エラー', err.message); } finally { setLoading(false); }
   };
 
+  // 🌟 お知らせの配信（修正済み）
   const handleSendAnnouncement = async () => {
     if (!annTitle || !annBody) return Alert.alert('エラー', 'タイトルと本文を入力してください');
     setLoading(true);
     try {
-      const targetCriteria = { gender: targetGender, age: targetAge, location: targetLocation };
-      const { error } = await supabase.from('messages').insert([{
-        sender_id: 'SYSTEM',
-        text: `📢【運営よりお知らせ】\n${annTitle}\n\n${annBody}\n\n(※対象: ${targetGender}/${targetAge}${targetLocation ? '/' + targetLocation : ''})`,
-        metadata: targetCriteria
+      // 1. お知らせテーブルに保存（ダッシュボード・全体履歴として管理）
+      const { error: annError } = await supabase.from('announcements').insert([{
+        title: annTitle,
+        body: annBody,
+        target_gender: targetGender,
+        target_age: targetAge,
+        target_location: targetLocation || null
       }]);
-      if (error) console.warn(error);
-      Alert.alert('配信完了', '条件に合致するユーザーにお知らせを配信しました！');
+      
+      if (annError) throw annError;
+
+      // 2. ターゲットユーザーを抽出して、個別の受信箱（messages）に配信
+      const { data: allProfiles } = await supabase.from('profiles').select('*').limit(10000);
+      const matched = (allProfiles || []).filter((p: any) => {
+        if (targetGender === 'MALE' && !(p.gender === 'male' || p.gender === '男性')) return false;
+        if (targetGender === 'FEMALE' && !(p.gender === 'female' || p.gender === '女性')) return false;
+        const age = parseInt(p.age) || 0;
+        if (targetAge === 'TEENS' && !(age > 0 && age < 20)) return false;
+        if (targetAge === 'TWENTIES' && !(age >= 20 && age < 30)) return false;
+        if (targetAge === 'THIRTIES' && !(age >= 30)) return false;
+        if (targetLocation && p.location && !p.location.includes(targetLocation)) return false;
+        return true;
+      });
+
+      if (matched.length > 0) {
+        // metadata内に recipient_id を付与し、各ユーザーごとのメッセージとして複製挿入する
+        const messagesToInsert = matched.map((p: any) => ({
+          sender_id: 'SYSTEM',
+          text: `📢【お知らせ】\n${annTitle}\n\n${annBody}`,
+          metadata: { type: 'announcement', recipient_id: p.id }
+        }));
+        const { error: msgError } = await supabase.from('messages').insert(messagesToInsert);
+        if (msgError) throw msgError;
+      }
+
+      Alert.alert('配信完了', `${matched.length}人のユーザーにお知らせを配信しました！`);
       setAnnTitle(''); setAnnBody(''); setTargetLocation('');
-    } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+      fetchAnnouncements(); // 履歴を再取得
+    } catch (e: any) { 
+      Alert.alert('エラー', e.message); 
+    } finally { 
+      setLoading(false); 
+    }
+  };
+
+  // 🌟 お知らせの削除機能
+  const handleDeleteAnnouncement = async (id: string) => {
+    Alert.alert('削除確認', 'このお知らせを履歴から削除しますか？\n（※配信済みの個別メッセージは消えません）', [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '削除', style: 'destructive', onPress: async () => {
+          setLoading(true);
+          try {
+            await supabase.from('announcements').delete().eq('id', id);
+            fetchAnnouncements();
+            Alert.alert('削除完了', 'お知らせを削除しました');
+          } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+      }}
+    ]);
   };
 
   const handleAddMaster = async (type: 'element' | 'rarity') => {
@@ -2112,6 +2171,29 @@ export default function AdminDashboard() {
             <TouchableOpacity style={styles.primaryBtn} onPress={handleSendAnnouncement} disabled={loading}>
               {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>この条件で配信する</Text>}
             </TouchableOpacity>
+
+            {/* 🌟 お知らせ履歴一覧セクションを追加 */}
+            <View style={styles.divider} />
+            <Text style={styles.cardTitle}>配信履歴</Text>
+            {announcements.length === 0 ? (
+              <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>配信履歴はありません</Text>
+            ) : (
+              announcements.map(ann => (
+                <View key={ann.id} style={styles.listItemRow}>
+                  <View style={{flex: 1}}>
+                    <Text style={styles.listItemTitle}>{ann.title}</Text>
+                    <Text style={styles.listItemSub} numberOfLines={2}>{ann.body}</Text>
+                    <Text style={[styles.listItemSub, {marginTop: 4, color: '#3B82F6', fontWeight: 'bold'}]}>
+                      対象: {ann.target_gender} / {ann.target_age} {ann.target_location ? `/ ${ann.target_location}` : ''}
+                    </Text>
+                    <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>{new Date(ann.created_at).toLocaleString()}</Text>
+                  </View>
+                  <TouchableOpacity style={{padding: 10}} onPress={() => handleDeleteAnnouncement(ann.id)}>
+                    <Trash2 color="#EF4444" size={24} />
+                  </TouchableOpacity>
+                </View>
+              ))
+            )}
           </View>
         )}
 
