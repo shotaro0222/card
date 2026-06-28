@@ -15,76 +15,88 @@ export default function EventsScreen() {
 
   const fetchEvents = async () => {
     setLoading(true);
-    
-    // 1. 現在ログインしているユーザーの情報を取得
-    const { data: { user }, error: authError } = await supabase.auth.getUser();
-    if (authError || !user) {
-      setLoading(false);
-      return;
-    }
 
-    let fetchedData: any[] = [];
-
-    // 2. 矢印演算子による 400 Bad Request を避けるため、安全な contains でクエリを試みる
-    const { data, error } = await supabase
-      .from('messages')
-      .select('*')
-      .contains('metadata', { type: 'announcement', recipient_id: user.id })
-      .order('created_at', { ascending: false });
-
-    // 3. もし DBの型制約(json型など)で contains もエラーになった場合の安全なフォールバック
-    if (error) {
-      console.warn('JSON Query Error, falling back to client-side filtering:', error);
-      
-      const { data: fallbackData, error: fallbackError } = await supabase
-        .from('messages')
-        .select('*')
-        .order('created_at', { ascending: false })
-        .limit(200); // 負荷軽減のために上限を設定して最新を取得
-
-      if (!fallbackError && fallbackData) {
-        // クライアント(JS)側で該当ユーザー宛てのお知らせだけを絞り込む
-        fetchedData = fallbackData.filter((msg: any) => 
-          msg.metadata && 
-          msg.metadata.type === 'announcement' && 
-          msg.metadata.recipient_id === user.id
-        );
+    try {
+      // 1. ユーザー情報を取得
+      const { data: { user }, error: authError } = await supabase.auth.getUser();
+      if (authError || !user) {
+        setLoading(false);
+        return;
       }
-    } else if (data) {
-      fetchedData = data;
-    }
 
-    setEvents(fetchedData);
-    setLoading(false);
+      // 2. ユーザーのプロフィール（性別、年齢、地域）を取得
+      // ※セグメント（ターゲット）配信の判定に使用します
+      const { data: profile } = await supabase
+        .from('profiles')
+        .select('gender, age, location')
+        .eq('id', user.id)
+        .maybeSingle();
+
+      // 3. announcements テーブルからお知らせを取得
+      const { data, error } = await supabase
+        .from('announcements')
+        .select('*')
+        .order('created_at', { ascending: false });
+
+      if (error) {
+        console.warn('お知らせの取得に失敗しました:', error);
+        return;
+      }
+
+      if (data) {
+        // 4. ユーザーの属性に合わせてお知らせをフィルタリング
+        const filteredData = data.filter((ann: any) => {
+          // プロフィールが取得できない場合は、全体向け（ALL）のみ表示する
+          if (!profile) {
+            return ann.target_gender === 'ALL' && ann.target_age === 'ALL' && (!ann.target_location || ann.target_location === '');
+          }
+
+          // 性別フィルター
+          if (ann.target_gender && ann.target_gender !== 'ALL') {
+            const isMale = profile.gender === 'male' || profile.gender === '男性';
+            const isFemale = profile.gender === 'female' || profile.gender === '女性';
+            if (ann.target_gender === 'MALE' && !isMale) return false;
+            if (ann.target_gender === 'FEMALE' && !isFemale) return false;
+          }
+
+          // 年代フィルター
+          if (ann.target_age && ann.target_age !== 'ALL') {
+            const age = parseInt(profile.age) || 0;
+            if (ann.target_age === 'TEENS' && !(age > 0 && age < 20)) return false;
+            if (ann.target_age === 'TWENTIES' && !(age >= 20 && age < 30)) return false;
+            if (ann.target_age === 'THIRTIES' && !(age >= 30)) return false;
+          }
+
+          // エリアフィルター（登録されている地域が含まれているか）
+          if (ann.target_location && ann.target_location !== '') {
+            if (!profile.location || !profile.location.includes(ann.target_location)) return false;
+          }
+
+          return true;
+        });
+
+        setEvents(filteredData);
+      }
+    } catch (err) {
+      console.log('お知らせ取得エラー:', err);
+    } finally {
+      setLoading(false);
+    }
   };
 
-  const renderEvent = ({ item }: { item: any }) => {
-    // ダッシュボードで送信されるフォーマット「📢【お知らせ】\n{タイトル}\n\n{本文}」を解析して分割表示
-    let displayTitle = 'お知らせ';
-    let displayDesc = item.text || '';
-    
-    if (displayDesc.startsWith('📢【お知らせ】\n')) {
-      const parts = displayDesc.split('\n\n');
-      // タイトル部分からヘッダー装飾を取り除く
-      displayTitle = parts[0].replace('📢【お知らせ】\n', '');
-      // 本文部分を結合（本文内に改行が含まれているケースに対応）
-      displayDesc = parts.slice(1).join('\n\n');
-    }
-
-    return (
-      <View style={styles.eventCard}>
-        <View style={styles.header}>
-          <Text style={styles.title}>{displayTitle}</Text>
-          <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString('ja-JP')}</Text>
-        </View>
-        {/* お知らせに画像がある場合の処理 */}
-        {item.metadata?.image_url && (
-          <Image source={{ uri: item.metadata.image_url }} style={styles.image} />
-        )}
-        <Text style={styles.description}>{displayDesc}</Text>
+  const renderEvent = ({ item }: { item: any }) => (
+    <View style={styles.eventCard}>
+      <View style={styles.header}>
+        <Text style={styles.title}>{item.title}</Text>
+        <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString('ja-JP')}</Text>
       </View>
-    );
-  };
+      {/* ※ announcementsテーブルに画像URLカラムを追加した場合はここで表示可能 */}
+      {item.image_url && (
+        <Image source={{ uri: item.image_url }} style={styles.image} />
+      )}
+      <Text style={styles.description}>{item.body}</Text>
+    </View>
+  );
 
   return (
     <View style={styles.container}>
