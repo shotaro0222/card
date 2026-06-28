@@ -103,7 +103,7 @@ export default function AdminDashboard() {
   const [massiveEndAt, setMassiveEndAt] = useState('');
 
   // ==================== 6. お知らせ配信 ====================
-  const [announcements, setAnnouncements] = useState<any[]>([]); // 🌟 お知らせ履歴用のステートを追加
+  const [announcements, setAnnouncements] = useState<any[]>([]);
   const [annTitle, setAnnTitle] = useState('');
   const [annBody, setAnnBody] = useState('');
   const [targetGender, setTargetGender] = useState<'ALL' | 'MALE' | 'FEMALE'>('ALL');
@@ -134,7 +134,6 @@ export default function AdminDashboard() {
   const [arDeployMode, setArDeployMode] = useState<'immediate' | 'scheduled'>('immediate');
   const [arScheduledAt, setArScheduledAt] = useState('');
 
-  // 🌟 新規追加: 報酬タイプ (カード付与 か ボス出現 か)
   const [arRewardType, setArRewardType] = useState<'card' | 'boss'>('card');
 
   // カード用ステート
@@ -162,7 +161,7 @@ export default function AdminDashboard() {
   const [arWinAssetDef, setArWinAssetDef] = useState('200');
   const [arWinAssetSpd, setArWinAssetSpd] = useState('200');
 
-  // 🌟 新規追加: ボスバトル報酬用ステート
+  // ボスバトル報酬用ステート
   const [arBossMode, setArBossMode] = useState<'upload' | 'ai'>('upload');
   const [arBossImageUrl, setArBossImageUrl] = useState('');
   const [arBossAiPrompt, setArBossAiPrompt] = useState('');
@@ -184,7 +183,6 @@ export default function AdminDashboard() {
   const [territories, setTerritories] = useState<any[]>([]);
   const [territoryRules, setTerritoryRules] = useState<any[]>([]);
   
-  // 陣取りイベント管理用のステート
   const [ruleName, setRuleName] = useState('');
   const [ruleKeyword, setRuleKeyword] = useState('');
   const [ruleRequireFixed, setRuleRequireFixed] = useState(true);
@@ -193,7 +191,6 @@ export default function AdminDashboard() {
   const [ruleEventDesc, setRuleEventDesc] = useState('');
   const [ruleTargetRarity, setRuleTargetRarity] = useState('');
 
-  // 初回データ読み込み
   useFocusEffect(
     useCallback(() => {
       fetchAnalytics();
@@ -206,11 +203,10 @@ export default function AdminDashboard() {
       fetchTeams();
       fetchTerritories();
       fetchRules();
-      fetchAnnouncements(); // 🌟 履歴読み込み処理を追加
+      fetchAnnouncements();
     }, [])
   );
 
-  // 🌟 追加機能：お知らせ履歴の読み込み
   const fetchAnnouncements = async () => {
     try {
       const { data } = await supabase.from('announcements').select('*').order('created_at', { ascending: false }).limit(50);
@@ -220,7 +216,8 @@ export default function AdminDashboard() {
 
   const fetchArWebSettings = async () => {
     try {
-      const { data } = await supabase.from('system_config').select('*').eq('id', 'webar_dynamic_settings').single();
+      // 🌟 修正点: .single() を .maybeSingle() に変更し、データ未作成時の 406 エラーを防止
+      const { data } = await supabase.from('system_config').select('*').eq('id', 'webar_dynamic_settings').maybeSingle();
       if (data && data.config_data) {
         const c = data.config_data;
         if (c.arClientType) setArClientType(c.arClientType);
@@ -257,7 +254,8 @@ export default function AdminDashboard() {
 
   const fetchRandomBossConfig = async () => {
     try {
-      const { data } = await supabase.from('system_config').select('*').eq('id', 'random_boss_settings').single();
+      // 🌟 修正点: .single() を .maybeSingle() に変更し、データ未作成時の 406 エラーを防止
+      const { data } = await supabase.from('system_config').select('*').eq('id', 'random_boss_settings').maybeSingle();
       if (data && data.config_data) {
         setRandomBossEnabled(data.config_data.enabled ?? false);
         setRandomBossInterval(data.config_data.interval ?? '1h');
@@ -389,7 +387,6 @@ export default function AdminDashboard() {
     } catch (e) { console.log('Rules fetch error:', e); }
   };
 
-  // --- アクション関連 ---
   const pickImage = async (setter: any) => {
     let result = await ImagePicker.launchImageLibraryAsync({ mediaTypes: ImagePicker.MediaTypeOptions.Images, allowsEditing: true, aspect: [3, 4], quality: 0.5, base64: true });
     if (!result.canceled && result.assets[0].base64) {
@@ -457,7 +454,6 @@ export default function AdminDashboard() {
     return decode(base64);
   };
 
-  // 🌟 ARアセットアップロード（種別指定）
   const handleUploadArAsset = async (promoId: string, assetType: 'base' | 'win' | 'boss') => {
     try {
       const result = Platform.OS === 'web'
@@ -500,7 +496,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 ARアセットAI生成（種別指定）
   const handleGenerateArAssetAi = async (assetType: 'base' | 'win' | 'boss') => {
     const prompt = assetType === 'win' ? arWinAssetAiPrompt : assetType === 'boss' ? arBossAiPrompt : arAssetAiPrompt;
     if (!prompt) return Alert.alert('エラー', 'プロンプトを入力してください');
@@ -646,7 +641,6 @@ export default function AdminDashboard() {
             return true;
           });
 
-          // 🚨【修正箇所】: 直接 cards テーブルに入れるのではなく、rewards（報酬ボックス）に入れるように変更
           const rewardsToInsert = matched.map((p: any) => ({
             player_id: p.id,
             title: `🎁 運営からのプレゼント: ${cName}`,
@@ -672,10 +666,10 @@ export default function AdminDashboard() {
             const { error: rewardError } = await supabase.from('rewards').insert(rewardsToInsert);
             if (rewardError) throw rewardError;
 
-            // お知らせメッセージも送信
+            // 🌟 修正点: sender_id に 'SYSTEM' を入れると UUID 型でエラーになるため除外し、metadata に含める
             const messages = matched.map((p: any) => ({
-              sender_id: 'SYSTEM', text: `🎁 報酬ボックスにプレゼントが届いています: ${cName}`,
-              metadata: { type: 'direct_gift', card_name: cName, fixed_card_id: insertedFixed?.id || null, recipient_id: p.id }
+              text: `🎁 報酬ボックスにプレゼントが届いています: ${cName}`,
+              metadata: { type: 'direct_gift', sender_name: 'SYSTEM', card_name: cName, fixed_card_id: insertedFixed?.id || null, recipient_id: p.id }
             }));
             await supabase.from('messages').insert(messages);
           }
@@ -712,8 +706,6 @@ export default function AdminDashboard() {
       }]).select().single();
       if (campError) throw campError;
 
-      // 💡 ここは「設定」を保存する場所なので、固定カード情報(fixed_cards)として登録しておき、
-      // 実際のバトル画面等で勝利したときに `rewards` テーブルへ挿入する仕組みになります。
       await supabase.from('fixed_cards').insert([{
         card_name: dropCardName || `【撃破報酬】${bName}`, trigger_type: 'boss_drop', image_url: finalDropCardUrl, sponsor_id: campData.id,
         stats: { element: dropCardAttr, rarity: dropCardRarity, hp: 100, atk: 50, def: 50, spd: 50 }
@@ -807,7 +799,6 @@ export default function AdminDashboard() {
           }]).select().single();
           if (campError) throw campError;
 
-          // 💡 ここも設定の保存のみ
           await supabase.from('fixed_cards').insert([{
             card_name: `【戦果】${randomName}の結晶核`, trigger_type: 'boss_drop', image_url: finalDropUrl, sponsor_id: campData.id,
             stats: { element: randomElement, rarity: randomRarity, hp: 100, atk: 60, def: 40, spd: 80 }
@@ -826,12 +817,12 @@ export default function AdminDashboard() {
     } catch (err: any) { Alert.alert('エラー', err.message); } finally { setLoading(false); }
   };
 
-  // 🌟 お知らせの配信（修正済み）
+  // 🌟 お知らせの配信（エラーハンドリングと順序の修正版）
   const handleSendAnnouncement = async () => {
     if (!annTitle || !annBody) return Alert.alert('エラー', 'タイトルと本文を入力してください');
     setLoading(true);
     try {
-      // 1. お知らせテーブルに保存（ダッシュボード・全体履歴として管理）
+      // 1. お知らせテーブルに保存
       const { error: annError } = await supabase.from('announcements').insert([{
         title: annTitle,
         body: annBody,
@@ -842,7 +833,10 @@ export default function AdminDashboard() {
       
       if (annError) throw annError;
 
-      // 2. ターゲットユーザーを抽出して、個別の受信箱（messages）に配信
+      // 🌟 【修正箇所1】先に fetch を呼んで、仮に後続で失敗してもUI上（履歴）には必ず残るようにする
+      fetchAnnouncements(); 
+
+      // 2. ターゲットユーザーを抽出して、個別の受信箱に配信
       const { data: allProfiles } = await supabase.from('profiles').select('*').limit(10000);
       const matched = (allProfiles || []).filter((p: any) => {
         if (targetGender === 'MALE' && !(p.gender === 'male' || p.gender === '男性')) return false;
@@ -856,19 +850,24 @@ export default function AdminDashboard() {
       });
 
       if (matched.length > 0) {
-        // metadata内に recipient_id を付与し、各ユーザーごとのメッセージとして複製挿入する
+        // 🌟 【修正箇所2】sender_id に文字列を入れると UUID 形式と合わず 400 エラーになるため除外し、metadataに含める
         const messagesToInsert = matched.map((p: any) => ({
-          sender_id: 'SYSTEM',
           text: `📢【お知らせ】\n${annTitle}\n\n${annBody}`,
-          metadata: { type: 'announcement', recipient_id: p.id }
+          metadata: { type: 'announcement', recipient_id: p.id, sender_name: 'SYSTEM' }
         }));
+        
         const { error: msgError } = await supabase.from('messages').insert(messagesToInsert);
-        if (msgError) throw msgError;
+        if (msgError) {
+            console.warn('メッセージ個別送信でエラーが発生しました:', msgError);
+            Alert.alert('配信完了 (一部警告)', `履歴には保存されましたが、ユーザーへの個別送信でエラーが発生しました。\n詳細: ${msgError.message}`);
+            setAnnTitle(''); setAnnBody(''); setTargetLocation('');
+            setLoading(false);
+            return; // ここで終了
+        }
       }
 
       Alert.alert('配信完了', `${matched.length}人のユーザーにお知らせを配信しました！`);
       setAnnTitle(''); setAnnBody(''); setTargetLocation('');
-      fetchAnnouncements(); // 履歴を再取得
     } catch (e: any) { 
       Alert.alert('エラー', e.message); 
     } finally { 
@@ -876,7 +875,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 お知らせの削除機能
   const handleDeleteAnnouncement = async (id: string) => {
     Alert.alert('削除確認', 'このお知らせを履歴から削除しますか？\n（※配信済みの個別メッセージは消えません）', [
       { text: 'キャンセル', style: 'cancel' },
@@ -946,7 +944,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 AR設定の同期保存（個別 or グローバル）
   const handleUpdateArConfig = async () => {
     if (arClientType === 'client_specific' && !arTargetClientId) {
       Alert.alert('エラー', '個別指定時は対象のクライアントUUIDが必要です。');
@@ -959,7 +956,6 @@ export default function AdminDashboard() {
       hp: parseInt(arAssetHp)||100, atk: parseInt(arAssetAtk)||50, def: parseInt(arAssetDef)||50, spd: parseInt(arAssetSpd)||50
     };
     
-    // 💡 ボス勝利時の報酬カードとしても利用される
     const arWinStats = {
       name: arWinAssetName || '大当りARカード', rarity: arWinAssetRarity, element: arWinAssetAttr,
       hp: parseInt(arWinAssetHp)||500, atk: parseInt(arWinAssetAtk)||200, def: parseInt(arWinAssetDef)||200, spd: parseInt(arWinAssetSpd)||200
@@ -1014,7 +1010,6 @@ export default function AdminDashboard() {
     Linking.openURL(previewUrl);
   };
 
-  // 🌟 QR発行とURL表示
   const handleGenerateShopQr = async () => {
     if (!newShopName) {
       Alert.alert('エラー', '店舗名（キャンペーン名）を入力してください。');
@@ -1859,7 +1854,6 @@ export default function AdminDashboard() {
                 {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>専用URLとQRコードを発行</Text>}
               </TouchableOpacity>
 
-              {/* 💡 ここにアプリ復帰用（ディープリンク）の正しい呼び出し方の警告を明記 */}
               {generatedShopData && (
                 <View style={{ marginTop: 24, padding: 16, backgroundColor: '#F8FAFC', borderRadius: 16, borderWidth: 1, borderColor: '#CBD5E1', alignItems: 'center' }}>
                   <Text style={{ fontSize: 14, fontWeight: '800', color: '#10B981', marginBottom: 12 }}>✨ 登録完了！QRコードが生成されました</Text>
@@ -2047,7 +2041,6 @@ export default function AdminDashboard() {
                     </View>
                   </View>
 
-                  {/* 🌟 追加：ボス討伐報酬カードの設定UI */}
                   <View style={{backgroundColor: '#F0FDF4', padding: 12, borderRadius: 12, borderWidth: 1, borderColor: '#BBF7D0', marginBottom: 16}}>
                     <Text style={[styles.label, {color: '#15803D'}]}><Gift color="#15803D" size={16} style={{top: 2}}/> ボス討伐報酬カードの画像 ＆ ステータス</Text>
                     <View style={styles.radioGroup}>
@@ -2172,7 +2165,6 @@ export default function AdminDashboard() {
               {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>この条件で配信する</Text>}
             </TouchableOpacity>
 
-            {/* 🌟 お知らせ履歴一覧セクションを追加 */}
             <View style={styles.divider} />
             <Text style={styles.cardTitle}>配信履歴</Text>
             {announcements.length === 0 ? (
