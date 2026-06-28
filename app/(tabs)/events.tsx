@@ -15,29 +15,56 @@ export default function EventsScreen() {
 
   const fetchEvents = async () => {
     setLoading(true);
-    // アクティブなイベントを最新順で取得
+    
+    // 1. 現在ログインしているユーザーの情報を取得
+    const { data: { user }, error: authError } = await supabase.auth.getUser();
+    if (authError || !user) {
+      setLoading(false);
+      return;
+    }
+
+    // 2. ダッシュボードから個別（messagesテーブル）に届いたお知らせを取得
+    // metadata内の type が 'announcement' かつ、recipient_id が自分のIDであるものを抽出
     const { data, error } = await supabase
-      .from('events')
+      .from('messages')
       .select('*')
-      .eq('is_active', true)
+      .eq('metadata->>type', 'announcement')
+      .eq('metadata->>recipient_id', user.id)
       .order('created_at', { ascending: false });
 
-    if (!error && data) setEvents(data);
+    if (!error && data) {
+      setEvents(data);
+    }
     setLoading(false);
   };
 
-  const renderEvent = ({ item }: { item: any }) => (
-    <View style={styles.eventCard}>
-      <View style={styles.header}>
-        <Text style={styles.title}>{item.title}</Text>
-        <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString('ja-JP')}</Text>
+  const renderEvent = ({ item }: { item: any }) => {
+    // ダッシュボードで送信されるフォーマット「📢【お知らせ】\n{タイトル}\n\n{本文}」を解析して分割表示
+    let displayTitle = 'お知らせ';
+    let displayDesc = item.text || '';
+    
+    if (displayDesc.startsWith('📢【お知らせ】\n')) {
+      const parts = displayDesc.split('\n\n');
+      // タイトル部分からヘッダー装飾を取り除く
+      displayTitle = parts[0].replace('📢【お知らせ】\n', '');
+      // 本文部分を結合（本文内に改行が含まれているケースに対応）
+      displayDesc = parts.slice(1).join('\n\n');
+    }
+
+    return (
+      <View style={styles.eventCard}>
+        <View style={styles.header}>
+          <Text style={styles.title}>{displayTitle}</Text>
+          <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString('ja-JP')}</Text>
+        </View>
+        {/* お知らせに画像がある場合の処理（必要に応じてダッシュボード側で追加可能） */}
+        {item.metadata?.image_url && (
+          <Image source={{ uri: item.metadata.image_url }} style={styles.image} />
+        )}
+        <Text style={styles.description}>{displayDesc}</Text>
       </View>
-      {item.image_url && (
-        <Image source={{ uri: item.image_url }} style={styles.image} />
-      )}
-      <Text style={styles.description}>{item.description}</Text>
-    </View>
-  );
+    );
+  };
 
   return (
     <View style={styles.container}>
@@ -49,7 +76,7 @@ export default function EventsScreen() {
           keyExtractor={(item) => item.id}
           renderItem={renderEvent}
           contentContainerStyle={{ padding: 15 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>現在開催中のイベントはありません。</Text>}
+          ListEmptyComponent={<Text style={styles.emptyText}>現在届いているお知らせはありません。</Text>}
         />
       )}
     </View>
