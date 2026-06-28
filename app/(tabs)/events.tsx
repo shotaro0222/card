@@ -23,18 +23,38 @@ export default function EventsScreen() {
       return;
     }
 
-    // 2. ダッシュボードから個別（messagesテーブル）に届いたお知らせを取得
-    // metadata内の type が 'announcement' かつ、recipient_id が自分のIDであるものを抽出
+    let fetchedData: any[] = [];
+
+    // 2. 矢印演算子による 400 Bad Request を避けるため、安全な contains でクエリを試みる
     const { data, error } = await supabase
       .from('messages')
       .select('*')
-      .eq('metadata->>type', 'announcement')
-      .eq('metadata->>recipient_id', user.id)
+      .contains('metadata', { type: 'announcement', recipient_id: user.id })
       .order('created_at', { ascending: false });
 
-    if (!error && data) {
-      setEvents(data);
+    // 3. もし DBの型制約(json型など)で contains もエラーになった場合の安全なフォールバック
+    if (error) {
+      console.warn('JSON Query Error, falling back to client-side filtering:', error);
+      
+      const { data: fallbackData, error: fallbackError } = await supabase
+        .from('messages')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(200); // 負荷軽減のために上限を設定して最新を取得
+
+      if (!fallbackError && fallbackData) {
+        // クライアント(JS)側で該当ユーザー宛てのお知らせだけを絞り込む
+        fetchedData = fallbackData.filter((msg: any) => 
+          msg.metadata && 
+          msg.metadata.type === 'announcement' && 
+          msg.metadata.recipient_id === user.id
+        );
+      }
+    } else if (data) {
+      fetchedData = data;
     }
+
+    setEvents(fetchedData);
     setLoading(false);
   };
 
@@ -57,7 +77,7 @@ export default function EventsScreen() {
           <Text style={styles.title}>{displayTitle}</Text>
           <Text style={styles.date}>{new Date(item.created_at).toLocaleDateString('ja-JP')}</Text>
         </View>
-        {/* お知らせに画像がある場合の処理（必要に応じてダッシュボード側で追加可能） */}
+        {/* お知らせに画像がある場合の処理 */}
         {item.metadata?.image_url && (
           <Image source={{ uri: item.metadata.image_url }} style={styles.image} />
         )}
