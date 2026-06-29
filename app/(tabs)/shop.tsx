@@ -42,9 +42,15 @@ export default function ShopScreen() {
     }
 
     // 💡 修正: card_packs ではなく shop_items テーブルから取得
-    // ※ 在庫(stock)が0より大きいものを表示する条件を追加しても良いかもしれません
-    const { data: itemsData } = await supabase.from('shop_items').select('*').order('created_at', { ascending: false });
-    if (itemsData) setShopItems(itemsData);
+    const { data: itemsData, error } = await supabase.from('shop_items').select('*').order('created_at', { ascending: false });
+    
+    if (error) {
+      console.error('Shop fetch error:', error);
+    }
+    
+    if (itemsData) {
+        setShopItems(itemsData);
+    }
     
     setLoading(false);
   };
@@ -62,7 +68,6 @@ export default function ShopScreen() {
           setLoading(true);
           try {
             if (ENABLE_IN_APP_PURCHASE && !isAdmin) {
-              // const { customerInfo } = await Purchases.purchaseProduct(STORE_PRODUCT_IDS.premium);
               console.log("RevenueCat: プレミアムパス決済成功");
             }
 
@@ -136,7 +141,6 @@ export default function ShopScreen() {
 
             // 💡 修正: 管理画面から登録された stats データに基づいてカードを生成する
             if (item.stats && item.stats.item_type === 'single') {
-              // 単体カードの場合
               newCards.push({
                 player_id: user.id,
                 card_name: item.stats.card_name || item.name,
@@ -154,20 +158,19 @@ export default function ShopScreen() {
                 is_active: false
               });
             } else if (item.stats && item.stats.item_type === 'pack') {
-              // パックの場合 (指定された枚数分ランダムに生成)
               const count = item.stats.count || 5;
               for (let i = 0; i < count; i++) {
                 newCards.push({
                   player_id: user.id,
                   card_name: `${item.name} 封入カード #${i+1}`,
-                  image_url: 'https://via.placeholder.com/400x400/1e293b/f87171?text=SECRET', // 本来はランダムにアセットを選ぶかAI生成する等のロジックが必要
+                  image_url: 'https://via.placeholder.com/400x400/1e293b/f87171?text=SECRET',
                   feature: `パック開封: ${item.name}`,
                   skill_name: '未知の力',
                   status_hp: Math.floor(Math.random() * 200) + 50,
                   status_atk: Math.floor(Math.random() * 100) + 20,
                   status_def: Math.floor(Math.random() * 100) + 20,
                   status_spd: Math.floor(Math.random() * 100) + 20,
-                  status_total: 0, // トリガー等で後から計算
+                  status_total: 0,
                   rarity: ['R', 'SR', 'SSR'][Math.floor(Math.random() * 3)],
                   element: ['火', '水', '木', '光', '闇'][Math.floor(Math.random() * 5)],
                   card_type: 'shop_pack_item',
@@ -179,10 +182,6 @@ export default function ShopScreen() {
             if (newCards.length > 0) {
               const { error } = await supabase.from('cards').insert(newCards);
               if (error) throw error;
-              
-              // 在庫を1減らす処理（オプショナル）
-              await supabase.rpc('decrement_stock', { row_id: item.id }); 
-              // ※注意: RPC 'decrement_stock' が未定義の場合はエラーになるため、不要であればこの行を削除してください。
               
               Alert.alert('獲得完了！', `${item.stats?.item_type === 'pack' ? 'パックを開封し、' : ''}${newCards.length}枚のカードをDECKに追加したぞ！`);
             } else {
@@ -242,7 +241,7 @@ export default function ShopScreen() {
 
       <Text style={[styles.header, { marginTop: 20, fontSize: 18, color: '#c084fc' }]}>SHOP ITEMS</Text>
       
-      {/* 💡 修正: shopItems からマップ展開し、カラム名を修正 */}
+      {/* 💡 修正: shopItems からマップ展開 */}
       {shopItems.map(item => (
         <View key={item.id} style={[styles.productCard, { borderColor: '#c084fc' }]}>
           <View style={styles.productHeader}>
