@@ -134,10 +134,11 @@ export default function EventsScreen() {
           <ActivityIndicator size="large" color="#f87171" style={{ marginTop: 50 }} />
         ) : (
           <FlatList
+            style={{ flex: 1 }} // 💡追加: リスト自体を伸縮させてスクロール領域を確保
             data={displayEvents}
             keyExtractor={(item) => item.id}
             renderItem={renderEvent}
-            contentContainerStyle={{ padding: 15 }}
+            contentContainerStyle={{ padding: 15, paddingBottom: 40 }} // 💡変更: 下部の余白を増やして最下部まで見やすく
             ListEmptyComponent={<Text style={styles.emptyText}>現在届いているお知らせはありません。</Text>}
             ListFooterComponent={renderPagination}
           />
@@ -157,16 +158,22 @@ export default function EventsScreen() {
               </TouchableOpacity>
               
               {selectedEvent && (
-                <ScrollView showsVerticalScrollIndicator={false}>
-                  <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
-                  <Text style={styles.modalDate}>{new Date(selectedEvent.created_at).toLocaleDateString('ja-JP')}</Text>
-                  
-                  {selectedEvent.image_url && (
-                    <Image source={{ uri: selectedEvent.image_url }} style={styles.modalImage} />
-                  )}
-                  
-                  <Text style={styles.modalBody}>{selectedEvent.body}</Text>
-                </ScrollView>
+                // 💡追加: flexShrinkを加えることでModal内に収め、ScrollViewを機能させる
+                <View style={{ flexShrink: 1 }}>
+                  <ScrollView 
+                    showsVerticalScrollIndicator={true} // 💡変更: スクロール可能なことを視覚的にわかりやすくする
+                    contentContainerStyle={{ paddingBottom: 30 }} // 💡追加: 最後までスクロールした時の余白を確保
+                  >
+                    <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
+                    <Text style={styles.modalDate}>{new Date(selectedEvent.created_at).toLocaleDateString('ja-JP')}</Text>
+                    
+                    {selectedEvent.image_url && (
+                      <Image source={{ uri: selectedEvent.image_url }} style={styles.modalImage} />
+                    )}
+                    
+                    <Text style={styles.modalBody}>{selectedEvent.body}</Text>
+                  </ScrollView>
+                </View>
               )}
             </View>
           </View>
@@ -225,6 +232,7 @@ const styles = StyleSheet.create({
     padding: 20, 
     width: '100%', 
     maxHeight: '85%', 
+    flexShrink: 1, // 💡追加: 中身が溢れた際に縮むことを許可し、ScrollViewを動かす
     borderWidth: 1, 
     borderColor: '#334155' 
   },
