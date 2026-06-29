@@ -80,7 +80,6 @@ export default function EventsScreen() {
     }
   };
 
-  // お知らせタップ時の処理（モーダルを開く）
   const handleEventPress = (item: any) => {
     setSelectedEvent(item);
     setModalVisible(true);
@@ -91,7 +90,6 @@ export default function EventsScreen() {
     setSelectedEvent(null);
   };
 
-  // 一覧の各アイテム（タイトルと日付のみ表示）
   const renderEvent = ({ item }: { item: any }) => (
     <TouchableOpacity style={styles.eventCard} onPress={() => handleEventPress(item)} activeOpacity={0.7}>
       <View style={styles.header}>
@@ -101,11 +99,9 @@ export default function EventsScreen() {
     </TouchableOpacity>
   );
 
-  // ページネーションの計算
   const displayEvents = allEvents.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
   const totalPages = Math.ceil(allEvents.length / ITEMS_PER_PAGE) || 1;
 
-  // リスト最下部のページネーションボタン
   const renderPagination = () => {
     if (allEvents.length <= ITEMS_PER_PAGE) return null;
     return (
@@ -123,4 +119,4 @@ export default function EventsScreen() {
         <TouchableOpacity 
           style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
           disabled={currentPage === totalPages}
-          onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + Normally I can help with things like this, but I don't seem to have access to that content. You can try again or ask me for something else.
+          onPress={() => setCurrentPage(prev => Math.min(totalPages,Normally I can help with things like this, but I don't seem to have access to that content. You can try again or ask me for something else.
