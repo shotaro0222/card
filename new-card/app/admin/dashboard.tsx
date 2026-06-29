@@ -645,7 +645,7 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 MINT配布・出品の確定ロジック
+  // 🌟 MINT配布・出品の確定ロジック (エラーハンドリング・サイレントスキップ対策強化)
   const handleMintAction = async () => {
     setLoading(true);
     setMintPreviewVisible(false); // プレビューモーダルを閉じる
@@ -679,12 +679,21 @@ export default function AdminDashboard() {
         if (shopError) throw shopError;
         Alert.alert('成功', `ショップに${shopItemType === 'pack' ? 'パック商品' : '単体カード'}を出品しました！`);
       } else {
-        const { data: insertedFixed, error: fixError } = await supabase.from('fixed_cards').insert([{
+        // --- 直接配布（特権MINT）の処理 ---
+        // 1. fixed_cards に登録 (エラーが出ても配布は継続するように警告のみ)
+        const { error: fixError } = await supabase.from('fixed_cards').insert([{
           card_name: cName, trigger_type: 'admin_mint', image_url: finalCardImageUrl, stats: cardDataToInsert
-        }]).select().single();
-        if (fixError) throw fixError;
+        }]);
+        if (fixError) {
+            console.warn('fixed_cards への挿入に失敗しましたが処理を継続します:', fixError);
+        }
 
-        const { data: allProfiles } = await supabase.from('profiles').select('*').limit(10000);
+        // 2. ユーザー情報の取得（RLSによるブロックがないか確認必須）
+        const { data: allProfiles, error: profError } = await supabase.from('profiles').select('*').limit(10000);
+        if (profError) {
+            throw new Error(`ユーザー情報の取得に失敗しました: ${profError.message}`);
+        }
+
         const matched = (allProfiles || []).filter((p: any) => {
           if (directTargetGender === 'MALE' && !(p.gender === 'male' || p.gender === '男性')) return false;
           if (directTargetGender === 'FEMALE' && !(p.gender === 'female' || p.gender === '女性')) return false;
@@ -695,6 +704,11 @@ export default function AdminDashboard() {
           if (directTargetLocation && p.location && !p.location.includes(directTargetLocation)) return false;
           return true;
         });
+
+        // 💡サイレントエラー対策：対象が0人だった場合は明確にエラーを投げて処理を止める
+        if (matched.length === 0) {
+            throw new Error(`エラー: 配布対象のユーザーが0人です。\n\n【原因の可能性】\n1. 条件に合うユーザーが登録されていない\n2. Supabaseの「profiles」テーブルのRLSにより、他ユーザーのデータ取得がブロックされている`);
+        }
 
         const rewardsToInsert = matched.map((p: any) => ({
           player_id: p.id,
@@ -717,20 +731,19 @@ export default function AdminDashboard() {
           is_claimed: false
         }));
 
-        if (rewardsToInsert.length > 0) {
-          const { error: rewardError } = await supabase.from('rewards').insert(rewardsToInsert);
-          if (rewardError) throw rewardError;
+        const { error: rewardError } = await supabase.from('rewards').insert(rewardsToInsert);
+        // 💡エラー握りつぶし対策：RewardsへのINSERTに失敗したら即座にエラーをスロー
+        if (rewardError) throw new Error(`rewardsテーブルへの挿入に失敗しました: ${rewardError.message}`);
 
-          // 🌟 【修正箇所1】スキーマエラー回避: metadata カラムを削除し、必須な通知データのみを送信。
-          // もし messages テーブルのRLSやスキーマで弾かれても全体の処理は成功とする。
-          const messages = matched.map((p: any) => ({
-            text: `🎁 報酬ボックスに特権カードが届いています: ${cName}`,
-            player_id: p.id
-          }));
-          const { error: msgError } = await supabase.from('messages').insert(messages);
-          if (msgError) console.warn('メッセージ個別送信でエラーが発生しましたが無視して進行します:', msgError.message);
-        }
-        Alert.alert('成功', '条件に合致するユーザーの「報酬ボックス」に特権カードを配布しました！');
+        // メッセージ送信 (RLSで弾かれる可能性があるため、エラーはコンソールに出しつつ処理は完了させる)
+        const messages = matched.map((p: any) => ({
+          text: `🎁 報酬ボックスに特権カードが届いています: ${cName}`,
+          player_id: p.id
+        }));
+        const { error: msgError } = await supabase.from('messages').insert(messages);
+        if (msgError) console.warn('メッセージ送信でエラーが発生しましたが無視して進行します:', msgError.message);
+        
+        Alert.alert('成功', `${matched.length}人のユーザーの「報酬ボックス」に特権カードを配布しました！`);
       }
       setCName(''); setCImage(''); setCPackageImage(''); setCAiPrompt(''); setPackDesc('');
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
