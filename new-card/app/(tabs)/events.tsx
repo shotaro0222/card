@@ -1,5 +1,5 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, Image, TouchableOpacity, Modal, SafeAreaView } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView, SafeAreaView, Image } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { X } from 'lucide-react-native';
@@ -24,7 +24,7 @@ export default function EventsScreen() {
 
   const fetchEvents = async () => {
     setLoading(true);
-    setCurrentPage(1);
+    setCurrentPage(1); // データ再取得時に1ページ目に戻す
 
     try {
       const { data: { user }, error: authError } = await supabase.auth.getUser();
@@ -80,11 +80,18 @@ export default function EventsScreen() {
     }
   };
 
+  // お知らせタップ時の処理（モーダルを開く）
   const handleEventPress = (item: any) => {
     setSelectedEvent(item);
     setModalVisible(true);
   };
 
+  const closeModal = () => {
+    setModalVisible(false);
+    setSelectedEvent(null);
+  };
+
+  // 一覧の各アイテム（タイトルと日付のみ表示）
   const renderEvent = ({ item }: { item: any }) => (
     <TouchableOpacity style={styles.eventCard} onPress={() => handleEventPress(item)} activeOpacity={0.7}>
       <View style={styles.header}>
@@ -94,36 +101,26 @@ export default function EventsScreen() {
     </TouchableOpacity>
   );
 
+  // ページネーションの計算
   const displayEvents = allEvents.slice((currentPage - 1) * ITEMS_PER_PAGE, currentPage * ITEMS_PER_PAGE);
   const totalPages = Math.ceil(allEvents.length / ITEMS_PER_PAGE) || 1;
 
-  return (
-    <View style={styles.container}>
-      {loading ? (
-        <ActivityIndicator size="large" color="#f87171" style={{ marginTop: 50 }} />
-      ) : (
-        <FlatList
-          data={displayEvents}
-          keyExtractor={(item) => item.id}
-          renderItem={renderEvent}
-          contentContainerStyle={{ padding: 15 }}
-          ListEmptyComponent={<Text style={styles.emptyText}>現在届いているお知らせはありません。</Text>}
-          ListFooterComponent={
-            allEvents.length > ITEMS_PER_PAGE ? (
-              <View style={styles.paginationContainer}>
-                <TouchableOpacity 
-                  style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
-                  disabled={currentPage === 1}
-                  onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
-                >
-                  <Text style={[styles.pageButtonText, currentPage === 1 && styles.pageButtonTextDisabled]}>前へ</Text>
-                </TouchableOpacity>
-
-                <Text style={styles.pageInfo}>{currentPage} / {totalPages}</Text>
-
-                <TouchableOpacity 
-                  style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
-                  disabled={currentPage === totalPages}
-                  onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
-                >
-                  <Text style={[styles.pageButtonText, currentPageNormally I can help with things like this, but I don't seem to have access to that content. You can try again or ask me for something else.
+  // リスト最下部のページネーションボタン
+  const renderPagination = () => {
+    if (allEvents.length <= ITEMS_PER_PAGE) return null;
+    return (
+      <View style={styles.paginationContainer}>
+        <TouchableOpacity 
+          style={[styles.pageButton, currentPage === 1 && styles.pageButtonDisabled]}
+          disabled={currentPage === 1}
+          onPress={() => setCurrentPage(prev => Math.max(1, prev - 1))}
+        >
+          <Text style={[styles.pageButtonText, currentPage === 1 && styles.pageButtonTextDisabled]}>前へ</Text>
+        </TouchableOpacity>
+        
+        <Text style={styles.pageInfo}>{currentPage} / {totalPages}</Text>
+        
+        <TouchableOpacity 
+          style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
+          disabled={currentPage === totalPages}
+          onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + Normally I can help with things like this, but I don't seem to have access to that content. You can try again or ask me for something else.
