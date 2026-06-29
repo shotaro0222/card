@@ -5,20 +5,11 @@ import { supabase } from '../../lib/supabase';
 // 💡 将来RevenueCatを導入したらコメントアウトを外す
 // import Purchases from 'react-native-purchases';
 
-/**
- * 💡 課金有効化フラグ
- * ストア登録が終わるまでは false (モック動作) にしておく。
- * true にすると、実際に RevenueCat 経由で Apple/Google の決済画面が呼ばれるようになる。
- */
 const ENABLE_IN_APP_PURCHASE = false;
 
-/**
- * 💡 ストアに登録するプロダクトIDの定義
- * Apple/Googleそれぞれのストアで登録するアイテムのID。
- */
 const STORE_PRODUCT_IDS = {
-  premium: 'sub_premium_monthly_500', // 例: プレミアムパスのID
-  tickets_10: 'cons_tickets_10_100',  // 例: チケット10枚のID
+  premium: 'sub_premium_monthly_500',
+  tickets_10: 'cons_tickets_10_100',
 };
 
 export default function ShopScreen() {
@@ -26,7 +17,9 @@ export default function ShopScreen() {
   const [isPremium, setIsPremium] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [tickets, setTickets] = useState(0);
-  const [packs, setPacks] = useState<any[]>([]);
+  
+  // 💡 修正: packs ではなく shopItems として管理
+  const [shopItems, setShopItems] = useState<any[]>([]);
 
   useEffect(() => {
     fetchShopData();
@@ -48,8 +41,10 @@ export default function ShopScreen() {
       setTickets(profile.forge_tickets || 0);
     }
 
-    const { data: packData } = await supabase.from('card_packs').select('*').eq('is_active', true);
-    if (packData) setPacks(packData);
+    // 💡 修正: card_packs ではなく shop_items テーブルから取得
+    // ※ 在庫(stock)が0より大きいものを表示する条件を追加しても良いかもしれません
+    const { data: itemsData } = await supabase.from('shop_items').select('*').order('created_at', { ascending: false });
+    if (itemsData) setShopItems(itemsData);
     
     setLoading(false);
   };
@@ -66,16 +61,11 @@ export default function ShopScreen() {
       { text: "購入", onPress: async () => {
           setLoading(true);
           try {
-            // 💰 【本番決済フロー】
             if (ENABLE_IN_APP_PURCHASE && !isAdmin) {
               // const { customerInfo } = await Purchases.purchaseProduct(STORE_PRODUCT_IDS.premium);
-              // if (typeof customerInfo.entitlements.active['premium'] === "undefined") {
-              //   throw new Error("サブスクリプションの有効化が確認できませんでした");
-              // }
               console.log("RevenueCat: プレミアムパス決済成功");
             }
 
-            // 💾 【DB更新フロー】決済が成功した（またはモック）場合のみここが実行される
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
               await supabase.from('profiles').update({ is_premium: true }).eq('id', user.id);
@@ -83,10 +73,8 @@ export default function ShopScreen() {
               Alert.alert('契約完了', 'プレミアム機能が解放されました！');
             }
           } catch (error: any) {
-            // ユーザーが決済画面でキャンセルした場合はエラーメッセージを出さない
             if (!error.userCancelled) {
               Alert.alert('決済エラー', '購入処理中にエラーが発生しました。');
-              console.error("Purchase error:", error);
             }
           } finally {
             setLoading(false);
@@ -105,13 +93,10 @@ export default function ShopScreen() {
       { text: isAdmin ? "追加" : "購入", onPress: async () => {
           setLoading(true);
           try {
-            // 💰 【本番決済フロー】
             if (ENABLE_IN_APP_PURCHASE && !isAdmin) {
-              // await Purchases.purchaseProduct(STORE_PRODUCT_IDS.tickets_10);
               console.log("RevenueCat: チケット決済成功");
             }
 
-            // 💾 【DB更新フロー】
             const { data: { user } } = await supabase.auth.getUser();
             if (user) {
               const newAmount = tickets + 10;
@@ -130,49 +115,80 @@ export default function ShopScreen() {
     ]);
   };
 
-  // 📦 パック購入フロー
-  const buyPack = async (pack: any) => {
-    const title = isAdmin ? "【無料】パック入手" : "パック購入確認";
-    const msg = isAdmin ? `ゴッドモード権限で「${pack.title}」を無料でゲットするぜ！` : `「${pack.title}」(￥${pack.price_jpy}) を購入しますか？`;
+  // 📦 ショップアイテム（単体 or パック）購入フロー
+  const buyShopItem = async (item: any) => {
+    const title = isAdmin ? "【無料】アイテム入手" : "購入確認";
+    const msg = isAdmin ? `ゴッドモード権限で「${item.name}」を無料でゲットするぜ！` : `「${item.name}」(￥${item.price}) を購入しますか？`;
 
     Alert.alert(title, msg, [
       { text: "キャンセル", style: "cancel" },
       { text: isAdmin ? "入手" : "購入", onPress: async () => {
           setLoading(true);
           try {
-            // 💰 【本番決済フロー】
             if (ENABLE_IN_APP_PURCHASE && !isAdmin) {
-              // パックごとにストアIDが異なるため、DBに保存された store_product_id を使う想定
-              // const storeProductId = pack.store_product_id;
-              // await Purchases.purchaseProduct(storeProductId);
-              console.log(`RevenueCat: パック(${pack.title})決済成功`);
+              console.log(`RevenueCat: アイテム(${item.name})決済成功`);
             }
 
-            // 💾 【DB更新フロー】
             const { data: { user } } = await supabase.auth.getUser();
             if (!user) return;
 
-            const newCards = pack.contents.map((cardData: any) => ({
-              player_id: user.id,
-              card_name: cardData.name,
-              image_url: pack.image_url || 'https://via.placeholder.com/400x400/1e293b/f87171?text=SECRET', 
-              feature: cardData.feature,
-              skill_name: cardData.skill,
-              status_hp: cardData.hp,
-              status_atk: cardData.atk,
-              status_def: cardData.def,
-              status_spd: cardData.spd,
-              status_total: cardData.hp + cardData.atk + cardData.def + cardData.spd,
-              rarity: cardData.rarity || 'P',
-              card_type: 'influencer',
-              is_active: false
-            }));
+            let newCards = [];
 
-            const { error } = await supabase.from('cards').insert(newCards);
-            
-            if (error) throw error;
-            
-            Alert.alert('獲得完了！', `パックを開封し、${newCards.length}枚のカードをDECKに追加したぞ！`);
+            // 💡 修正: 管理画面から登録された stats データに基づいてカードを生成する
+            if (item.stats && item.stats.item_type === 'single') {
+              // 単体カードの場合
+              newCards.push({
+                player_id: user.id,
+                card_name: item.stats.card_name || item.name,
+                image_url: item.card_image_url || item.package_image_url || 'https://via.placeholder.com/400x400', 
+                feature: `ショップ購入: ${item.name}`,
+                skill_name: item.stats.skill_name || '通常攻撃',
+                status_hp: item.stats.status_hp || 100,
+                status_atk: item.stats.status_atk || 50,
+                status_def: item.stats.status_def || 50,
+                status_spd: item.stats.status_spd || 50,
+                status_total: item.stats.status_total || 250,
+                rarity: item.stats.rarity || 'SR',
+                element: item.stats.element || '無',
+                card_type: 'shop_item',
+                is_active: false
+              });
+            } else if (item.stats && item.stats.item_type === 'pack') {
+              // パックの場合 (指定された枚数分ランダムに生成)
+              const count = item.stats.count || 5;
+              for (let i = 0; i < count; i++) {
+                newCards.push({
+                  player_id: user.id,
+                  card_name: `${item.name} 封入カード #${i+1}`,
+                  image_url: 'https://via.placeholder.com/400x400/1e293b/f87171?text=SECRET', // 本来はランダムにアセットを選ぶかAI生成する等のロジックが必要
+                  feature: `パック開封: ${item.name}`,
+                  skill_name: '未知の力',
+                  status_hp: Math.floor(Math.random() * 200) + 50,
+                  status_atk: Math.floor(Math.random() * 100) + 20,
+                  status_def: Math.floor(Math.random() * 100) + 20,
+                  status_spd: Math.floor(Math.random() * 100) + 20,
+                  status_total: 0, // トリガー等で後から計算
+                  rarity: ['R', 'SR', 'SSR'][Math.floor(Math.random() * 3)],
+                  element: ['火', '水', '木', '光', '闇'][Math.floor(Math.random() * 5)],
+                  card_type: 'shop_pack_item',
+                  is_active: false
+                });
+              }
+            }
+
+            if (newCards.length > 0) {
+              const { error } = await supabase.from('cards').insert(newCards);
+              if (error) throw error;
+              
+              // 在庫を1減らす処理（オプショナル）
+              await supabase.rpc('decrement_stock', { row_id: item.id }); 
+              // ※注意: RPC 'decrement_stock' が未定義の場合はエラーになるため、不要であればこの行を削除してください。
+              
+              Alert.alert('獲得完了！', `${item.stats?.item_type === 'pack' ? 'パックを開封し、' : ''}${newCards.length}枚のカードをDECKに追加したぞ！`);
+            } else {
+              Alert.alert('エラー', 'アイテムの中身が設定されていません。');
+            }
+
           } catch (error: any) {
             if (!error.userCancelled) {
               Alert.alert('エラー', '購入またはカードの付与に失敗しました。');
@@ -224,18 +240,21 @@ export default function ShopScreen() {
         </TouchableOpacity>
       </View>
 
-      <Text style={[styles.header, { marginTop: 20, fontSize: 18, color: '#c084fc' }]}>INFLUENCER PACKS</Text>
+      <Text style={[styles.header, { marginTop: 20, fontSize: 18, color: '#c084fc' }]}>SHOP ITEMS</Text>
       
-      {packs.map(pack => (
-        <View key={pack.id} style={[styles.productCard, { borderColor: '#c084fc' }]}>
+      {/* 💡 修正: shopItems からマップ展開し、カラム名を修正 */}
+      {shopItems.map(item => (
+        <View key={item.id} style={[styles.productCard, { borderColor: '#c084fc' }]}>
           <View style={styles.productHeader}>
-            <Text style={[styles.productTitle, { color: '#c084fc', flex: 1 }]} numberOfLines={1}>📦 {pack.title}</Text>
-            <Text style={styles.price}>{isAdmin ? '￥0 (God Mode)' : `￥${pack.price_jpy}`}</Text>
+            <Text style={[styles.productTitle, { color: '#c084fc', flex: 1 }]} numberOfLines={1}>
+              {item.stats?.item_type === 'pack' ? '📦 ' : '🎴 '}{item.name}
+            </Text>
+            <Text style={styles.price}>{isAdmin ? '￥0 (God Mode)' : `￥${item.price}`}</Text>
           </View>
-          <Text style={[styles.desc, { color: '#e2e8f0', fontWeight: 'bold' }]}>by {pack.influencer_name}</Text>
-          <Text style={styles.desc}>{pack.description}</Text>
-          <TouchableOpacity style={[styles.buyBtn, { backgroundColor: isAdmin ? '#854D0E' : '#c084fc' }]} onPress={() => buyPack(pack)}>
-            <Text style={styles.buyBtnText}>{isAdmin ? '無料でゲット' : 'パックを購入する'}</Text>
+          {item.stock !== null && <Text style={[styles.desc, { color: '#e2e8f0', fontWeight: 'bold' }]}>残り在庫: {item.stock}</Text>}
+          <Text style={styles.desc}>{item.description}</Text>
+          <TouchableOpacity style={[styles.buyBtn, { backgroundColor: isAdmin ? '#854D0E' : '#c084fc' }]} onPress={() => buyShopItem(item)}>
+            <Text style={styles.buyBtnText}>{isAdmin ? '無料でゲット' : '購入する'}</Text>
           </TouchableOpacity>
         </View>
       ))}
