@@ -1,5 +1,6 @@
 import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, ScrollView, SafeAreaView, Alert, TextInput, Image, Platform, ActivityIndicator, Modal } from 'react-native';
+
 // ★ react-native-maps をWeb環境でインポートするとホワイトアウト（クラッシュ）するため、動的requireに変更
 let MapView: any = null;
 let Marker: any = null;
@@ -34,10 +35,24 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState('analytics');
   const [loading, setLoading] = useState(false);
 
-  // ==================== プレビュー用ステート ====================
+  // ==================== プレビュー用ステート (MINT/SHOP) ====================
   const [mintPreviewVisible, setMintPreviewVisible] = useState(false);
   const [mintTargetCount, setMintTargetCount] = useState(0);
   const [previewImageUrl, setPreviewImageUrl] = useState('');
+
+  // ==================== 🌟 プレビュー用ステート (BOSS/MAP) ====================
+  const [bossPreviewVisible, setBossPreviewVisible] = useState(false);
+  const [previewBossContext, setPreviewBossContext] = useState<'manual' | 'massive'>('manual');
+  const [pbName, setPbName] = useState('');
+  const [pbElement, setPbElement] = useState('');
+  const [pbHp, setPbHp] = useState('');
+  const [pbAtk, setPbAtk] = useState('');
+  const [pbDef, setPbDef] = useState('');
+  const [pbImageUrl, setPbImageUrl] = useState('');
+  const [pdName, setPdName] = useState('');
+  const [pdRarity, setPdRarity] = useState('');
+  const [pdAttr, setPdAttr] = useState('');
+  const [pdImageUrl, setPdImageUrl] = useState('');
 
   // ==================== 1. 分析用データ ====================
   const [analyticsData, setAnalyticsData] = useState<any>({
@@ -490,7 +505,7 @@ export default function AdminDashboard() {
         Alert.alert('アップロード成功', `😈 ボス用アセットをアップロードしました`);
       } else {
         setArAssetCustomUrl(publicUrl);
-        Alert.alert('アップロード成功', `通常時の3Dモデル/画像をアップロードしました`);
+        Alert.alert('アップロード成功', `通常時のオブジェクトをアップロードしました`);
       }
     } catch (e: any) {
       Alert.alert('アップロード失敗', e.message);
@@ -510,13 +525,13 @@ export default function AdminDashboard() {
       if (data?.imageUrl) {
         if (assetType === 'win') {
           setArWinAssetUrl(data.imageUrl);
-          Alert.alert('生成成功', '🎁 報酬アセットをAIで生成しました！');
+          Alert.alert('生成成功', '🎁 報酬デザインをAIで生成しました！プレビューを確認してください。');
         } else if (assetType === 'boss') {
           setArBossImageUrl(data.imageUrl);
-          Alert.alert('生成成功', '😈 ボスアセットをAIで生成しました！');
+          Alert.alert('生成成功', '😈 ボスデザインをAIで生成しました！プレビューを確認してください。');
         } else {
           setArAssetCustomUrl(data.imageUrl);
-          Alert.alert('生成成功', '通常アセットをAIで生成しました！');
+          Alert.alert('生成成功', '通常デザインをAIで生成しました！プレビューを確認してください。');
         }
       } else {
         throw new Error('AI生成に失敗しました');
@@ -595,7 +610,7 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // 🌟 新機能: MINT配布・出品前のプレビュー表示ロジック（ステータス表示追加＆CORSエラー回避強化）
+  // 🌟 MINT配布・出品前のプレビュー表示ロジック
   const handleShowPreview = async () => {
     if (!cName && shopItemType === 'single') return Alert.alert('エラー', 'カード名を入力してください');
     if (mintDest === 'shop' && shopItemType === 'pack' && !packCardCount) return Alert.alert('エラー', 'パック封入枚数を入力してください');
@@ -604,7 +619,6 @@ export default function AdminDashboard() {
     try {
       let tempImageUrl = cImage;
 
-      // AI生成指定の場合はプレビュー表示のためにここで生成を試みる
       if (shopItemType === 'single' && cardGenMode === 'ai' && cAiPrompt) {
         try {
           const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: cAiPrompt } });
@@ -621,7 +635,6 @@ export default function AdminDashboard() {
 
       setPreviewImageUrl(tempImageUrl);
 
-      // 直接配布の場合は、対象セグメントのユーザー数をカウントする
       if (mintDest === 'direct') {
         const { data: allProfiles } = await supabase.from('profiles').select('*').limit(10000);
         const matched = (allProfiles || []).filter((p: any) => {
@@ -645,10 +658,9 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 MINT配布・出品の確定ロジック (エラーハンドリング・サイレントスキップ対策強化)
   const handleMintAction = async () => {
     setLoading(true);
-    setMintPreviewVisible(false); // プレビューモーダルを閉じる
+    setMintPreviewVisible(false);
     try {
       let finalCardImageUrl = previewImageUrl;
       let finalPackageUrl = cPackageImage;
@@ -660,7 +672,6 @@ export default function AdminDashboard() {
         skill_name: cSkillName || '通常攻撃',
       };
 
-      // 手動アップロードの場合、プレビュー画像(Base64)をStorageにアップロードする
       if (shopItemType === 'single' && previewImageUrl && previewImageUrl.startsWith('data:image')) {
         finalCardImageUrl = await uploadBase64Image(previewImageUrl, 'mint');
       }
@@ -677,7 +688,6 @@ export default function AdminDashboard() {
           stats: itemStats
         }]);
         
-        // 💡修正箇所：400エラーの原因を特定しやすくするため、詳細なエラー情報を投げる
         if (shopError) {
           console.error("【ショップ登録エラー詳細】", shopError);
           throw new Error(`ショップ登録失敗: ${shopError.message || shopError.details}`);
@@ -685,8 +695,6 @@ export default function AdminDashboard() {
 
         Alert.alert('成功', `ショップに${shopItemType === 'pack' ? 'パック商品' : '単体カード'}を出品しました！`);
       } else {
-        // --- 直接配布（特権MINT）の処理 ---
-        // 1. fixed_cards に登録 (エラーが出ても配布は継続するように警告のみ)
         const { error: fixError } = await supabase.from('fixed_cards').insert([{
           card_name: cName, trigger_type: 'admin_mint', image_url: finalCardImageUrl, stats: cardDataToInsert
         }]);
@@ -694,7 +702,6 @@ export default function AdminDashboard() {
             console.warn('fixed_cards への挿入に失敗しましたが処理を継続します:', fixError);
         }
 
-        // 2. ユーザー情報の取得（RLSによるブロックがないか確認必須）
         const { data: allProfiles, error: profError } = await supabase.from('profiles').select('*').limit(10000);
         if (profError) {
             throw new Error(`ユーザー情報の取得に失敗しました: ${profError.message}`);
@@ -711,9 +718,8 @@ export default function AdminDashboard() {
           return true;
         });
 
-        // 💡サイレントエラー対策：対象が0人だった場合は明確にエラーを投げて処理を止める
         if (matched.length === 0) {
-            throw new Error(`エラー: 配布対象のユーザーが0人です。\n\n【原因の可能性】\n1. 条件に合うユーザーが登録されていない\n2. Supabaseの「profiles」テーブルのRLSにより、他ユーザーのデータ取得がブロックされている`);
+            throw new Error(`エラー: 配布対象のユーザーが0人です。`);
         }
 
         const rewardsToInsert = matched.map((p: any) => ({
@@ -738,16 +744,14 @@ export default function AdminDashboard() {
         }));
 
         const { error: rewardError } = await supabase.from('rewards').insert(rewardsToInsert);
-        // 💡エラー握りつぶし対策：RewardsへのINSERTに失敗したら即座にエラーをスロー
         if (rewardError) throw new Error(`rewardsテーブルへの挿入に失敗しました: ${rewardError.message}`);
 
-        // メッセージ送信 (RLSで弾かれる可能性があるため、エラーはコンソールに出しつつ処理は完了させる)
         const messages = matched.map((p: any) => ({
           text: `🎁 報酬ボックスに特権カードが届いています: ${cName}`,
-          user_id: p.id // 💡修正箇所：player_id を user_id に修正
+          user_id: p.id
         }));
         const { error: msgError } = await supabase.from('messages').insert(messages);
-        if (msgError) console.warn('メッセージ送信でエラーが発生しましたが無視して進行します:', msgError.message);
+        if (msgError) console.warn('メッセージ送信でエラー:', msgError.message);
         
         Alert.alert('成功', `${matched.length}人のユーザーの「報酬ボックス」に特権カードを配布しました！`);
       }
@@ -755,13 +759,114 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  const handleCreateBoss = async () => {
+  // 🌟 マニュアルボスのプレビュー作成ロジック
+  const handleShowManualBossPreview = async () => {
+    if (!bName) return Alert.alert('エラー', 'ボス名を入力してください');
     setLoading(true);
     try {
-      let finalBossImageUrl = bossImageUrl;
-      let finalDropCardUrl = dropCardUrl;
-      
+      let bUrl = bossImageUrl || 'https://via.placeholder.com/300x400.png?text=No+Boss+Image';
+      let dUrl = dropCardUrl || 'https://via.placeholder.com/300x400.png?text=No+Drop+Image';
+
       if (bossImageMode === 'ai' && bossAiPrompt) {
+        try {
+          const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: bossAiPrompt } });
+          if (error) throw error;
+          bUrl = data?.imageUrl || bUrl;
+        } catch (e) {
+          console.warn('Boss Preview AI Error', e);
+          bUrl = 'https://via.placeholder.com/300x400.png?text=AI+Boss+Error';
+        }
+      }
+
+      if (dropCardMode === 'ai' && dropCardPrompt) {
+        try {
+          const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: dropCardPrompt } });
+          if (error) throw error;
+          dUrl = data?.imageUrl || dUrl;
+        } catch (e) {
+          console.warn('Drop Preview AI Error', e);
+          dUrl = 'https://via.placeholder.com/300x400.png?text=AI+Drop+Error';
+        }
+      }
+
+      setPbName(bName); setPbElement(bElement); setPbHp(bHp || '1500'); setPbAtk(bAtk || '100'); setPbDef(bDef || '50'); setPbImageUrl(bUrl);
+      setPdName(dropCardName || `【撃破報酬】${bName}`); setPdRarity(dropCardRarity || 'UR'); setPdAttr(dropCardAttr || '闇'); setPdImageUrl(dUrl);
+
+      setPreviewBossContext('manual');
+      setBossPreviewVisible(true);
+    } catch(e: any) {
+      Alert.alert('プレビュー生成エラー', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 🌟 大量発生(フェス)のサンプル生成・プレビューロジック
+  const handleShowMassiveBossPreview = async () => {
+    setLoading(true);
+    try {
+      const prefix = ['次元の', '彷徨える', '極大の', 'アビス・', 'ヴォイド・', '災厄の', '覚醒せし'];
+      const suffix = ['ゴーレム', 'ベヒモス', 'フェニックス', 'リヴァイアsan', 'ナイトメア', '機神龍', 'タイタン'];
+      const randomName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
+      const randomElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
+      const randomRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
+
+      const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
+      const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
+
+      let bUrl = 'https://via.placeholder.com/300x400.png?text=Boss+Preview';
+      let dUrl = 'https://via.placeholder.com/300x400.png?text=Drop+Preview';
+
+      try {
+        const bossRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedBossPrompt } });
+        if (bossRes.data?.imageUrl) bUrl = bossRes.data.imageUrl;
+      } catch (e) { console.warn('Massive Boss AI Error', e); }
+
+      try {
+        const dropRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedDropPrompt } });
+        if (dropRes.data?.imageUrl) dUrl = dropRes.data.imageUrl;
+      } catch (e) { console.warn('Massive Drop AI Error', e); }
+
+      setPbName(`(サンプル) ${randomName}`);
+      setPbElement(randomElement);
+      setPbHp(String(Math.floor(Math.random() * 2000) + 1000));
+      setPbAtk(String(Math.floor(Math.random() * 150) + 50));
+      setPbDef('50');
+      setPbImageUrl(bUrl);
+
+      setPdName(`(サンプル) 【戦果】${randomName}の結晶核`);
+      setPdRarity(randomRarity);
+      setPdAttr(randomElement);
+      setPdImageUrl(dUrl);
+
+      setPreviewBossContext('massive');
+      setBossPreviewVisible(true);
+    } catch(e: any) {
+      Alert.alert('プレビュー生成エラー', e.message);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // 🌟 ボスプレビューからの確定実行
+  const handleConfirmBossPreview = async () => {
+    setBossPreviewVisible(false);
+    if (previewBossContext === 'manual') {
+       await handleCreateBoss(pbImageUrl, pdImageUrl);
+    } else {
+       await triggerInstantRandomBoss();
+    }
+  };
+
+  // 🌟 マニュアル配置の実行ロジック (引数がある場合はプレビュー済みのURLを利用)
+  const handleCreateBoss = async (preBossUrl?: string, preDropUrl?: string) => {
+    setLoading(true);
+    try {
+      let finalBossImageUrl = preBossUrl || bossImageUrl;
+      let finalDropCardUrl = preDropUrl || dropCardUrl;
+      
+      // 引数が無い場合（プレビューを経由していない場合）のみAI生成を走らせる
+      if (!preBossUrl && bossImageMode === 'ai' && bossAiPrompt) {
         try {
           const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: bossAiPrompt } });
           if (error) throw error;
@@ -770,11 +875,12 @@ export default function AdminDashboard() {
           console.warn(e);
           finalBossImageUrl = 'https://via.placeholder.com/300x400.png?text=AI+Error';
         }
-      } else if (bossImageUrl) {
-        finalBossImageUrl = await uploadBase64Image(bossImageUrl, 'bosses');
+      }
+      if (finalBossImageUrl && finalBossImageUrl.startsWith('data:image')) {
+        finalBossImageUrl = await uploadBase64Image(finalBossImageUrl, 'bosses');
       }
 
-      if (dropCardMode === 'ai' && dropCardPrompt) {
+      if (!preDropUrl && dropCardMode === 'ai' && dropCardPrompt) {
         try {
           const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: dropCardPrompt } });
           if (error) throw error;
@@ -783,8 +889,9 @@ export default function AdminDashboard() {
           console.warn(e);
           finalDropCardUrl = 'https://via.placeholder.com/300x400.png?text=AI+Error';
         }
-      } else if (dropCardUrl) {
-        finalDropCardUrl = await uploadBase64Image(dropCardUrl, 'boss_drops');
+      }
+      if (finalDropCardUrl && finalDropCardUrl.startsWith('data:image')) {
+        finalDropCardUrl = await uploadBase64Image(finalDropCardUrl, 'boss_drops');
       }
 
       const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
@@ -859,7 +966,7 @@ export default function AdminDashboard() {
       for (let i = 0; i < count; i++) {
         promises.push((async () => {
           const randomName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
-          const randomElement = elementsList[Math.floor(Math.random() * elementsList.length)] || '闇';
+          const randomElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
           const randomRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
           
           const { finalLat, finalLng } = getRandomCoords();
@@ -905,25 +1012,17 @@ export default function AdminDashboard() {
     } catch (err: any) { Alert.alert('エラー', err.message); } finally { setLoading(false); }
   };
 
-  // 🌟 お知らせの配信（スキーマエラー回避版）
   const handleSendAnnouncement = async () => {
     if (!annTitle || !annBody) return Alert.alert('エラー', 'タイトルと本文を入力してください');
     setLoading(true);
     try {
-      // 1. お知らせテーブルに保存
       const { error: annError } = await supabase.from('announcements').insert([{
-        title: annTitle,
-        body: annBody,
-        target_gender: targetGender,
-        target_age: targetAge,
-        target_location: targetLocation || null
+        title: annTitle, body: annBody, target_gender: targetGender, target_age: targetAge, target_location: targetLocation || null
       }]);
-      
       if (annError) throw annError;
 
       fetchAnnouncements(); 
 
-      // 2. ターゲットユーザーを抽出して、個別の受信箱に配信
       const { data: allProfiles } = await supabase.from('profiles').select('*').limit(10000);
       const matched = (allProfiles || []).filter((p: any) => {
         if (targetGender === 'MALE' && !(p.gender === 'male' || p.gender === '男性')) return false;
@@ -937,16 +1036,12 @@ export default function AdminDashboard() {
       });
 
       if (matched.length > 0) {
-        // 🌟 【修正箇所2】metadata カラムを外し、安全な user_id を使用してエラーを抑制
         const messagesToInsert = matched.map((p: any) => ({
           text: `📢【お知らせ】\n${annTitle}\n\n${annBody}`,
-          user_id: p.id // 💡修正箇所：player_id を user_id に変更
+          user_id: p.id
         }));
-        
         const { error: msgError } = await supabase.from('messages').insert(messagesToInsert);
-        if (msgError) {
-            console.warn('メッセージ個別送信でエラーが発生しました (無視して進行します):', msgError.message);
-        }
+        if (msgError) console.warn('メッセージ個別送信でエラー:', msgError.message);
       }
 
       Alert.alert('配信完了', `${matched.length}人のユーザーにお知らせを配信しました！`);
@@ -1829,8 +1924,8 @@ export default function AdminDashboard() {
                   </View>
                 )}
 
-                <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: isMassiveSpawn ? '#DC2626' : '#8B5CF6', marginTop: 16}]} onPress={triggerInstantRandomBoss} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{isMassiveSpawn ? `${massiveSpawnCount}体のボスをマップへ大量投下！` : '完全自動生成ボスを1体マップへ降臨'}</Text>}
+                <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: isMassiveSpawn ? '#DC2626' : '#8B5CF6', marginTop: 16}]} onPress={handleShowMassiveBossPreview} disabled={loading}>
+                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{isMassiveSpawn ? `生成プレビュー確認後、${massiveSpawnCount}体をマップへ大量投下` : '生成プレビュー確認後、1体をマップへ降臨'}</Text>}
                 </TouchableOpacity>
               </View>
             </View>
@@ -1908,8 +2003,8 @@ export default function AdminDashboard() {
                 <TextInput style={[styles.input, {height: 80}]} value={dropCardPrompt} onChangeText={setDropCardPrompt} placeholder="AI画像生成プロンプト" multiline />
               )}
 
-              <TouchableOpacity style={styles.primaryBtn} onPress={handleCreateBoss} disabled={loading}>
-                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>ボスと報酬カードを配置</Text>}
+              <TouchableOpacity style={styles.primaryBtn} onPress={handleShowManualBossPreview} disabled={loading}>
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>プレビューしてボスと報酬カードを配置</Text>}
               </TouchableOpacity>
             </View>
           </View>
@@ -2030,7 +2125,11 @@ export default function AdminDashboard() {
                         </TouchableOpacity>
                       </View>
                     )}
-                    {arAssetCustomUrl ? <Text style={{fontSize:11, color:'#475569', marginTop: 8}} numberOfLines={1}>登録済: {arAssetCustomUrl}</Text> : null}
+                    {arAssetCustomUrl ? (
+                      <View style={{height: 150, width: 120, marginTop: 12, borderRadius: 12, overflow: 'hidden', alignSelf: 'center', borderWidth: 1, borderColor: '#E2E8F0'}}>
+                        <Image source={{uri: arAssetCustomUrl}} style={styles.previewImg} />
+                      </View>
+                    ) : null}
                     
                     <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#E2E8F0'}}>
                       <Text style={{fontSize: 12, color: '#475569', fontWeight: 'bold', marginBottom: 6}}>付与されるカードのステータス設定</Text>
@@ -2066,7 +2165,11 @@ export default function AdminDashboard() {
                         </TouchableOpacity>
                       </View>
                     )}
-                    {arWinAssetUrl ? <Text style={{fontSize:11, color:'#D97706', marginTop: 8}} numberOfLines={1}>登録済: {arWinAssetUrl}</Text> : null}
+                    {arWinAssetUrl ? (
+                      <View style={{height: 150, width: 120, marginTop: 12, borderRadius: 12, overflow: 'hidden', alignSelf: 'center', borderWidth: 1, borderColor: '#FDE68A'}}>
+                        <Image source={{uri: arWinAssetUrl}} style={styles.previewImg} />
+                      </View>
+                    ) : null}
 
                     <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#FDE68A'}}>
                       <Text style={{fontSize: 12, color: '#D97706', fontWeight: 'bold', marginBottom: 6}}>付与されるレアカードのステータス設定</Text>
@@ -2108,7 +2211,11 @@ export default function AdminDashboard() {
                         </TouchableOpacity>
                       </View>
                     )}
-                    {arBossImageUrl ? <Text style={{fontSize:11, color:'#DC2626', marginTop: 8}} numberOfLines={1}>登録済: {arBossImageUrl}</Text> : null}
+                    {arBossImageUrl ? (
+                      <View style={{height: 150, width: 120, marginTop: 12, borderRadius: 12, overflow: 'hidden', alignSelf: 'center', borderWidth: 1, borderColor: '#FECACA'}}>
+                        <Image source={{uri: arBossImageUrl}} style={styles.previewImg} />
+                      </View>
+                    ) : null}
 
                     <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#FECACA'}}>
                       <Text style={{fontSize: 12, color: '#DC2626', fontWeight: 'bold', marginBottom: 6}}>ボスのステータス設定</Text>
@@ -2142,7 +2249,11 @@ export default function AdminDashboard() {
                         </TouchableOpacity>
                       </View>
                     )}
-                    {arWinAssetUrl ? <Text style={{fontSize:11, color:'#10B981', marginTop: 8}} numberOfLines={1}>登録済: {arWinAssetUrl}</Text> : null}
+                    {arWinAssetUrl ? (
+                      <View style={{height: 150, width: 120, marginTop: 12, borderRadius: 12, overflow: 'hidden', alignSelf: 'center', borderWidth: 1, borderColor: '#BBF7D0'}}>
+                        <Image source={{uri: arWinAssetUrl}} style={styles.previewImg} />
+                      </View>
+                    ) : null}
 
                     <View style={{marginTop: 12, paddingTop: 12, borderTopWidth: 1, borderColor: '#BBF7D0'}}>
                       <Text style={{fontSize: 12, color: '#166534', fontWeight: 'bold', marginBottom: 6}}>報酬カードのステータス設定</Text>
@@ -2371,6 +2482,40 @@ export default function AdminDashboard() {
               </TouchableOpacity>
               <TouchableOpacity style={[styles.primaryBtn, {flex: 1, marginTop: 0}]} onPress={handleMintAction} disabled={loading}>
                 {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>確定して実行</Text>}
+              </TouchableOpacity>
+            </View>
+          </View>
+        </View>
+      </Modal>
+
+      {/* 🌟 ボス・マップ配置プレビュー用のモーダル */}
+      <Modal visible={bossPreviewVisible} transparent animationType="fade" onRequestClose={() => setBossPreviewVisible(false)}>
+        <View style={styles.modalOverlay}>
+          <View style={styles.modalContent}>
+            <Text style={styles.cardTitle}>{previewBossContext === 'massive' ? 'ランダムボス生成プレビュー (サンプル)' : 'ボス手動配置プレビュー'}</Text>
+            <ScrollView style={{maxHeight: 500, marginBottom: 16}}>
+              <View style={{flexDirection: 'row', gap: 12}}>
+                 <View style={{flex: 1}}>
+                    <Text style={styles.label}>😈 ボスデザイン</Text>
+                    <Image source={{uri: pbImageUrl}} style={{width: '100%', height: 200, borderRadius: 12, resizeMode: 'cover', backgroundColor: '#E2E8F0', marginBottom: 8}} />
+                    <Text style={{fontSize: 14, fontWeight: 'bold'}}>{pbName}</Text>
+                    <Text style={{fontSize: 12, color: '#475569'}}>属性: {pbElement}</Text>
+                    <Text style={{fontSize: 12, color: '#DC2626', fontWeight: 'bold'}}>HP: {pbHp} / ATK: {pbAtk} / DEF: {pbDef}</Text>
+                 </View>
+                 <View style={{flex: 1}}>
+                    <Text style={styles.label}>🎁 ドロップ報酬デザイン</Text>
+                    <Image source={{uri: pdImageUrl}} style={{width: '100%', height: 200, borderRadius: 12, resizeMode: 'cover', backgroundColor: '#E2E8F0', marginBottom: 8}} />
+                    <Text style={{fontSize: 14, fontWeight: 'bold'}}>{pdName}</Text>
+                    <Text style={{fontSize: 12, color: '#475569'}}>属性: {pdAttr} / レア: {pdRarity}</Text>
+                 </View>
+              </View>
+            </ScrollView>
+            <View style={{flexDirection: 'row', gap: 12}}>
+              <TouchableOpacity style={[styles.primaryBtn, {flex: 1, backgroundColor: '#94A3B8', marginTop: 0}]} onPress={() => setBossPreviewVisible(false)}>
+                <Text style={styles.primaryBtnText}>キャンセル</Text>
+              </TouchableOpacity>
+              <TouchableOpacity style={[styles.primaryBtn, {flex: 1, backgroundColor: previewBossContext === 'massive' ? '#DC2626' : '#10B981', marginTop: 0}]} onPress={handleConfirmBossPreview} disabled={loading}>
+                {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{previewBossContext === 'massive' ? 'この設定で本番実行' : '確定して配置'}</Text>}
               </TouchableOpacity>
             </View>
           </View>
