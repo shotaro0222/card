@@ -595,7 +595,7 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // 🌟 新機能: MINT配布・出品前のプレビュー表示ロジック
+  // 🌟 新機能: MINT配布・出品前のプレビュー表示ロジック（ステータス表示追加＆CORSエラー回避強化）
   const handleShowPreview = async () => {
     if (!cName && shopItemType === 'single') return Alert.alert('エラー', 'カード名を入力してください');
     if (mintDest === 'shop' && shopItemType === 'pack' && !packCardCount) return Alert.alert('エラー', 'パック封入枚数を入力してください');
@@ -612,8 +612,8 @@ export default function AdminDashboard() {
           tempImageUrl = data?.imageUrl || 'https://via.placeholder.com/300x400.png?text=AI+Generated';
         } catch (aiErr: any) {
           console.warn('Preview AI Gen Error:', aiErr);
-          Alert.alert('AI生成エラー', 'AI画像の生成に失敗しました（CORSエラー等）。プレースホルダー画像を使用してプレビューを表示します。');
-          tempImageUrl = 'https://via.placeholder.com/300x400.png?text=AI+Generated';
+          Alert.alert('AI生成警告', 'AI画像の生成に失敗しました（CORSエラー等）。プレースホルダー画像でプレビューを続行します。');
+          tempImageUrl = 'https://via.placeholder.com/300x400.png?text=AI+Error';
         }
       } else if (shopItemType === 'single' && !cImage) {
         tempImageUrl = 'https://via.placeholder.com/300x400.png?text=No+Image';
@@ -2324,7 +2324,16 @@ export default function AdminDashboard() {
               <Text style={{fontSize: 16, fontWeight: 'bold', marginBottom: 8}}>{cName || '名称未設定'}</Text>
               
               {shopItemType === 'single' && (
-                <Text style={{fontSize: 14, color: '#475569', marginBottom: 8}}>属性: {cAttr} / レア: {cRarity}</Text>
+                <View style={{marginTop: 8}}>
+                  <Text style={{fontSize: 14, color: '#475569', marginBottom: 4}}>属性: {cAttr} / レア: {cRarity}</Text>
+                  <Text style={{fontSize: 14, color: '#475569', marginBottom: 8}}>スキル: {cSkillName || '通常攻撃'}</Text>
+                  <View style={{flexDirection: 'row', gap: 12, marginTop: 4, backgroundColor: '#F8FAFC', padding: 12, borderRadius: 8, borderWidth: 1, borderColor: '#E2E8F0'}}>
+                    <Text style={{fontSize: 13, fontWeight: 'bold', color: '#DC2626'}}>HP: {cHp || '100'}</Text>
+                    <Text style={{fontSize: 13, fontWeight: 'bold', color: '#D97706'}}>ATK: {cAtk || '50'}</Text>
+                    <Text style={{fontSize: 13, fontWeight: 'bold', color: '#2563EB'}}>DEF: {cDef || '50'}</Text>
+                    <Text style={{fontSize: 13, fontWeight: 'bold', color: '#16A34A'}}>SPD: {cSpd || '50'}</Text>
+                  </View>
+                </View>
               )}
 
               {mintDest === 'direct' && (
