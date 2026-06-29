@@ -12,6 +12,12 @@ export default function TabLayout() {
         paddingBottom: 10,
         position: 'absolute', // コンテンツに押し出されないよう固定
       },
+      tabBarLabelStyle: {
+        fontSize: 10, // 全体的に文字サイズをわずかに下げて収まりやすくする
+      },
+      tabBarItemStyle: {
+        padding: 0, // アイテム間の余白を極力減らしてテキスト表示領域を広げる
+      },
       tabBarActiveTintColor: '#3B82F6',
       tabBarInactiveTintColor: '#94A3B8',
       headerShown: true, // ヘッダーを出すことで枠組みを安定させる
@@ -19,7 +25,8 @@ export default function TabLayout() {
       headerStyle: { backgroundColor: '#FFFFFF' },
       headerTitleStyle: { fontWeight: '800', color: '#0F172A' },
     }}>
-      <Tabs.Screen name="index" options={{ title: 'カード生成', tabBarIcon: ({ color }) => <Camera color={color} size={24} /> }} />
+      {/* 「カード生成」を「カード」に変更して文字切れを防止 */}
+      <Tabs.Screen name="index" options={{ title: 'カード', tabBarIcon: ({ color }) => <Camera color={color} size={24} /> }} />
       <Tabs.Screen name="deck" options={{ title: '図鑑', tabBarIcon: ({ color }) => <Layers color={color} size={24} /> }} />
       <Tabs.Screen name="battle" options={{ title: '冒険', tabBarIcon: ({ color }) => <MapPin color={color} size={24} /> }} />
       <Tabs.Screen name="arena" options={{ title: '闘技場', tabBarIcon: ({ color }) => <Swords color={color} size={24} /> }} />
