@@ -119,4 +119,118 @@ export default function EventsScreen() {
         <TouchableOpacity 
           style={[styles.pageButton, currentPage === totalPages && styles.pageButtonDisabled]}
           disabled={currentPage === totalPages}
-          onPress={() => setCurrentPage(prev => Math.min(totalPages,Normally I can help with things like this, but I don't seem to have access to that content. You can try again or ask me for something else.
+          onPress={() => setCurrentPage(prev => Math.min(totalPages, prev + 1))}
+        >
+          <Text style={[styles.pageButtonText, currentPage === totalPages && styles.pageButtonTextDisabled]}>次へ</Text>
+        </TouchableOpacity>
+      </View>
+    );
+  };
+
+  return (
+    <SafeAreaView style={styles.safeArea}>
+      <View style={styles.container}>
+        {loading ? (
+          <ActivityIndicator size="large" color="#f87171" style={{ marginTop: 50 }} />
+        ) : (
+          <FlatList
+            data={displayEvents}
+            keyExtractor={(item) => item.id}
+            renderItem={renderEvent}
+            contentContainerStyle={{ padding: 15 }}
+            ListEmptyComponent={<Text style={styles.emptyText}>現在届いているお知らせはありません。</Text>}
+            ListFooterComponent={renderPagination}
+          />
+        )}
+
+        {/* お知らせ詳細モーダル */}
+        <Modal
+          visible={modalVisible}
+          transparent={true}
+          animationType="fade"
+          onRequestClose={closeModal}
+        >
+          <View style={styles.modalOverlay}>
+            <View style={styles.modalContent}>
+              <TouchableOpacity style={styles.closeButton} onPress={closeModal}>
+                <X color="#94a3b8" size={28} />
+              </TouchableOpacity>
+              
+              {selectedEvent && (
+                <ScrollView showsVerticalScrollIndicator={false}>
+                  <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
+                  <Text style={styles.modalDate}>{new Date(selectedEvent.created_at).toLocaleDateString('ja-JP')}</Text>
+                  
+                  {selectedEvent.image_url && (
+                    <Image source={{ uri: selectedEvent.image_url }} style={styles.modalImage} />
+                  )}
+                  
+                  <Text style={styles.modalBody}>{selectedEvent.body}</Text>
+                </ScrollView>
+              )}
+            </View>
+          </View>
+        </Modal>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  safeArea: { flex: 1, backgroundColor: '#020617' },
+  container: { flex: 1 },
+  eventCard: { 
+    backgroundColor: '#0f172a', 
+    borderRadius: 12, 
+    padding: 16, 
+    marginBottom: 12, 
+    borderWidth: 1, 
+    borderColor: '#1e293b' 
+  },
+  header: { flexDirection: 'column', justifyContent: 'center' },
+  title: { color: '#f87171', fontSize: 16, fontWeight: 'bold', marginBottom: 6 },
+  date: { color: '#64748b', fontSize: 12 },
+  emptyText: { color: '#64748b', textAlign: 'center', marginTop: 50 },
+  
+  // ページネーション用スタイル
+  paginationContainer: { 
+    flexDirection: 'row', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    paddingVertical: 20 
+  },
+  pageButton: { 
+    backgroundColor: '#1e293b', 
+    paddingHorizontal: 20, 
+    paddingVertical: 12, 
+    borderRadius: 8, 
+    marginHorizontal: 16 
+  },
+  pageButtonDisabled: { opacity: 0.4 },
+  pageButtonText: { color: '#e2e8f0', fontWeight: 'bold', fontSize: 14 },
+  pageButtonTextDisabled: { color: '#64748b' },
+  pageInfo: { color: '#94a3b8', fontSize: 14, fontWeight: 'bold' },
+
+  // モーダル用スタイル
+  modalOverlay: { 
+    flex: 1, 
+    backgroundColor: 'rgba(0, 0, 0, 0.75)', 
+    justifyContent: 'center', 
+    alignItems: 'center', 
+    padding: 20 
+  },
+  modalContent: { 
+    backgroundColor: '#0f172a', 
+    borderRadius: 16, 
+    padding: 20, 
+    width: '100%', 
+    maxHeight: '85%', 
+    borderWidth: 1, 
+    borderColor: '#334155' 
+  },
+  closeButton: { alignSelf: 'flex-end', padding: 4, marginBottom: 8 },
+  modalTitle: { color: '#f87171', fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
+  modalDate: { color: '#64748b', fontSize: 13, marginBottom: 20 },
+  modalImage: { width: '100%', height: 200, borderRadius: 8, marginBottom: 20, resizeMode: 'cover', backgroundColor: '#000' },
+  modalBody: { color: '#cbd5e1', fontSize: 15, lineHeight: 26, paddingBottom: 20 }
+});
