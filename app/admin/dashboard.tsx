@@ -676,7 +676,13 @@ export default function AdminDashboard() {
           card_image_url: shopItemType === 'single' ? finalCardImageUrl : null,
           stats: itemStats
         }]);
-        if (shopError) throw shopError;
+        
+        // 💡修正箇所：400エラーの原因を特定しやすくするため、詳細なエラー情報を投げる
+        if (shopError) {
+          console.error("【ショップ登録エラー詳細】", shopError);
+          throw new Error(`ショップ登録失敗: ${shopError.message || shopError.details}`);
+        }
+
         Alert.alert('成功', `ショップに${shopItemType === 'pack' ? 'パック商品' : '単体カード'}を出品しました！`);
       } else {
         // --- 直接配布（特権MINT）の処理 ---
@@ -738,7 +744,7 @@ export default function AdminDashboard() {
         // メッセージ送信 (RLSで弾かれる可能性があるため、エラーはコンソールに出しつつ処理は完了させる)
         const messages = matched.map((p: any) => ({
           text: `🎁 報酬ボックスに特権カードが届いています: ${cName}`,
-          player_id: p.id
+          user_id: p.id // 💡修正箇所：player_id を user_id に修正
         }));
         const { error: msgError } = await supabase.from('messages').insert(messages);
         if (msgError) console.warn('メッセージ送信でエラーが発生しましたが無視して進行します:', msgError.message);
@@ -931,10 +937,10 @@ export default function AdminDashboard() {
       });
 
       if (matched.length > 0) {
-        // 🌟 【修正箇所2】metadata カラムを外し、安全な player_id を使用してエラーを抑制
+        // 🌟 【修正箇所2】metadata カラムを外し、安全な user_id を使用してエラーを抑制
         const messagesToInsert = matched.map((p: any) => ({
           text: `📢【お知らせ】\n${annTitle}\n\n${annBody}`,
-          player_id: p.id
+          user_id: p.id // 💡修正箇所：player_id を user_id に変更
         }));
         
         const { error: msgError } = await supabase.from('messages').insert(messagesToInsert);
