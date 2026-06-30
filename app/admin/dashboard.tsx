@@ -88,6 +88,9 @@ export default function AdminDashboard() {
 
   // ==================== 5. ボス / マップ配置 ====================
   const [bosses, setBosses] = useState<any[]>([]);
+  const [activeBosses, setActiveBosses] = useState<any[]>([]); // 🌟 現在出現中のボス
+  const [bossHistory, setBossHistory] = useState<any[]>([]);   // 🌟 過去のボス履歴
+  
   const [bName, setBName] = useState('');
   const [bStartAt, setBStartAt] = useState('');
   const [bEndAt, setBEndAt] = useState('');
@@ -351,8 +354,38 @@ export default function AdminDashboard() {
   };
 
   const fetchBosses = async () => {
-    const { data } = await supabase.from('bosses').select('*').order('created_at', { ascending: false }).limit(20);
-    if (data) setBosses(data);
+    try {
+      let { data, error } = await supabase.from('bosses').select('*, campaigns(*)').order('created_at', { ascending: false }).limit(100);
+      if (error) {
+        const fallback = await supabase.from('bosses').select('*').order('created_at', { ascending: false }).limit(100);
+        data = fallback.data;
+      }
+      if (data) {
+        setBosses(data);
+        const now = new Date().getTime();
+        const active: any[] = [];
+        const history: any[] = [];
+        
+        data.forEach((b: any) => {
+          let isActive = true;
+          if (b.campaigns) {
+            const c = Array.isArray(b.campaigns) ? b.campaigns[0] : b.campaigns;
+            if (c) {
+              if (c.is_active === false) isActive = false;
+              if (c.end_at && new Date(c.end_at).getTime() < now) isActive = false;
+            }
+          }
+          if (isActive) {
+            active.push(b);
+          } else {
+            history.push(b);
+          }
+        });
+        
+        setActiveBosses(active);
+        setBossHistory(history);
+      }
+    } catch (e) { console.log('Bosses fetch error:', e); }
   };
 
   const fetchMasterData = async () => {
@@ -1010,6 +1043,22 @@ export default function AdminDashboard() {
       Alert.alert('自動生成成功', `${count}体のボスをマップへ配置しました！`);
       fetchBosses();
     } catch (err: any) { Alert.alert('エラー', err.message); } finally { setLoading(false); }
+  };
+
+  const handleEndBoss = async (bossId: string, campaignId: string) => {
+    Alert.alert('終了確認', 'このボスをマップから撤去（終了）しますか？', [
+      { text: 'キャンセル', style: 'cancel' },
+      { text: '撤去', style: 'destructive', onPress: async () => {
+          setLoading(true);
+          try {
+            if (campaignId) {
+              await supabase.from('campaigns').update({ is_active: false, end_at: new Date().toISOString() }).eq('id', campaignId);
+            }
+            fetchBosses();
+            Alert.alert('成功', 'ボスをマップから撤去しました');
+          } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
+      }}
+    ]);
   };
 
   const handleSendAnnouncement = async () => {
@@ -1837,6 +1886,41 @@ export default function AdminDashboard() {
         {activeTab === 'bosses' && (
           <View>
             <View style={styles.card}>
+              <Text style={styles.cardTitle}>🟢 現在出現中のボス</Text>
+              <Text style={{color:'#64748B', fontSize: 12, marginBottom: 12}}>
+                現在マップ上でプレイヤーが挑戦可能なボスの一覧です。
+              </Text>
+              {activeBosses.length === 0 ? (
+                <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>現在出現中のボスはいません</Text>
+              ) : (
+                activeBosses.map((b) => {
+                  const camp = b.campaigns ? (Array.isArray(b.campaigns) ? b.campaigns[0] : b.campaigns) : null;
+                  return (
+                    <View key={b.id} style={styles.listItemRow}>
+                      {b.image_url ? (
+                        <Image source={{uri: b.image_url}} style={{width: 50, height: 70, borderRadius: 8, marginRight: 12, resizeMode: 'cover'}} />
+                      ) : (
+                        <View style={{width: 50, height: 70, borderRadius: 8, marginRight: 12, backgroundColor: '#E2E8F0'}} />
+                      )}
+                      <View style={{flex: 1}}>
+                        <Text style={styles.listItemTitle}>{b.name}</Text>
+                        <Text style={styles.listItemSub}>属性: {b.element} / HP: {b.hp}</Text>
+                        {camp && (
+                          <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>
+                            終了予定: {camp.end_at ? new Date(camp.end_at).toLocaleString() : '期限なし'}
+                          </Text>
+                        )}
+                      </View>
+                      <TouchableOpacity style={{padding: 10}} onPress={() => handleEndBoss(b.id, b.trigger_campaign_id)}>
+                        <Trash2 color="#EF4444" size={24} />
+                      </TouchableOpacity>
+                    </View>
+                  );
+                })
+              )}
+            </View>
+
+            <View style={styles.card}>
               <Text style={styles.cardTitle}>🎲 ランダムボス自動出現 ＆ 大量発生(フェス)</Text>
               <Text style={{color:'#64748B', fontSize: 12, marginBottom: 12}}>
                 自動出現のON/OFFや、座標ベース・全国・自治体ベースの出現範囲を設定できます。
@@ -2007,6 +2091,37 @@ export default function AdminDashboard() {
                 {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>プレビューしてボスと報酬カードを配置</Text>}
               </TouchableOpacity>
             </View>
+
+            <View style={styles.card}>
+              <Text style={styles.cardTitle}>📖 ボス履歴 (過去の出現)</Text>
+              <Text style={{color:'#64748B', fontSize: 12, marginBottom: 12}}>
+                期間が終了した、または手動で撤去されたボスの履歴です。
+              </Text>
+              {bossHistory.length === 0 ? (
+                <Text style={{textAlign: 'center', color: '#94A3B8', marginVertical: 20}}>ボス履歴はありません</Text>
+              ) : (
+                bossHistory.map((b) => (
+                  <View key={b.id} style={[styles.listItemRow, { opacity: 0.6 }]}>
+                    {b.image_url ? (
+                      <Image source={{uri: b.image_url}} style={{width: 50, height: 70, borderRadius: 8, marginRight: 12, resizeMode: 'cover'}} />
+                    ) : (
+                      <View style={{width: 50, height: 70, borderRadius: 8, marginRight: 12, backgroundColor: '#E2E8F0'}} />
+                    )}
+                    <View style={{flex: 1}}>
+                      <Text style={styles.listItemTitle}>{b.name}</Text>
+                      <Text style={styles.listItemSub}>属性: {b.element} / HP: {b.hp}</Text>
+                      <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>
+                        作成日: {new Date(b.created_at).toLocaleString()}
+                      </Text>
+                    </View>
+                    <View style={[styles.bannedBadge, {backgroundColor: '#E2E8F0', color: '#64748B'}]}>
+                      <Text style={{fontSize: 11, fontWeight: 'bold', color: '#475569'}}>終了済</Text>
+                    </View>
+                  </View>
+                ))
+              )}
+            </View>
+
           </View>
         )}
 
