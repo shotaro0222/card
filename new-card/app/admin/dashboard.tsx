@@ -334,7 +334,7 @@ export default function AdminDashboard() {
 
   const fetchUgcCards = async () => {
     try {
-      let { data, error } = await supabase
+      let { data, error }: { data: any[] | null; error: any } = await supabase
         .from('cards')
         .select(`id, card_name, image_url, is_hidden, created_at, player_id, profiles(player_name)`)
         .order('created_at', { ascending: false })
@@ -402,7 +402,7 @@ export default function AdminDashboard() {
 
   const fetchTeams = async () => {
     try {
-      let { data, error } = await supabase.from('teams').select('*, profiles(player_name)').order('created_at', { ascending: false });
+      let { data, error }: { data: any[] | null; error: any } = await supabase.from('teams').select('*, profiles(player_name)').order('created_at', { ascending: false });
       
       if (error) {
         const fallback = await supabase.from('teams').select('*').order('created_at', { ascending: false });
@@ -422,7 +422,7 @@ export default function AdminDashboard() {
 
   const fetchTerritories = async () => {
     try {
-      let { data, error } = await supabase.from('territories').select('*, profiles(player_name)').order('created_at', { ascending: false });
+      let { data, error }: { data: any[] | null; error: any } = await supabase.from('territories').select('*, profiles(player_name)').order('created_at', { ascending: false });
       if (error) {
         const fallback = await supabase.from('territories').select('*').order('created_at', { ascending: false });
         data = fallback.data;
@@ -477,7 +477,7 @@ export default function AdminDashboard() {
   const pickWebDocument = async () => {
     try {
       const result = await DocumentPicker.getDocumentAsync({ type: ['*/*'] });
-      if (result.type === 'success') return result;
+      if (!result.canceled) return result;
     } catch (_) {}
     const file = await pickWebFile('*/*');
     if (!file) return { type: 'cancel' as const };
@@ -510,8 +510,15 @@ export default function AdminDashboard() {
       const result = Platform.OS === 'web'
         ? await pickWebDocument()
         : await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true });
-      if (result.type !== 'success') return;
-      const asset: any = result;
+
+      let asset: any = null;
+      if ('canceled' in result) {
+        if (result.canceled) return;
+        asset = result.assets?.[0];
+      } else if (result.type === 'success') {
+        asset = result;
+      }
+      if (!asset) return;
 
       if (!promoId || promoId === 'ALL') {
         Alert.alert('エラー', '対象のプロモID（クライアントUUID）を入力してください。');
@@ -582,8 +589,15 @@ export default function AdminDashboard() {
       const result = Platform.OS === 'web'
         ? await pickWebDocument()
         : await DocumentPicker.getDocumentAsync({ type: ['*/*'], copyToCacheDirectory: true });
-      if (result.type !== 'success') return;
-      const asset: any = result;
+
+      let asset: any = null;
+      if ('canceled' in result) {
+        if (result.canceled) return;
+        asset = result.assets?.[0];
+      } else if (result.type === 'success') {
+        asset = result;
+      }
+      if (!asset) return;
 
       if (!promoId || promoId === 'ALL') {
         Alert.alert('エラー', '対象のプロモIDを入力してください。');
@@ -1282,7 +1296,8 @@ export default function AdminDashboard() {
         a.download = `analytics_${Date.now()}.csv`;
         a.click();
       } else {
-        const fileUri = `${FileSystem.documentDirectory}analytics_${Date.now()}.csv`;
+        const documentDir = (FileSystem as any).documentDirectory ?? (FileSystem as any).cacheDirectory ?? '';
+        const fileUri = `${documentDir}analytics_${Date.now()}.csv`;
         await FileSystem.writeAsStringAsync(fileUri, csvContent);
         await Sharing.shareAsync(fileUri);
       }
@@ -2192,7 +2207,7 @@ export default function AdminDashboard() {
               </View>
 
               <Text style={styles.label}>2. 操作対象の店舗UUID</Text>
-              <TextInput style={styles.input} value={arTargetClientId} onChangeText={setArTargetClientId} placeholder="promo_links テーブルの UUID を指定" disabled={arClientType === 'global'} autoCapitalize="none" />
+              <TextInput style={styles.input} value={arTargetClientId} onChangeText={setArTargetClientId} placeholder="promo_links テーブルの UUID を指定" editable={arClientType !== 'global'} autoCapitalize="none" />
 
               <Text style={styles.label}>3. トリガーマーカーのアップロード（.mind または 画像）</Text>
               <TouchableOpacity style={[styles.primaryBtn, { backgroundColor: arClientType === 'global' ? '#94A3B8' : '#8B5CF6', marginTop: 8, marginBottom: 12 }]} onPress={() => handleUploadArMarker(arTargetClientId)} disabled={loading || arClientType === 'global'}>

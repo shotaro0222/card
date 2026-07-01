@@ -8,15 +8,16 @@ import { supabase } from '../lib/supabase';
 // アプリがフォアグラウンド（起動中）のときの通知挙動設定
 Notifications.setNotificationHandler({
   handleNotification: async () => ({
-    shouldShowAlert: true,
+    shouldShowBanner: true,
+    shouldShowList: true,
     shouldPlaySound: true,
     shouldSetBadge: false,
   }),
 });
 
 export function usePushNotifications() {
-  const notificationListener = useRef<any>();
-  const responseListener = useRef<any>();
+  const notificationListener = useRef<any>(null);
+  const responseListener = useRef<any>(null);
 
   useEffect(() => {
     registerForPushNotificationsAsync().then(token => {
@@ -26,19 +27,19 @@ export function usePushNotifications() {
     });
 
     // 通知を受信したときのイベントリスナー（アプリ起動中）
-    notificationListener.current = Notifications.addNotificationReceivedListener(notification => {
+    notificationListener.current = Notifications.addNotificationReceivedListener((notification: any) => {
       console.log('通知を受信しました:', notification);
     });
 
     // ユーザーが通知をタップしてアプリを開いたときのイベントリスナー
-    responseListener.current = Notifications.addNotificationResponseReceivedListener(response => {
+    responseListener.current = Notifications.addNotificationResponseReceivedListener((response: any) => {
       console.log('通知がタップされました:', response);
       // 将来的に、特定の画面（お知らせ画面など）へルーティングさせる処理をここに記述可能
     });
 
     return () => {
-      Notifications.removeNotificationSubscription(notificationListener.current);
-      Notifications.removeNotificationSubscription(responseListener.current);
+      notificationListener.current?.remove();
+      responseListener.current?.remove();
     };
   }, []);
 }

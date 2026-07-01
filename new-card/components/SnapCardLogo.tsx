@@ -1,5 +1,5 @@
 import React from 'react';
-import { View, Text, StyleSheet } from 'react-native';
+import { View, Text, StyleSheet, Platform } from 'react-native';
 import { Sparkles } from 'lucide-react-native'; // 💡 キラキラアイコンを使用
 
 interface LogoProps {

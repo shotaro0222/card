@@ -160,13 +160,13 @@ export default function WebAdminDashboard() {
   };
 
   const fetchUsers = async () => {
-    const { data } = await supabase.from('profiles').select('*').order('created_at', { descending: false }).limit(50);
+    const { data } = await supabase.from('profiles').select('*').order('created_at', { ascending: true }).limit(50);
     if (data) setUsers(data);
   };
 
   const fetchUgcCards = async () => {
     try {
-      let { data, error } = await supabase.from('cards').select(`id, card_name, image_url, is_hidden, created_at, player_id, profiles(player_name)`).order('created_at', { ascending: false }).limit(50);
+      let { data, error }: { data: any[] | null; error: any } = await supabase.from('cards').select(`id, card_name, image_url, is_hidden, created_at, player_id, profiles(player_name)`).order('created_at', { ascending: false }).limit(50);
       if (error) {
         const fallback = await supabase.from('cards').select('id, card_name, image_url, is_hidden, created_at, player_id').order('created_at', { ascending: false }).limit(50);
         data = fallback.data;
@@ -393,7 +393,7 @@ export default function WebAdminDashboard() {
       <header className="bg-white px-6 py-4 border-b border-slate-200 shadow-sm sticky top-0 z-10 flex justify-between items-center">
         <h1 className="text-2xl font-black text-slate-900 tracking-wide">COMMAND CENTER</h1>
         <button onClick={handleLogout} className="flex items-center text-xs font-bold text-red-500 hover:text-red-600 bg-red-50 px-3 py-2 rounded-xl transition-colors">
-          <LogOut size={14} className="mr-1" /> 司令部から離脱
+          <LogOut size={14} style={{ marginRight: 4 }} /> 司令部から離脱
         </button>
       </header>
 
@@ -459,7 +459,7 @@ export default function WebAdminDashboard() {
             </div>
 
             <button onClick={exportAnalyticsCSV} className="w-full flex justify-center items-center bg-blue-600 hover:bg-blue-700 text-white font-bold py-4 rounded-2xl transition-colors text-sm">
-              <Download size={20} className="mr-2" /> 全データをCSVでエクスポート
+              <Download size={20} style={{ marginRight: 8 }} /> 全データをCSVでエクスポート
             </button>
           </div>
         )}
@@ -503,7 +503,7 @@ export default function WebAdminDashboard() {
                   {c.image_url ? (
                     <img src={c.image_url} alt="card" className="w-12 h-16 object-cover rounded-lg" />
                   ) : (
-                    <div className="w-12 h-16 bg-slate-200 flex items-center justify-center rounded-lg"><ImageIcon className="text-slate-400" size={20}/></div>
+                    <div className="w-12 h-16 bg-slate-200 flex items-center justify-center rounded-lg"><ImageIcon size={20} color="#94a3b8" /></div>
                   )}
                   <div className="flex-1 ml-4">
                     <div className="flex items-center gap-2">
@@ -602,7 +602,7 @@ export default function WebAdminDashboard() {
                   <div className="col-span-2">
                     <label className="block text-xs font-bold text-slate-700 mb-2">パッケージ画像</label>
                     <label className="flex flex-col items-center justify-center h-32 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 overflow-hidden relative">
-                      {cPackageImage ? <img src={cPackageImage} className="object-cover h-full w-full" alt="pkg" /> : <Upload className="text-slate-400" />}
+                      {cPackageImage ? <img src={cPackageImage} className="object-cover h-full w-full" alt="pkg" /> : <Upload color="#94a3b8" />}
                       <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, setCPackageImage)} />
                     </label>
                   </div>
@@ -618,7 +618,7 @@ export default function WebAdminDashboard() {
                   </div>
                   {cardGenMode === 'manual' ? (
                     <label className="flex flex-col items-center justify-center h-40 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 overflow-hidden relative">
-                      {cImage ? <img src={cImage} className="object-cover h-full" alt="card" /> : <ImageIcon className="text-slate-400" size={32} />}
+                      {cImage ? <img src={cImage} className="object-cover h-full" alt="card" /> : <ImageIcon size={32} color="#94a3b8" />}
                       <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, setCImage)} />
                     </label>
                   ) : (
@@ -689,7 +689,7 @@ export default function WebAdminDashboard() {
                 </div>
                 {bossImageMode === 'upload' ? (
                   <label className="flex flex-col items-center justify-center h-32 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 overflow-hidden relative">
-                    {bossImageUrl ? <img src={bossImageUrl} className="object-cover h-full" alt="boss" /> : <ImageIcon className="text-slate-400" />}
+                    {bossImageUrl ? <img src={bossImageUrl} className="object-cover h-full" alt="boss" /> : <ImageIcon color="#94a3b8" />}
                     <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, setBossImageUrl)} />
                   </label>
                 ) : (
@@ -722,7 +722,7 @@ export default function WebAdminDashboard() {
                 </div>
                 {dropCardMode === 'upload' ? (
                   <label className="flex flex-col items-center justify-center h-32 bg-slate-50 border-2 border-dashed border-slate-300 rounded-xl cursor-pointer hover:bg-slate-100 overflow-hidden relative">
-                    {dropCardUrl ? <img src={dropCardUrl} className="object-cover h-full" alt="drop" /> : <ImageIcon className="text-slate-400" />}
+                    {dropCardUrl ? <img src={dropCardUrl} className="object-cover h-full" alt="drop" /> : <ImageIcon color="#94a3b8" />}
                     <input type="file" accept="image/*" className="hidden" onChange={(e) => handleImageUpload(e, setDropCardUrl)} />
                   </label>
                 ) : (
@@ -744,7 +744,7 @@ export default function WebAdminDashboard() {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">配信ターゲット: 性別</label>
                 <div className="flex gap-2">
-                  {['ALL', 'MALE', 'FEMALE'].map(g => (
+                  {(['ALL', 'MALE', 'FEMALE'] as const).map(g => (
                     <button key={g} onClick={()=>setTargetGender(g)} className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${targetGender === g ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>{g === 'ALL' ? '全員' : g === 'MALE' ? '男性のみ' : '女性のみ'}</button>
                   ))}
                 </div>
@@ -752,7 +752,7 @@ export default function WebAdminDashboard() {
               <div>
                 <label className="block text-xs font-bold text-slate-700 mb-2">配信ターゲット: 年代</label>
                 <div className="flex flex-wrap gap-2">
-                  {['ALL', 'TEENS', 'TWENTIES', 'THIRTIES'].map(a => (
+                  {(['ALL', 'TEENS', 'TWENTIES', 'THIRTIES'] as const).map(a => (
                     <button key={a} onClick={()=>setTargetAge(a)} className={`px-4 py-2 rounded-xl border text-xs font-bold transition-colors ${targetAge === a ? 'border-blue-500 bg-blue-50 text-blue-600' : 'border-slate-200 bg-slate-50 text-slate-600'}`}>{a === 'ALL' ? '全年代' : a === 'TEENS' ? '10代' : a === 'TWENTIES' ? '20代' : '30代以上'}</button>
                   ))}
                 </div>
