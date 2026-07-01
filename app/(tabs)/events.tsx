@@ -1,12 +1,14 @@
 import React, { useState, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView, SafeAreaView, Image } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity, Modal, ScrollView, SafeAreaView, Image, Alert } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
-import { X } from 'lucide-react-native';
+import { X, Trash2 } from 'lucide-react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 
 export default function EventsScreen() {
   const [allEvents, setAllEvents] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  const [currentUserId, setCurrentUserId] = useState<string | null>(null);
 
   // ページネーション用のステート
   const [currentPage, setCurrentPage] = useState(1);
@@ -32,6 +34,19 @@ export default function EventsScreen() {
         setLoading(false);
         return;
       }
+      
+      setCurrentUserId(user.id);
+
+      // ローカルに保存された「削除済み（非表示）」のお知らせIDを取得
+      let hiddenIds: string[] = [];
+      try {
+        const stored = await AsyncStorage.getItem(`hidden_events_${user.id}`);
+        if (stored) {
+          hiddenIds = JSON.parse(stored);
+        }
+      } catch (e) {
+        console.warn('非表示リストの読み込みに失敗しました:', e);
+      }
 
       const { data: profile } = await supabase
         .from('profiles')
@@ -51,6 +66,9 @@ export default function EventsScreen() {
 
       if (data) {
         const filteredData = data.filter((ann: any) => {
+          // 💡追加: 既に削除（非表示）アクションをしたお知らせは除外する
+          if (hiddenIds.includes(ann.id)) return false;
+
           if (!profile) {
             return ann.target_gender === 'ALL' && ann.target_age === 'ALL' && (!ann.target_location || ann.target_location === '');
           }
@@ -88,6 +106,43 @@ export default function EventsScreen() {
   const closeModal = () => {
     setModalVisible(false);
     setSelectedEvent(null);
+  };
+
+  // 💡追加: お知らせを「削除（非表示）」する処理
+  const hideEvent = async (eventId: string) => {
+    if (!currentUserId) return;
+    try {
+      // 現在の非表示リストを取得して追加
+      const stored = await AsyncStorage.getItem(`hidden_events_${currentUserId}`);
+      const hiddenIds = stored ? JSON.parse(stored) : [];
+      const newHiddenIds = [...hiddenIds, eventId];
+      
+      await AsyncStorage.setItem(`hidden_events_${currentUserId}`, JSON.stringify(newHiddenIds));
+
+      // 画面のリストから即座に取り除く
+      setAllEvents(prev => prev.filter(event => event.id !== eventId));
+      closeModal();
+    } catch (e) {
+      console.warn('お知らせの削除に失敗しました:', e);
+    }
+  };
+
+  // 💡追加: 削除前の確認アラート
+  const confirmHideEvent = () => {
+    Alert.alert(
+      "お知らせの削除",
+      "このお知らせをリストから削除しますか？\n(一度削除すると元に戻せません)",
+      [
+        { text: "キャンセル", style: "cancel" },
+        { 
+          text: "削除する", 
+          style: "destructive", 
+          onPress: () => {
+            if (selectedEvent) hideEvent(selectedEvent.id);
+          }
+        }
+      ]
+    );
   };
 
   const renderEvent = ({ item }: { item: any }) => (
@@ -134,11 +189,11 @@ export default function EventsScreen() {
           <ActivityIndicator size="large" color="#f87171" style={{ marginTop: 50 }} />
         ) : (
           <FlatList
-            style={{ flex: 1 }} // 💡追加: リスト自体を伸縮させてスクロール領域を確保
+            style={{ flex: 1 }} // リスト自体を伸縮させてスクロール領域を確保
             data={displayEvents}
             keyExtractor={(item) => item.id}
             renderItem={renderEvent}
-            contentContainerStyle={{ padding: 15, paddingBottom: 40 }} // 💡変更: 下部の余白を増やして最下部まで見やすく
+            contentContainerStyle={{ padding: 15, paddingBottom: 40 }} // 下部の余白を増やして最下部まで見やすく
             ListEmptyComponent={<Text style={styles.emptyText}>現在届いているお知らせはありません。</Text>}
             ListFooterComponent={renderPagination}
           />
@@ -158,11 +213,11 @@ export default function EventsScreen() {
               </TouchableOpacity>
               
               {selectedEvent && (
-                // 💡追加: flexShrinkを加えることでModal内に収め、ScrollViewを機能させる
+                // flexShrinkを加えることでModal内に収め、ScrollViewを機能させる
                 <View style={{ flexShrink: 1 }}>
                   <ScrollView 
-                    showsVerticalScrollIndicator={true} // 💡変更: スクロール可能なことを視覚的にわかりやすくする
-                    contentContainerStyle={{ paddingBottom: 30 }} // 💡追加: 最後までスクロールした時の余白を確保
+                    showsVerticalScrollIndicator={true} // スクロール可能なことを視覚的にわかりやすくする
+                    contentContainerStyle={{ paddingBottom: 30 }} // 最後までスクロールした時の余白を確保
                   >
                     <Text style={styles.modalTitle}>{selectedEvent.title}</Text>
                     <Text style={styles.modalDate}>{new Date(selectedEvent.created_at).toLocaleDateString('ja-JP')}</Text>
@@ -172,6 +227,12 @@ export default function EventsScreen() {
                     )}
                     
                     <Text style={styles.modalBody}>{selectedEvent.body}</Text>
+
+                    {/* 💡追加: 削除ボタン */}
+                    <TouchableOpacity style={styles.deleteButton} onPress={confirmHideEvent} activeOpacity={0.8}>
+                      <Trash2 color="#FFFFFF" size={20} style={{ marginRight: 8 }} />
+                      <Text style={styles.deleteButtonText}>読んだので削除する</Text>
+                    </TouchableOpacity>
                   </ScrollView>
                 </View>
               )}
@@ -232,7 +293,7 @@ const styles = StyleSheet.create({
     padding: 20, 
     width: '100%', 
     maxHeight: '85%', 
-    flexShrink: 1, // 💡追加: 中身が溢れた際に縮むことを許可し、ScrollViewを動かす
+    flexShrink: 1, // 中身が溢れた際に縮むことを許可し、ScrollViewを動かす
     borderWidth: 1, 
     borderColor: '#334155' 
   },
@@ -240,5 +301,22 @@ const styles = StyleSheet.create({
   modalTitle: { color: '#f87171', fontSize: 20, fontWeight: 'bold', marginBottom: 8 },
   modalDate: { color: '#64748b', fontSize: 13, marginBottom: 20 },
   modalImage: { width: '100%', height: 200, borderRadius: 8, marginBottom: 20, resizeMode: 'cover', backgroundColor: '#000' },
-  modalBody: { color: '#cbd5e1', fontSize: 15, lineHeight: 26, paddingBottom: 20 }
+  modalBody: { color: '#cbd5e1', fontSize: 15, lineHeight: 26, paddingBottom: 20 },
+
+  // 💡追加: 削除ボタン用のスタイル
+  deleteButton: {
+    flexDirection: 'row',
+    backgroundColor: '#ef4444',
+    paddingVertical: 14,
+    paddingHorizontal: 16,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginTop: 20,
+  },
+  deleteButtonText: {
+    color: '#ffffff',
+    fontSize: 15,
+    fontWeight: 'bold',
+  }
 });
