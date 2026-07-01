@@ -1,12 +1,17 @@
 import React, { useEffect, useState, useCallback } from 'react';
-import { View, Text, FlatList, StyleSheet, ActivityIndicator } from 'react-native';
+import { View, Text, FlatList, StyleSheet, ActivityIndicator, TouchableOpacity } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 
 export default function RankingScreen() {
+  const [activeTab, setActiveTab] = useState<'individual' | 'team'>('individual');
+  
   const [rankings, setRankings] = useState<any[]>([]);
+  const [teamRankings, setTeamRankings] = useState<any[]>([]);
   const [loading, setLoading] = useState(true);
+  
   const [myId, setMyId] = useState<string | null>(null);
+  const [myTeamId, setMyTeamId] = useState<string | null>(null);
 
   useFocusEffect(
     useCallback(() => {
@@ -18,31 +23,47 @@ export default function RankingScreen() {
     setLoading(true);
     
     // 1. ログインユーザーのIDを取得
+    let currentUserId: string | null = null;
     const { data: { user } } = await supabase.auth.getUser();
-    if (user) setMyId(user.id);
+    if (user) {
+      setMyId(user.id);
+      currentUserId = user.id;
+    }
 
     try {
       // 2. 各種テーブルからランキング計算に必要なデータを並列で取得
-      // ※400エラーを防ぐため、カラム名を指定せずに全て取得し、JS側で処理します
-      const [profilesRes, cardsRes, territoriesRes] = await Promise.all([
+      const [profilesRes, cardsRes, territoriesRes, teamsRes] = await Promise.all([
         supabase.from('profiles').select('*'),
         supabase.from('cards').select('*'),
-        supabase.from('territories').select('*')
+        supabase.from('territories').select('*'),
+        supabase.from('teams').select('*')
       ]);
 
       const allProfiles = profilesRes.data || [];
       const allCards = cardsRes.data || [];
       const allTerritories = territoriesRes.data || [];
+      const allTeams = teamsRes.data || [];
 
-      // 総テリトリー数（陣取り占有率の分母）
+      // 総テリトリー数（個人陣取り占有率の分母）
       const totalTerritoryCount = allTerritories.length;
 
-      // 3. 各ユーザーのスコアを動的に算出
+      // ユーザーIDからチームIDを引けるようにマップを作成
+      const userToTeamMap: Record<string, string> = {};
+      allProfiles.forEach((p: any) => {
+        if (p.team_id) {
+          userToTeamMap[p.id] = p.team_id;
+          // 自分のチームIDをセット
+          if (p.id === currentUserId) setMyTeamId(p.team_id);
+        }
+      });
+
+      // ==========================================
+      // 3. 個人のスコア計算
+      // ==========================================
       const calculatedRankings = allProfiles.map((profile: any) => {
         const userId = profile.id;
 
         // --- ① レアリティ保有率の計算 ---
-        // DBのカラム名が player_id か user_id か分からないため両方対応
         const userCards = allCards.filter((c: any) => c.player_id === userId || c.user_id === userId);
         const totalUserCards = userCards.length;
         
@@ -55,7 +76,6 @@ export default function RankingScreen() {
         }
 
         // --- ② バトル勝利率の計算 ---
-        // カラム名が存在しない場合を考慮し、複数の可能性をチェック
         const wins = profile.total_wins || profile.wins || profile.win_count || 0;
         const battles = profile.total_battles || profile.battles || profile.battle_count || wins; 
         
@@ -67,7 +87,6 @@ export default function RankingScreen() {
         // --- ③ 陣取りトータル占有率の計算 ---
         let territoryShareScore = 0;
         if (totalTerritoryCount > 0) {
-          // owner_id, user_id, player_id などの可能性を考慮してチェック
           const userTerritoriesCount = allTerritories.filter((t: any) => 
             t.owner_id === userId || t.user_id === userId || t.player_id === userId
           ).length;
@@ -90,11 +109,57 @@ export default function RankingScreen() {
         };
       });
 
-      // 4. 総合スコアが高い順にソートし、上位50名に絞り込む
       calculatedRankings.sort((a, b) => b.calculated_score - a.calculated_score);
-      const top50Rankings = calculatedRankings.slice(0, 50);
+      setRankings(calculatedRankings.slice(0, 50));
 
-      setRankings(top50Rankings);
+
+      // ==========================================
+      // 4. チームのスコア（総面積量）計算
+      // ==========================================
+      const teamDetails: Record<string, { count: number, totalArea: number }> = {};
+      
+      allTeams.forEach((t: any) => {
+        teamDetails[t.id] = { count: 0, totalArea: 0 };
+      });
+
+      allTerritories.forEach((t: any) => {
+        const ownerId = t.owner_id || t.user_id || t.player_id;
+        // テリトリーに直接チームIDがあればそれを、なければオーナーのチームIDを使用
+        let tTeamId = t.team_id; 
+        if (!tTeamId && ownerId) {
+          tTeamId = userToTeamMap[ownerId];
+        }
+
+        if (tTeamId) {
+          // 円の面積（π * r^2）を計算。半径データがない場合はデフォルト500mとして計算
+          const radius = t.radius || 500;
+          const area = Math.PI * Math.pow(radius, 2);
+          
+          if (!teamDetails[tTeamId]) teamDetails[tTeamId] = { count: 0, totalArea: 0 };
+          teamDetails[tTeamId].count += 1;
+          teamDetails[tTeamId].totalArea += area;
+        }
+      });
+
+      const calculatedTeamRankings = allTeams.map((t: any) => {
+        const details = teamDetails[t.id] || { count: 0, totalArea: 0 };
+        // 平方メートルだと桁が大きすぎるため、平方キロメートル(km²)に換算して表示用にする
+        const areaInKm2 = details.totalArea / 1000000;
+        
+        // ポイントとしてのスコア（面積に基づく。例として1000平方メートル = 1pt）
+        const areaScore = Math.round(details.totalArea / 1000);
+
+        return {
+          id: t.id,
+          team_name: t.name || t.team_name || '名称未設定',
+          score: areaScore,
+          formattedArea: areaInKm2.toFixed(2),
+          details: details
+        };
+      });
+
+      calculatedTeamRankings.sort((a, b) => b.score - a.score);
+      setTeamRankings(calculatedTeamRankings.slice(0, 50));
 
     } catch (err) {
       console.error('ランキングデータの取得・計算に失敗しました:', err);
@@ -103,12 +168,13 @@ export default function RankingScreen() {
     }
   };
 
-  const renderItem = ({ item, index }: { item: any, index: number }) => {
+  // 個人ランキング用のレンダリング
+  const renderIndividualItem = ({ item, index }: { item: any, index: number }) => {
     const isMe = item.id === myId;
-    let rankColor = '#64748b'; // デフォルト
-    if (index === 0) rankColor = '#fbbf24'; // 1位: 金
-    else if (index === 1) rankColor = '#94a3b8'; // 2位: 銀
-    else if (index === 2) rankColor = '#b45309'; // 3位: 銅
+    let rankColor = '#64748b';
+    if (index === 0) rankColor = '#fbbf24';
+    else if (index === 1) rankColor = '#94a3b8';
+    else if (index === 2) rankColor = '#b45309';
 
     return (
       <View style={[styles.rankCard, isMe && styles.myRankCard]}>
@@ -130,20 +196,79 @@ export default function RankingScreen() {
     );
   };
 
+  // チームランキング用のレンダリング
+  const renderTeamItem = ({ item, index }: { item: any, index: number }) => {
+    const isMyTeam = item.id === myTeamId;
+    let rankColor = '#64748b';
+    if (index === 0) rankColor = '#fbbf24';
+    else if (index === 1) rankColor = '#94a3b8';
+    else if (index === 2) rankColor = '#b45309';
+
+    return (
+      <View style={[styles.rankCard, isMyTeam && styles.myRankCard]}>
+        <Text style={[styles.rankNumber, { color: rankColor }]}>{index + 1}</Text>
+        
+        <View style={styles.playerInfo}>
+          <Text style={[styles.playerName, isMyTeam && { color: '#3b82f6' }]}>
+            {item.team_name}
+          </Text>
+          {isMyTeam && <Text style={[styles.meText, { color: '#3b82f6' }]}>所属チーム</Text>}
+          
+          <Text style={styles.rankDetails}>
+            🛡️確保陣地数: {item.details.count} 箇所
+          </Text>
+          <Text style={[styles.rankDetails, { marginTop: 2, color: '#94a3b8' }]}>
+            総面積: {item.formattedArea} km²
+          </Text>
+        </View>
+        
+        <Text style={styles.score}>{item.score.toLocaleString()} pt</Text>
+      </View>
+    );
+  };
+
   return (
     <View style={styles.container}>
       <Text style={styles.header}>STRATEGIC RANKING</Text>
-      <Text style={styles.subtitle}>レアリティ・勝率・占有率からなる総合評価ボード</Text>
+      
+      {/* タブ切り替えUI */}
+      <View style={styles.tabContainer}>
+        <TouchableOpacity 
+          style={[styles.tabButton, activeTab === 'individual' && styles.activeTab]} 
+          onPress={() => setActiveTab('individual')}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.tabText, activeTab === 'individual' && styles.activeTabText]}>個人スコア</Text>
+        </TouchableOpacity>
+        <TouchableOpacity 
+          style={[styles.tabButton, activeTab === 'team' && styles.activeTab]} 
+          onPress={() => setActiveTab('team')}
+          activeOpacity={0.8}
+        >
+          <Text style={[styles.tabText, activeTab === 'team' && styles.activeTabText]}>チーム制圧面積</Text>
+        </TouchableOpacity>
+      </View>
+
+      <Text style={styles.subtitle}>
+        {activeTab === 'individual' 
+          ? 'レアリティ・勝率・占有率からなる総合評価ボード'
+          : '陣取りゲームで獲得した陣地の総面積に基づくチーム評価ボード'}
+      </Text>
 
       {loading ? (
         <ActivityIndicator size="large" color="#38bdf8" style={{ marginTop: 50 }} />
       ) : (
         <FlatList
-          data={rankings}
+          data={activeTab === 'individual' ? rankings : teamRankings}
           keyExtractor={(item) => item.id}
-          renderItem={renderItem}
+          renderItem={activeTab === 'individual' ? renderIndividualItem : renderTeamItem}
           contentContainerStyle={{ padding: 15 }}
           showsVerticalScrollIndicator={false}
+          ListEmptyComponent={
+            <Text style={{ textAlign: 'center', color: '#64748b', marginTop: 40 }}>
+              ランキングデータがありません。
+            </Text>
+          }
         />
       )}
     </View>
@@ -153,9 +278,39 @@ export default function RankingScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617', paddingHorizontal: 10 },
   header: { fontSize: 24, fontWeight: '900', color: '#38bdf8', marginTop: 40, textAlign: 'center', letterSpacing: 2 },
-  subtitle: { color: '#94a3b8', fontSize: 12, textAlign: 'center', marginBottom: 20 },
+  
+  tabContainer: {
+    flexDirection: 'row',
+    marginTop: 20,
+    marginBottom: 10,
+    backgroundColor: '#0f172a',
+    borderRadius: 8,
+    padding: 4,
+    marginHorizontal: 15,
+  },
+  tabButton: {
+    flex: 1,
+    paddingVertical: 10,
+    alignItems: 'center',
+    borderRadius: 6,
+  },
+  activeTab: {
+    backgroundColor: '#1e293b',
+  },
+  tabText: {
+    color: '#64748b',
+    fontSize: 14,
+    fontWeight: 'bold',
+  },
+  activeTabText: {
+    color: '#38bdf8',
+  },
+
+  subtitle: { color: '#94a3b8', fontSize: 12, textAlign: 'center', marginBottom: 15, paddingHorizontal: 20 },
+  
   rankCard: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#0f172a', padding: 15, borderRadius: 12, marginBottom: 10, borderWidth: 1, borderColor: '#1e293b' },
   myRankCard: { borderColor: '#10b981', backgroundColor: 'rgba(16, 185, 129, 0.1)' },
+  
   rankNumber: { fontSize: 20, fontWeight: '900', width: 40, textAlign: 'center' },
   playerInfo: { flex: 1, paddingLeft: 10, justifyContent: 'center' },
   playerName: { color: '#f1f5f9', fontSize: 16, fontWeight: 'bold' },
