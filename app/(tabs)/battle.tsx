@@ -144,13 +144,16 @@ export default function BattleScreen() {
     const { data: { user } } = await supabase.auth.getUser();
     if (user) {
       setMyId(user.id);
-      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).single();
+      
+      // 💡 修正: maybeSingle() に変更（初期登録直後などデータ欠損時のエラー回避）
+      const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
       if (profile) {
         setMyProfile(profile);
         setPlayerStats({ totalWins: profile.total_wins, bossDefeats: profile.boss_defeats });
       }
 
-      const { data: memberData } = await supabase.from('team_members').select('*, teams(*)').eq('player_id', user.id).eq('status', 'approved').single();
+      // 💡 修正: maybeSingle() に変更（チーム未所属時の 406 Not Acceptable エラーを回避）
+      const { data: memberData } = await supabase.from('team_members').select('*, teams(*)').eq('player_id', user.id).eq('status', 'approved').maybeSingle();
       if (memberData && memberData.teams) setMyTeam(memberData.teams);
 
       const { data: cards } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true).or('level.gte.5,status_total.gte.300,is_fixed.eq.true'); 
@@ -194,7 +197,8 @@ export default function BattleScreen() {
         const nearbyCampaign = targetCampaigns.find((c: any) => getDistance(latitude, longitude, c.target_lat, c.target_lng) <= (c.radius_meters || 100));
         
         if (nearbyCampaign) {
-          const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).single();
+          // 💡 修正: ボスが未配置の場合に備え maybeSingle() を使用
+          const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).maybeSingle();
           if (boss) foundBoss = { ...boss, campaign_title: nearbyCampaign.title, sponsor_name: nearbyCampaign.sponsor_name, lat: nearbyCampaign.target_lat, lng: nearbyCampaign.target_lng, element: boss.element || '火' };
         }
       }
@@ -241,9 +245,6 @@ export default function BattleScreen() {
     return R * (2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a)));
   };
 
-  // ==========================================
-  // 🌟 WebAR起動処理
-  // ==========================================
   const openWebAR = async (url: string) => {
     if (!url) return;
     try {
@@ -364,8 +365,9 @@ export default function BattleScreen() {
 
   const attackTerritoryByBattle = async () => {
     setAttackModalVisible(false); setIsBattling(true); setBattleLog([]);
-    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).single();
-    if (!myCard) { Alert.alert('出撃不可', '出撃カードがありません。'); setIsBattling(false); return; }
+    // 💡 修正: maybeSingle()
+    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).maybeSingle();
+    if (!myCard) { Alert.alert('出撃不可', '出撃可能なカードがありません。カード一覧からアクティブにしてください。'); setIsBattling(false); return; }
 
     const defStats = Math.floor(selectedTerritory.defense_power / 4);
     const bossMonster = { 
@@ -385,32 +387,67 @@ export default function BattleScreen() {
   // ⚔️ 既存バトルシステム
   // ==========================================
   const startPvpBattle = async () => {
-    setIsBattling(true); setBattleLog([]);
-    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).single();
-    if (!myCard) { setIsBattling(false); return; }
+    setIsBattling(true); 
+    setBattleLog([]);
     
-    const minS = Math.floor(myCard.status_total * 0.75); const maxS = Math.floor(myCard.status_total * 1.25);
-    const { data: oppCards } = await supabase.from('cards').select('*').neq('player_id', myId).eq('is_active', true).gte('status_total', minS).lte('status_total', maxS).limit(10);
-    if (!oppCards || oppCards.length === 0) { Alert.alert('索敵中', '同格のライバルが見つかりませんでした。'); setIsBattling(false); return; }
+    // 💡 修正: maybeSingle() に変更し、自分のカードが見つからない場合はポップアップで警告
+    const { data: myCard, error: myError } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).maybeSingle();
+    if (myError || !myCard) { 
+      Alert.alert('出撃エラー', 'アクティブな出撃カードがありません。\nマイページから出撃させたいカードを選択してください。'); 
+      setIsBattling(false); 
+      return; 
+    }
     
-    const oppCard = oppCards[Math.floor(Math.random() * oppCards.length)];
-    simulateBattle(myCard, oppCard, false, async (isWin) => {
-      if (isWin) {
-        const newWins = playerStats.totalWins + 1;
-        await supabase.from('profiles').update({ total_wins: newWins }).eq('id', myId);
-        setPlayerStats(prev => ({ ...prev, totalWins: newWins }));
-        await supabase.rpc('gain_card_exp', { target_card_id: myCard.id, exp_to_add: 120 });
-      } else {
-        await supabase.rpc('gain_card_exp', { target_card_id: myCard.id, exp_to_add: 30 });
+    const minS = Math.floor(myCard.status_total * 0.75); 
+    const maxS = Math.floor(myCard.status_total * 1.25);
+    
+    const { data: oppCards, error: oppError } = await supabase.from('cards')
+      .select('*')
+      .neq('player_id', myId)
+      .eq('is_active', true)
+      .gte('status_total', minS)
+      .lte('status_total', maxS)
+      .limit(10);
+      
+    // 💡 修正: 相手が見つからない場合のエラーハンドリングを追加
+    if (oppError || !oppCards || oppCards.length === 0) { 
+      Alert.alert('検索結果', '現在、同格のライバルが見つかりませんでした。\n時間をおいて再度お試しください。'); 
+      setIsBattling(false); 
+      return; 
+    }
+    
+    // 💡 修正: マッチング成功時のポップアップ表示
+    Alert.alert('マッチング成功！', '同格のライバルを発見しました。\nバトルを開始しますか？', [
+      {
+        text: 'キャンセル',
+        style: 'cancel',
+        onPress: () => setIsBattling(false)
+      },
+      {
+        text: 'バトル開始！',
+        onPress: () => {
+          const oppCard = oppCards[Math.floor(Math.random() * oppCards.length)];
+          simulateBattle(myCard, oppCard, false, async (isWin) => {
+            if (isWin) {
+              const newWins = playerStats.totalWins + 1;
+              await supabase.from('profiles').update({ total_wins: newWins }).eq('id', myId);
+              setPlayerStats(prev => ({ ...prev, totalWins: newWins }));
+              await supabase.rpc('gain_card_exp', { target_card_id: myCard.id, exp_to_add: 120 });
+            } else {
+              await supabase.rpc('gain_card_exp', { target_card_id: myCard.id, exp_to_add: 30 });
+            }
+          });
+        }
       }
-    });
+    ]);
   };
 
   const startBossBattle = async () => {
     if (!detectedBoss) return;
     setIsBattling(true); setBattleLog([]);
-    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).single();
-    if (!myCard) { setIsBattling(false); return; }
+    // 💡 修正: maybeSingle()
+    const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).maybeSingle();
+    if (!myCard) { Alert.alert('出撃不可', '出撃可能なアクティブカードがありません。'); setIsBattling(false); return; }
     
     const bossMonster = { 
       id: 'BOSS', card_name: `【エリアボス】${detectedBoss.name}`, skill_name: 'カタストロフィ', 
@@ -586,7 +623,6 @@ export default function BattleScreen() {
         <View style={styles.statItem}><Flag color="#3B82F6" size={20} /><Text style={styles.statValue}>{territories.filter(t=>t.player_id===myId).length}</Text><Text style={styles.statLabel}>支配陣地</Text></View>
       </View>
 
-      {/* 🌟 ARボタンと被らないようにスクロールの下部余白(paddingBottom)を増やしました */}
       <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 150 }}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📍 リアルマップ：陣取り(テリトリー) ＆ ボス</Text>
@@ -716,7 +752,6 @@ export default function BattleScreen() {
         )}
       </ScrollView>
 
-      {/* 🌟 修正：ARスキャンボタンの位置を上に持ち上げ、タブバーに隠れないように調整 */}
       <TouchableOpacity 
         style={styles.floatingArBtn}
         onPress={() => setCampaignModalVisible(true)}
@@ -746,7 +781,6 @@ export default function BattleScreen() {
                   <TouchableOpacity style={styles.campaignItem} onPress={() => setSelectedCampaign(item)}>
                     <Text style={styles.campaignTitle}>{item.title}</Text>
                     <Text style={styles.campaignSponsor}>{item.sponsor_name}</Text>
-                    {/* 🌟 本番環境用にテキストを最適化 */}
                     <Text style={styles.campaignDescPreview} numberOfLines={2}>{item.description || '現地でマーカーを見つけて専用コンテンツを探索しよう！'}</Text>
                   </TouchableOpacity>
                 )}
@@ -758,13 +792,11 @@ export default function BattleScreen() {
                   <Text style={styles.backBtnText}>← 一覧に戻る</Text>
                 </TouchableOpacity>
                 <Text style={styles.campaignDetailTitle}>{selectedCampaign.title}</Text>
-                {/* 🌟 スポンサーの有無に応じた表示分岐を追加 */}
                 <Text style={styles.campaignDetailSponsor}>
                   {selectedCampaign.sponsor_name ? `主催・協賛: ${selectedCampaign.sponsor_name}` : '公式イベント'}
                 </Text>
                 
                 <View style={styles.campaignDetailBox}>
-                  {/* 🌟 モックアップ文章を削除し、本番向けの汎用テキストに変更 */}
                   <Text style={styles.campaignDetailDesc}>
                     対象の店舗やイベント会場に設置された専用の「ARマーカー（QRコード）」を探しましょう！{"\n\n"}
                     スキャナーを起動してマーカーを読み取ると、現実世界に限定アイテムやボスが出現し、バトルや報酬獲得のアクションが発生します。
@@ -829,7 +861,6 @@ export default function BattleScreen() {
         </View>
       </Modal>
 
-      {/* --- その他のモーダル（非同期リザルト・陣地展開など既存のまま） --- */}
       <Modal visible={isAsyncResultModalVisible} animationType="fade" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { alignItems: 'center' }]}>
@@ -970,7 +1001,6 @@ const styles = StyleSheet.create({
   logText: { color: '#334155', fontSize: 14, fontWeight: '500' },
   specialLogText: { color: '#1E40AF', fontWeight: '800' },
   
-  // モーダル
   modalOverlay: { flex: 1, backgroundColor: 'rgba(15, 23, 42, 0.7)', justifyContent: 'flex-end' },
   modalContent: { backgroundColor: '#FFFFFF', padding: 24, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
@@ -999,7 +1029,6 @@ const styles = StyleSheet.create({
   resultPower: { fontSize: 24, fontWeight: '900', color: '#0F172A' },
   resultMessage: { fontSize: 14, color: '#475569', textAlign: 'center', lineHeight: 22, fontWeight: '700' },
 
-  // 🌟 キャンペーン・スキャナー関連のスタイル（ボトム位置などを調整）
   floatingArBtn: { position: 'absolute', bottom: 100, right: 20, backgroundColor: '#10B981', width: 68, height: 68, borderRadius: 34, justifyContent: 'center', alignItems: 'center', shadowColor: '#000', shadowOffset: { width: 0, height: 4 }, shadowOpacity: 0.4, shadowRadius: 6, elevation: 6, zIndex: 10 },
   floatingArBtnText: { color: '#FFF', fontSize: 10, fontWeight: '900', marginTop: 2 },
   campaignItem: { backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, marginBottom: 12, borderWidth: 1, borderColor: '#E2E8F0' },
