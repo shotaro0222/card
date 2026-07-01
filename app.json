@@ -1,5 +1,21 @@
 {
   "plugins": [
     "expo-router"
-  ]
+  ],
+  "extra": {
+    "router": {},
+    "eas": {
+      "projectId": "14714472-fc3b-4d1d-a504-9fe2d8d82485"
+    }
+  },
+  "expo": {
+    "android": {
+      "package": "com.shotake222.card"
+    },
+    "extra": {
+      "eas": {
+        "projectId": "14714472-fc3b-4d1d-a504-9fe2d8d82485"
+      }
+    }
+  }
 }

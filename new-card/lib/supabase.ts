@@ -6,11 +6,17 @@ const supabaseUrl = process.env.EXPO_PUBLIC_SUPABASE_URL || '';
 const supabaseAnonKey = process.env.EXPO_PUBLIC_SUPABASE_ANON_KEY || '';
 const isBrowser = typeof window !== 'undefined';
 
-export const supabase = createClient(supabaseUrl, supabaseAnonKey, {
-  auth: {
-    storage: isBrowser ? AsyncStorage : undefined,
-    autoRefreshToken: true,
-    persistSession: true,
-    detectSessionInUrl: false,
-  },
-});
+const hasValidConfig = Boolean(supabaseUrl && supabaseAnonKey);
+
+export const supabase = hasValidConfig
+  ? createClient(supabaseUrl, supabaseAnonKey, {
+      auth: {
+        storage: isBrowser ? AsyncStorage : undefined,
+        autoRefreshToken: true,
+        persistSession: true,
+        detectSessionInUrl: false,
+      },
+    })
+  : (null as any);
+
+export const isSupabaseReady = hasValidConfig;

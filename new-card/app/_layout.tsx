@@ -2,7 +2,7 @@ import { useEffect, useState } from 'react';
 import { Stack, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Alert, Modal, View, Text, Image, Button, StyleSheet } from 'react-native';
-import { supabase } from '../lib/supabase';
+import { supabase, isSupabaseReady } from '../lib/supabase';
 import { useARRewardHandler } from '../hooks/useARRewardHandler';
 
 export default function RootLayout() {
@@ -13,6 +13,11 @@ export default function RootLayout() {
 
   // 初回レンダリング時と認証状態の変更時にユーザーIDを取得・更新
   useEffect(() => {
+    if (!isSupabaseReady || !supabase) {
+      setCurrentUserId(null);
+      return;
+    }
+
     supabase.auth.getSession().then(({ data: { session } }) => {
       setCurrentUserId(session?.user.id || null);
     });
@@ -30,6 +35,10 @@ export default function RootLayout() {
   const { isProcessing, rewardedCard, clearRewardedCard } = useARRewardHandler(currentUserId);
 
   useEffect(() => {
+    if (!isSupabaseReady || !supabase) {
+      return;
+    }
+
     // ディープリンクのシグナルを検知・処理するハンドラー
     const handleIncomingURL = async (event: Linking.EventType) => {
       if (!event.url) return;

@@ -1,7 +1,7 @@
 {
   "expo": {
     "name": "new-card",
-    "slug": "new-card",
+    "slug": "card",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
@@ -11,6 +11,7 @@
       "icon": "./assets/expo.icon"
     },
     "android": {
+      "package": "com.shotake222.newcard",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/images/android-icon-foreground.png",
@@ -40,6 +41,13 @@
     "experiments": {
       "typedRoutes": true,
       "reactCompiler": true
-    }
+    },
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "14714472-fc3b-4d1d-a504-9fe2d8d82485"
+      }
+    },
+    "owner": "shotake222"
   }
 }
