@@ -109,7 +109,7 @@ export default function RankingScreen() {
         };
       });
 
-      calculatedRankings.sort((a, b) => b.calculated_score - a.calculated_score);
+calculatedRankings.sort((a: any, b: any) => b.calculated_score - a.calculated_score);
       setRankings(calculatedRankings.slice(0, 50));
 
 
@@ -158,7 +158,7 @@ export default function RankingScreen() {
         };
       });
 
-      calculatedTeamRankings.sort((a, b) => b.score - a.score);
+      calculatedTeamRankings.sort((a: any, b: any) => b.score - a.score);
       setTeamRankings(calculatedTeamRankings.slice(0, 50));
 
     } catch (err) {
