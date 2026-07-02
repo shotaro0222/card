@@ -120,6 +120,8 @@ export default function AdminDashboard() {
   const [baseLat, setBaseLat] = useState('35.6983');
   const [baseLng, setBaseLng] = useState('139.4130');
   const [targetMunicipality, setTargetMunicipality] = useState('東京都');
+  const [bossSpawnDensity, setBossSpawnDensity] = useState('1'); // 町番地当たりのボス数
+  const [festivalSpawnMultiplier, setFestivalSpawnMultiplier] = useState('100'); // フェスモード倍率
   const [isMassiveSpawn, setIsMassiveSpawn] = useState(false);
   const [massiveSpawnCount, setMassiveSpawnCount] = useState('50');
   const [massiveStartAt, setMassiveStartAt] = useState('');
@@ -288,6 +290,8 @@ export default function AdminDashboard() {
         setTargetMunicipality(data.config_data.municipality ?? '東京都');
         if (data.config_data.base_lat) setBaseLat(data.config_data.base_lat.toString());
         if (data.config_data.base_lng) setBaseLng(data.config_data.base_lng.toString());
+        setBossSpawnDensity((data.config_data.boss_spawn_density ?? 1).toString());
+        setFestivalSpawnMultiplier((data.config_data.festival_spawn_multiplier ?? 100).toString());
       }
     } catch (e) { console.log(e); }
   };
@@ -959,7 +963,9 @@ export default function AdminDashboard() {
       const config_data = {
         enabled: randomBossEnabled, interval: randomBossInterval,
         spawn_type: spawnType, municipality: targetMunicipality,
-        base_lat: parseFloat(baseLat) || 35.6983, base_lng: parseFloat(baseLng) || 139.4130
+        base_lat: parseFloat(baseLat) || 35.6983, base_lng: parseFloat(baseLng) || 139.4130,
+        boss_spawn_density: parseFloat(bossSpawnDensity) || 1,
+        festival_spawn_multiplier: parseFloat(festivalSpawnMultiplier) || 100
       };
       const { error } = await supabase.from('system_config').upsert({ id: 'random_boss_settings', config_data });
       if (error) throw error;
@@ -994,7 +1000,11 @@ export default function AdminDashboard() {
   const triggerInstantRandomBoss = async () => {
     setLoading(true);
     try {
-      const count = isMassiveSpawn ? (parseInt(massiveSpawnCount) || 10) : 1;
+      // 密度ベースの計算
+      const density = parseFloat(bossSpawnDensity) || 1; // 町番地当たりのボス数
+      const multiplier = isMassiveSpawn ? (parseFloat(festivalSpawnMultiplier) || 100) : 1;
+      const municipalityCount = 5000; // 全国町番地数の推定値
+      const count = Math.max(1, Math.floor(density * municipalityCount * multiplier));
       const prefix = ['次元の', '彷徨える', '極大の', 'アビス・', 'ヴォイド・', '災厄の', '覚醒せし'];
       const suffix = ['ゴーレム', 'ベヒモス', 'フェニックス', 'リヴァイアsan', 'ナイトメア', '機神龍', 'タイタン'];
       
@@ -1989,6 +1999,14 @@ export default function AdminDashboard() {
                 </>
               )}
 
+              <Text style={styles.label}>出現密度設定 (町番地当たりのボス数)</Text>
+              <TextInput style={styles.input} value={bossSpawnDensity} onChangeText={setBossSpawnDensity} placeholder="デフォルト: 1" keyboardType="decimal-pad" />
+              <Text style={{fontSize: 11, color: '#94A3B8', marginTop: 4}}>※1 = 全国約5000町番地に対し約5000体のボス</Text>
+
+              <Text style={styles.label}>フェスモード倍率</Text>
+              <TextInput style={styles.input} value={festivalSpawnMultiplier} onChangeText={setFestivalSpawnMultiplier} placeholder="デフォルト: 100" keyboardType="decimal-pad" />
+              <Text style={{fontSize: 11, color: '#94A3B8', marginTop: 4}}>※フェスモード時、密度 × この倍率でボスが生成されます</Text>
+
               <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: '#10B981', marginTop: 16}]} onPress={handleUpdateRandomBossConfig} disabled={loading}>
                 <Text style={styles.primaryBtnText}>ランダム出現設定を保存</Text>
               </TouchableOpacity>
@@ -1997,6 +2015,18 @@ export default function AdminDashboard() {
               
               <View style={{backgroundColor: '#FFFBEB', padding: 16, borderRadius: 12, borderWidth: 1, borderColor: '#FDE68A'}}>
                 <Text style={[styles.cardTitle, {color: '#D97706', marginBottom: 8}]}>🔥 大量発生(フェス)モード ＆ 即時生成</Text>
+                
+                {!isMassiveSpawn && (
+                  <View style={{backgroundColor: '#F0F9FF', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#BFDBFE'}}>
+                    <Text style={{fontSize: 13, fontWeight: '900', color: '#0369A1', marginBottom: 4}}>📊 通常生成（１回）の予定ボス数</Text>
+                    <Text style={{fontSize: 16, fontWeight: '900', color: '#1E40AF'}}>
+                      {Math.max(1, Math.floor((parseFloat(bossSpawnDensity) || 1) * 5000))} 体
+                    </Text>
+                    <Text style={{fontSize: 11, color: '#1E3A8A', marginTop: 4}}>
+                      計算式：{(parseFloat(bossSpawnDensity) || 1).toFixed(2)} × 5000町
+                    </Text>
+                  </View>
+                )}
                 
                 <View style={styles.row}>
                   <Text style={[styles.label, {flex: 1, marginTop: 0}]}>大量発生を有効化</Text>
@@ -2010,8 +2040,15 @@ export default function AdminDashboard() {
 
                 {isMassiveSpawn && (
                   <View style={{marginTop: 12}}>
-                    <Text style={styles.label}>一度の発生数</Text>
-                    <TextInput style={styles.input} value={massiveSpawnCount} onChangeText={setMassiveSpawnCount} placeholder="例: 50" keyboardType="numeric" />
+                    <View style={{backgroundColor: '#FFF9E6', padding: 12, borderRadius: 8, marginBottom: 12, borderWidth: 1, borderColor: '#FCD34D'}}>
+                      <Text style={{fontSize: 13, fontWeight: '900', color: '#D97706', marginBottom: 4}}>📊 生成予定ボス数</Text>
+                      <Text style={{fontSize: 16, fontWeight: '900', color: '#DC2626'}}>
+                        {Math.max(1, Math.floor((parseFloat(bossSpawnDensity) || 1) * 5000 * (parseFloat(festivalSpawnMultiplier) || 100)))} 体
+                      </Text>
+                      <Text style={{fontSize: 11, color: '#92400E', marginTop: 4}}>
+                        計算式：{(parseFloat(bossSpawnDensity) || 1).toFixed(2)} × 5000町 × {(parseFloat(festivalSpawnMultiplier) || 100)}倍
+                      </Text>
+                    </View>
                     <Text style={styles.label}>フェス期間 (任意)</Text>
                     <View style={styles.row}>
                       <TextInput style={[styles.input, {flex: 1, marginRight: 8}]} value={massiveStartAt} onChangeText={setMassiveStartAt} placeholder="開始日時" />
@@ -2021,7 +2058,7 @@ export default function AdminDashboard() {
                 )}
 
                 <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: isMassiveSpawn ? '#DC2626' : '#8B5CF6', marginTop: 16}]} onPress={handleShowMassiveBossPreview} disabled={loading}>
-                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{isMassiveSpawn ? `生成プレビュー確認後、${massiveSpawnCount}体をマップへ大量投下` : '生成プレビュー確認後、1体をマップへ降臨'}</Text>}
+                  {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{isMassiveSpawn ? `【生成数: ${Math.max(1, Math.floor((parseFloat(bossSpawnDensity) || 1) * 5000 * (parseFloat(festivalSpawnMultiplier) || 100)))}体】マップへ大量投下` : '生成プレビュー確認後、1体をマップへ降臨'}</Text>}
                 </TouchableOpacity>
               </View>
             </View>
