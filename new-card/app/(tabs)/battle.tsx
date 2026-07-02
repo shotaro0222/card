@@ -632,6 +632,17 @@ export default function BattleScreen() {
                 style={styles.map} 
                 showsUserLocation={false} 
                 customMapStyle={getMapStyle()}
+                region={currentLocation ? {
+                  latitude: currentLocation.lat,
+                  longitude: currentLocation.lng,
+                  latitudeDelta: 0.05,
+                  longitudeDelta: 0.05
+                } : {
+                  latitude: 35.6762,
+                  longitude: 139.6503,
+                  latitudeDelta: 20,
+                  longitudeDelta: 20
+                }}
               >
                 {/* 🌟 見やすい現在地マーカー */}
                 {currentLocation && (
@@ -650,7 +661,7 @@ export default function BattleScreen() {
                   </Marker>
                 )}
                 {startPoint && (
-                  <Marker coordinate={startPoint}>
+                  <Marker coordinate={{ latitude: startPoint.lat, longitude: startPoint.lng }}>
                     <View style={styles.startMarker}><Flag color="#FFF" size={16}/></View>
                   </Marker>
                 )}
