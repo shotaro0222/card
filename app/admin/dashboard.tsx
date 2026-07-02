@@ -213,6 +213,10 @@ export default function AdminDashboard() {
   const [ruleEventEnd, setRuleEventEnd] = useState('');
   const [ruleEventDesc, setRuleEventDesc] = useState('');
   const [ruleTargetRarity, setRuleTargetRarity] = useState('');
+  
+  // 🌟 特殊カード限定 ＆ ステータス補正用ステート
+  const [ruleRequiredCardId, setRuleRequiredCardId] = useState('');
+  const [rulePowerMultiplier, setRulePowerMultiplier] = useState('1.0');
 
   useFocusEffect(
     useCallback(() => {
@@ -1332,6 +1336,8 @@ export default function AdminDashboard() {
         target_keyword: ruleKeyword,
         require_fixed_card: ruleRequireFixed,
         required_rarity: ruleTargetRarity || null,
+        required_card_id: ruleRequiredCardId || null,
+        power_multiplier: parseFloat(rulePowerMultiplier) || 1.0,
         start_at: ruleEventStart || null,
         end_at: ruleEventEnd || null,
         description: ruleEventDesc || null,
@@ -1341,6 +1347,7 @@ export default function AdminDashboard() {
       setRuleName(''); setRuleKeyword('');
       setRuleEventStart(''); setRuleEventEnd('');
       setRuleEventDesc(''); setRuleTargetRarity('');
+      setRuleRequiredCardId(''); setRulePowerMultiplier('1.0');
       fetchRules();
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
@@ -1657,7 +1664,7 @@ export default function AdminDashboard() {
           <View style={styles.card}>
             <Text style={styles.cardTitle}>陣取りイベント・特殊ルール設定</Text>
             <Text style={{color:'#64748B', fontSize: 12, marginBottom: 16}}>
-              特定のエリア（キーワード）での陣取りに対し、「期間」や「特定カード/レアリティ」の制限を付与してイベントを作成します。
+              特定のエリア（キーワード）での陣取りに対し、「期間」や「特定カード/レアリティ」の制限や「特効倍率」を付与してイベントを作成します。
             </Text>
 
             <View style={{backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 24}}>
@@ -1674,8 +1681,10 @@ export default function AdminDashboard() {
               <Text style={styles.label}>イベント詳細・説明</Text>
               <TextInput style={[styles.input, {height: 80, textAlignVertical: 'top'}]} value={ruleEventDesc} onChangeText={setRuleEventDesc} placeholder="イベントの詳細内容を記載..." multiline />
 
-              <Text style={styles.label}>参加条件・制限</Text>
-              <TextInput style={[styles.input, {marginBottom: 12}]} value={ruleTargetRarity} onChangeText={setRuleTargetRarity} placeholder="特定のレアリティ限定 (例: UR, 未入力で制限なし)" />
+              <Text style={styles.label}>参加条件・特効（カード指定 / レアリティ指定）</Text>
+              <TextInput style={[styles.input, {marginBottom: 8}]} value={ruleTargetRarity} onChangeText={setRuleTargetRarity} placeholder="特定のレアリティ限定 (例: UR, 協賛レア等)" />
+              <TextInput style={[styles.input, {marginBottom: 8}]} value={ruleRequiredCardId} onChangeText={setRuleRequiredCardId} placeholder="特定カード限定 (対象カードのUUIDを入力)" />
+              <TextInput style={[styles.input, {marginBottom: 12}]} value={rulePowerMultiplier} onChangeText={setRulePowerMultiplier} placeholder="指定カードのステータス倍率 (例: 100 で絶対勝利)" keyboardType="numeric" />
 
               <View style={[styles.row, {marginTop: 0}]}>
                 <Text style={[styles.label, {flex: 1, marginTop: 0}]}>協賛(固定)カードを必須にする</Text>
@@ -1705,9 +1714,12 @@ export default function AdminDashboard() {
                     <View style={[styles.row, {flexWrap: 'wrap', gap: 4, marginTop: 4, marginBottom: 4}]}>
                       {r.require_fixed_card && <Text style={[styles.bannedBadge, {backgroundColor: '#DBEAFE', color: '#1D4ED8', marginLeft: 0}]}>固定カード必須</Text>}
                       {r.required_rarity && <Text style={[styles.bannedBadge, {backgroundColor: '#FEF3C7', color: '#D97706', marginLeft: 0}]}>{r.required_rarity}限定</Text>}
+                      {r.required_card_id && <Text style={[styles.bannedBadge, {backgroundColor: '#FCE7F3', color: '#BE185D', marginLeft: 0}]}>指定UUID限定</Text>}
+                      {r.power_multiplier && r.power_multiplier > 1 && <Text style={[styles.bannedBadge, {backgroundColor: '#FEF08A', color: '#A16207', marginLeft: 0}]}>特効 {r.power_multiplier}倍</Text>}
                       {(r.start_at || r.end_at) && <Text style={[styles.bannedBadge, {backgroundColor: '#DCFCE7', color: '#15803D', marginLeft: 0}]}>期間限定</Text>}
                     </View>
                     <Text style={styles.listItemSub}>対象エリア: {r.target_keyword}</Text>
+                    {r.required_card_id && <Text style={[styles.listItemSub, {marginTop: 2, fontSize: 11}]}>対象カードUUID: {r.required_card_id}</Text>}
                     {r.description && <Text style={[styles.listItemSub, {marginTop: 4, color: '#475569'}]}>{r.description}</Text>}
                     {(r.start_at || r.end_at) && (
                       <Text style={[styles.listItemSub, {marginTop: 4, fontSize: 11, color: '#94A3B8'}]}>
