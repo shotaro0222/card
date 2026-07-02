@@ -15,17 +15,14 @@ let Polygon: any;
 let PROVIDER_GOOGLE: any;
 
 if (Platform.OS !== 'web') {
-  // モバイル（実機）環境：ネイティブのreact-native-mapsを読み込む
   const Maps = require('react-native-maps');
   MapView = Maps.default;
   Marker = Maps.Marker;
   Polygon = Maps.Polygon;
   PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
 } else {
-  // Web環境：Vercelエラーを回避し、iframe(OpenStreetMap)でマップを擬似表示する
   MapView = React.forwardRef(({ children, region }: any, ref) => {
     React.useImperativeHandle(ref, () => ({ animateToRegion: () => {} }));
-    // 座標がない場合は立川エリアをデフォルトに
     const lat = region?.latitude || 35.698;
     const lng = region?.longitude || 139.413;
     return (
@@ -48,13 +45,11 @@ if (Platform.OS !== 'web') {
       {children}
     </TouchableOpacity>
   );
-  Polygon = () => null; // Webでは陣地のポリゴン描画はスキップ
+  Polygon = () => null;
 }
 
-// 動的属性テーブル用の型定義
 type ElementRelationMap = Record<string, { strong: string[], weak: string[] }>;
 
-// DBから取得した相性テーブルを参照して計算
 function getDamageMultiplier(attackerEl: string, defenderEl: string, relations: ElementRelationMap): { multiplier: number, label: string } {
   const relation = relations[attackerEl];
   if (!relation) return { multiplier: 1.0, label: '' }; 
@@ -65,7 +60,6 @@ function getDamageMultiplier(attackerEl: string, defenderEl: string, relations: 
   return { multiplier: 1.0, label: '' };
 }
 
-// マップのカスタムスタイル
 const BOSS_MAP_STYLE = [
   { "elementType": "geometry", "stylers": [{ "color": "#241010" }] },
   { "elementType": "labels.text.fill", "stylers": [{ "color": "#8f5a5a" }] },
@@ -99,6 +93,7 @@ export default function BattleScreen() {
   const [playerStats, setPlayerStats] = useState({ totalWins: 0, bossDefeats: 0 });
   const [battleLog, setBattleLog] = useState<any[]>([]);
   const [isBattling, setIsBattling] = useState(false);
+  const [isScrollEnabled, setIsScrollEnabled] = useState(true);
   
   const [elementRelations, setElementRelations] = useState<ElementRelationMap>({});
   
@@ -115,20 +110,16 @@ export default function BattleScreen() {
   const [isTerritoryModalVisible, setTerritoryModalVisible] = useState(false);
   const [isAttackModalVisible, setAttackModalVisible] = useState(false);
   const [selectedTerritory, setSelectedTerritory] = useState<any>(null);
-  
   const [myHighRareCards, setMyHighRareCards] = useState<any[]>([]);
   const [selectedSacrifices, setSelectedSacrifices] = useState<string[]>([]);
   
-  // 特殊ルール
   const [activeRule, setActiveRule] = useState<any>(null);
   const [currentLocation, setCurrentLocation] = useState<{lat: number, lng: number} | null>(null);
 
-  // エフェクト・非同期リザルト用ステート
   const pulseAnim = useRef(new Animated.Value(1)).current;
   const [isAsyncResultModalVisible, setAsyncResultModalVisible] = useState(false);
   const [asyncResultData, setAsyncResultData] = useState<any>(null);
 
-  // AR・キャンペーン関連のステート
   const [campaignList, setCampaignList] = useState<any[]>([]);
   const [isCampaignModalVisible, setCampaignModalVisible] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
@@ -143,6 +134,22 @@ export default function BattleScreen() {
       ])
     ).start();
   }, [pulseAnim]);
+
+  // GPSのリアルタイムトラッキング
+  useEffect(() => {
+    let locationSubscription: Location.LocationSubscription;
+    (async () => {
+      const { granted } = await Location.requestForegroundPermissionsAsync();
+      if (!granted) return;
+      locationSubscription = await Location.watchPositionAsync(
+        { accuracy: Location.Accuracy.High, distanceInterval: 5 },
+        (loc) => {
+          setCurrentLocation({ lat: loc.coords.latitude, lng: loc.coords.longitude });
+        }
+      );
+    })();
+    return () => { if (locationSubscription) locationSubscription.remove(); };
+  }, []);
 
   useFocusEffect(
     useCallback(() => { initBattleData(); }, [])
@@ -175,14 +182,15 @@ export default function BattleScreen() {
       const { data: memberData } = await supabase.from('team_members').select('*, teams(*)').eq('player_id', user.id).eq('status', 'approved').maybeSingle();
       if (memberData && memberData.teams) setMyTeam(memberData.teams);
 
+      // 手持ちの生贄（展開）用カードを取得
       const { data: cards } = await supabase.from('cards').select('*').eq('player_id', user.id).eq('is_active', true).or('level.gte.5,status_total.gte.300,is_fixed.eq.true'); 
       if (cards) setMyHighRareCards(cards);
     }
-    await checkLocationAndFetchData();
+    await initialLocationFetch();
     setLoadingMap(false);
   };
 
-  const checkLocationAndFetchData = async () => {
+  const initialLocationFetch = async () => {
     try {
       const locationPerm = await Location.requestForegroundPermissionsAsync();
       if (!locationPerm.granted) return;
@@ -198,8 +206,7 @@ export default function BattleScreen() {
           const g = geocode[0];
           postal = g.postalCode || '';
           addressString = `${g.region || ''}${g.city || ''}${g.street || ''}`;
-          if (addressString === '') addressString = '詳細不明なエリア';
-          setCurrentAddress(addressString);
+          setCurrentAddress(addressString || '詳細不明なエリア');
           setCurrentPostalCode(postal);
         }
       }
@@ -210,10 +217,8 @@ export default function BattleScreen() {
       let foundBoss = null;
       if (campaigns) {
         setCampaignList(campaigns);
-
         const targetCampaigns = campaigns.filter((c: any) => c.target_lat !== null);
         const nearbyCampaign = targetCampaigns.find((c: any) => getDistance(latitude, longitude, c.target_lat, c.target_lng) <= (c.radius_meters || 100));
-        
         if (nearbyCampaign) {
           const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).maybeSingle();
           if (boss) foundBoss = { ...boss, campaign_title: nearbyCampaign.title, sponsor_name: nearbyCampaign.sponsor_name, lat: nearbyCampaign.target_lat, lng: nearbyCampaign.target_lng, element: boss.element || '火' };
@@ -251,7 +256,7 @@ export default function BattleScreen() {
         return true;
       });
       setActiveRule(matchedRule || null);
-    } catch (e) { console.log("Rule Evaluation Error"); }
+    } catch (e) {}
   };
 
   const getDistance = (lat1: number, lon1: number, lat2: number, lon2: number) => {
@@ -266,14 +271,9 @@ export default function BattleScreen() {
     if (!url) return;
     try {
       const supported = await Linking.canOpenURL(url);
-      if (supported) {
-        await Linking.openURL(url);
-      } else {
-        Alert.alert('エラー', 'このURLは開けません: ' + url);
-      }
-    } catch (error) {
-      Alert.alert('エラー', 'ブラウザの起動に失敗しました。');
-    }
+      if (supported) await Linking.openURL(url);
+      else Alert.alert('エラー', 'このURLは開けません: ' + url);
+    } catch (error) { Alert.alert('エラー', 'ブラウザの起動に失敗しました。'); }
   };
 
   const handleStartScan = async () => {
@@ -288,12 +288,24 @@ export default function BattleScreen() {
     setScannerVisible(true);
   };
 
-  const markStartPoint = () => {
+  // ==========================================
+  // 🗺️ 陣取り（テリトリー）アクション
+  // ==========================================
+  const markStartPoint = async () => {
     if (!currentLocation) return;
-    setStartPoint({ lat: currentLocation.lat, lng: currentLocation.lng, address: currentAddress });
+    let addr = currentAddress;
+    if (Platform.OS !== 'web') {
+      const geocode = await Location.reverseGeocodeAsync({ latitude: currentLocation.lat, longitude: currentLocation.lng });
+      if (geocode.length > 0) {
+        const g = geocode[0];
+        addr = `${g.region || ''}${g.city || ''}${g.street || ''}`;
+      }
+    }
+    const finalAddr = addr || '現在地';
+    setStartPoint({ lat: currentLocation.lat, lng: currentLocation.lng, address: finalAddr });
     setMapMode('territory');
     mapRef.current?.animateToRegion({ latitude: currentLocation.lat, longitude: currentLocation.lng, latitudeDelta: 0.02, longitudeDelta: 0.02 }, 1000);
-    Alert.alert('起点マーカー設置', `「${currentAddress}」を起点として記録しました。別の場所に移動して陣地を展開してください。`);
+    Alert.alert('起点マーカー設置', `「${finalAddr}」を起点として記録しました。\n別の場所に移動して陣地を展開してください。`);
   };
 
   const cancelStartPoint = () => {
@@ -304,15 +316,36 @@ export default function BattleScreen() {
     }
   };
 
-  const openTerritoryModal = () => {
+  const openTerritoryModal = async () => {
     if (!startPoint || !currentLocation) return;
     const dist = getDistance(startPoint.lat, startPoint.lng, currentLocation.lat, currentLocation.lng);
     if (dist < 5) {
       Alert.alert('距離が近すぎます', '開始位置から最低5メートルは離れてください。');
       return;
     }
+    
+    if (Platform.OS !== 'web') {
+      const geocode = await Location.reverseGeocodeAsync({ latitude: currentLocation.lat, longitude: currentLocation.lng });
+      if (geocode.length > 0) {
+        const g = geocode[0];
+        const addr = `${g.region || ''}${g.city || ''}${g.street || ''}`;
+        setCurrentAddress(addr || '詳細不明なエリア');
+      }
+    }
+    
     setSelectedSacrifices([]);
     setTerritoryModalVisible(true);
+  };
+
+  const toggleSacrifice = (item: any) => {
+    if (activeRule && activeRule.require_fixed_card && !item.is_fixed) {
+      Alert.alert('ルール違反', `「${activeRule.rule_name}」のため協賛カード等が必要です。`); return;
+    }
+    if (selectedSacrifices.includes(item.id)) setSelectedSacrifices(prev => prev.filter(i => i !== item.id));
+    else {
+      if (selectedSacrifices.length >= 2) Alert.alert('制限', '選べる生贄は2枚までです。');
+      else setSelectedSacrifices(prev => [...prev, item.id]);
+    }
   };
 
   const confirmTerritoryCreation = async () => {
@@ -323,17 +356,18 @@ export default function BattleScreen() {
 
     Alert.alert(
       "陣地の展開", 
-      `「${startPoint?.address}」〜「${currentAddress}」を制圧し、防衛力[${totalDefense}]の陣地を展開しますか？\n※捧げたカードは消失します。`,
+      `「${startPoint?.address}」〜「${currentAddress}」のエリアを制圧し、防衛力[${totalDefense}]の陣地を展開しますか？\n※捧げた2枚のカードは消失します。`,
       [
         { text: "キャンセル", style: "cancel" },
-        { text: "生贄に捧げる", style: "destructive", onPress: async () => {
+        { text: "展開する", style: "destructive", onPress: async () => {
             setLoadingMap(true);
             try {
               await supabase.from('territories').insert([{
                 player_id: myId, player_name: myProfile?.player_name || '匿名エージェント',
                 team_id: myTeam?.id || null, team_name: myTeam?.name || '', team_color: myTeam?.team_color || '',
                 start_lat: startPoint?.lat, start_lng: startPoint?.lng, end_lat: currentLocation?.lat, end_lng: currentLocation?.lng,
-                start_address: startPoint?.address, end_address: currentAddress, defense_power: totalDefense, card1_name: card1.card_name, card2_name: card2.card_name
+                start_address: startPoint?.address, end_address: currentAddress, defense_power: totalDefense, 
+                card1_name: card1.card_name, card2_name: card2.card_name
               }]);
               await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
               Alert.alert('展開完了', '強大な陣地をマップ上に展開しました！');
@@ -356,10 +390,10 @@ export default function BattleScreen() {
     const myAttackPower = c1.status_total + c2.status_total;
 
     if (myAttackPower <= selectedTerritory.defense_power) {
-      Alert.alert('戦力不足', `防衛力[${selectedTerritory.defense_power}]に対し、あなたの戦力は[${myAttackPower}]です。`); return;
+      Alert.alert('戦力不足', `防衛力[${selectedTerritory.defense_power}]に対し、あなたの戦力は[${myAttackPower}]です。ステータスが足りません。`); return;
     }
 
-    Alert.alert("圧倒的制圧", `この陣地を無血開城させますか？`, [
+    Alert.alert("圧倒的制圧", `捧げたカードの力[${myAttackPower}]が防衛力[${selectedTerritory.defense_power}]を上回りました！\nこの陣地を強奪しますか？\n※捧げた2枚のカードは消失します。`, [
         { text: "キャンセル", style: "cancel" },
         { text: "強奪する", style: "destructive", onPress: async () => {
             setLoadingMap(true);
@@ -369,7 +403,7 @@ export default function BattleScreen() {
                 defense_power: myAttackPower, card1_name: c1.card_name, card2_name: c2.card_name
               }).eq('id', selectedTerritory.id);
               await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
-              Alert.alert('制圧完了', '陣地を奪い取りました！');
+              Alert.alert('制圧完了', '敵の陣地を奪い取りました！');
               setAttackModalVisible(false); initBattleData();
             } catch(e) {}
             setLoadingMap(false);
@@ -397,31 +431,17 @@ export default function BattleScreen() {
   };
 
   const startPvpBattle = async () => {
-    setIsBattling(true); 
-    setBattleLog([]);
-    
+    setIsBattling(true); setBattleLog([]);
     const { data: myCard, error: myError } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).maybeSingle();
     if (myError || !myCard) { 
-      Alert.alert('出撃エラー', 'アクティブな出撃カードがありません。\nマイページから出撃させたいカードを選択してください。'); 
-      setIsBattling(false); 
-      return; 
+      Alert.alert('出撃エラー', 'アクティブな出撃カードがありません。\nマイページから出撃させたいカードを選択してください。'); setIsBattling(false); return; 
     }
     
-    const minS = Math.floor(myCard.status_total * 0.75); 
-    const maxS = Math.floor(myCard.status_total * 1.25);
-    
-    const { data: oppCards, error: oppError } = await supabase.from('cards')
-      .select('*')
-      .neq('player_id', myId)
-      .eq('is_active', true)
-      .gte('status_total', minS)
-      .lte('status_total', maxS)
-      .limit(10);
+    const minS = Math.floor(myCard.status_total * 0.75); const maxS = Math.floor(myCard.status_total * 1.25);
+    const { data: oppCards, error: oppError } = await supabase.from('cards').select('*').neq('player_id', myId).eq('is_active', true).gte('status_total', minS).lte('status_total', maxS).limit(10);
       
     if (oppError || !oppCards || oppCards.length === 0) { 
-      Alert.alert('検索結果', '現在、同格のライバルが見つかりませんでした。\n時間をおいて再度お試しください。'); 
-      setIsBattling(false); 
-      return; 
+      Alert.alert('検索結果', '現在、同格のライバルが見つかりませんでした。\n時間をおいて再度お試しください。'); setIsBattling(false); return; 
     }
     
     Alert.alert('マッチング成功！', '同格のライバルを発見しました。\nバトルを開始しますか？', [
@@ -463,10 +483,8 @@ export default function BattleScreen() {
         const reward = detectedBoss.fixed_cards;
         if (reward) {
           await supabase.from('rewards').insert([{ 
-            player_id: myId, 
-            title: `🎁 ボス討伐報酬: ${reward.card_name}`,
-            description: `エリアボス「${detectedBoss.name}」を見事討伐した報酬の限定カードです！`,
-            reward_type: 'card',
+            player_id: myId, title: `🎁 ボス討伐報酬: ${reward.card_name}`,
+            description: `エリアボス「${detectedBoss.name}」を見事討伐した報酬の限定カードです！`, reward_type: 'card',
             reward_data: {
               card_name: reward.card_name, image_url: reward.image_url,
               status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd,
@@ -539,8 +557,7 @@ export default function BattleScreen() {
       if (reward) {
         await supabase.from('rewards').insert([{ 
             player_id: myId, title: `🎁 デッキ討伐報酬: ${reward.card_name}`,
-            description: `エリアボス「${detectedBoss.name}」をデッキの力で討伐した報酬の限定カードです！`,
-            reward_type: 'card',
+            description: `エリアボス「${detectedBoss.name}」をデッキの力で討伐した報酬の限定カードです！`, reward_type: 'card',
             reward_data: {
               card_name: reward.card_name, image_url: reward.image_url,
               status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd,
@@ -553,17 +570,6 @@ export default function BattleScreen() {
     }
     
     setIsBattling(false); setAsyncResultModalVisible(true);
-  };
-
-  const toggleSacrifice = (item: any) => {
-    if (activeRule && activeRule.require_fixed_card && !item.is_fixed) {
-      Alert.alert('ルール違反', `「${activeRule.rule_name}」のため協賛カード等が必要です。`); return;
-    }
-    if (selectedSacrifices.includes(item.id)) setSelectedSacrifices(prev => prev.filter(i => i !== item.id));
-    else {
-      if (selectedSacrifices.length >= 2) Alert.alert('制限', '選べる生贄は2枚までです。');
-      else setSelectedSacrifices(prev => [...prev, item.id]);
-    }
   };
 
   const getMapStyle = () => {
@@ -608,20 +614,34 @@ export default function BattleScreen() {
         <View style={styles.statItem}><Flag color="#3B82F6" size={20} /><Text style={styles.statValue}>{territories.filter(t=>t.player_id===myId).length}</Text><Text style={styles.statLabel}>支配陣地</Text></View>
       </View>
 
-      <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 150 }}>
+      <ScrollView style={styles.scrollArea} contentContainerStyle={{ paddingBottom: 150 }} scrollEnabled={isScrollEnabled}>
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>📍 リアルマップ：陣取り(テリトリー) ＆ ボス</Text>
           {loadingMap ? (
             <ActivityIndicator size="small" color="#3B82F6" style={{ padding: 20 }} />
           ) : (
-            <View style={styles.mapPanel}>
+            <View 
+              style={styles.mapPanel}
+              onTouchStart={() => setIsScrollEnabled(false)}
+              onTouchEnd={() => setIsScrollEnabled(true)}
+              onTouchCancel={() => setIsScrollEnabled(true)}
+            >
               <MapView 
                 ref={mapRef}
                 provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE} 
                 style={styles.map} 
-                showsUserLocation={true}
+                showsUserLocation={false} 
                 customMapStyle={getMapStyle()}
               >
+                {/* 🌟 見やすい現在地マーカー */}
+                {currentLocation && (
+                  <Marker coordinate={{ latitude: currentLocation.lat, longitude: currentLocation.lng }} zIndex={999}>
+                    <View style={styles.currentLocationMarker}>
+                      <View style={styles.currentLocationDot} />
+                    </View>
+                  </Marker>
+                )}
+
                 {detectedBoss && (
                   <Marker coordinate={{ latitude: detectedBoss.lat, longitude: detectedBoss.lng }}>
                     <Animated.View style={[styles.bossMarker, { transform: [{ scale: pulseAnim }], borderColor: getBossFeatureStyle(detectedBoss).color }]}>
@@ -745,9 +765,6 @@ export default function BattleScreen() {
         <Text style={styles.floatingArBtnText}>AR探索</Text>
       </TouchableOpacity>
 
-      {/* ==========================================
-          🌟 ARキャンペーン一覧・詳細モーダル
-      ========================================== */}
       <Modal visible={isCampaignModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={[styles.modalContent, { height: '80%' }]}>
@@ -799,9 +816,6 @@ export default function BattleScreen() {
         </View>
       </Modal>
 
-      {/* ==========================================
-          🌟 QRスキャナーモーダル
-      ========================================== */}
       <Modal visible={isScannerVisible} animationType="fade" transparent>
         <View style={{ flex: 1, backgroundColor: '#000' }}>
           {Platform.OS !== 'web' ? (
@@ -867,20 +881,34 @@ export default function BattleScreen() {
         </View>
       </Modal>
 
+      {/* 🌟 陣地展開（新規）用モーダル */}
       <Modal visible={isTerritoryModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
             <Text style={styles.modalHeader}>陣地の展開（生贄選択）</Text>
-            <Text style={styles.addressRouteText}>{startPoint?.address} {'\n'} 〜 {currentAddress}</Text>
+            <View style={{ marginVertical: 12 }}>
+              <View style={styles.addressRouteRow}>
+                <Text style={styles.addressRouteLabel}>📍 起点</Text>
+                <Text style={styles.addressRouteValue}>{startPoint?.address}</Text>
+              </View>
+              <View style={styles.addressRouteLine} />
+              <View style={styles.addressRouteRow}>
+                <Text style={styles.addressRouteLabel}>🏁 終点</Text>
+                <Text style={styles.addressRouteValue}>{currentAddress}</Text>
+              </View>
+            </View>
+            <Text style={styles.modalDesc}>展開するには2枚のカードを生贄に捧げる必要があります。</Text>
+            
             {activeRule && activeRule.require_fixed_card && (
               <View style={styles.warningBox}><Text style={styles.warningText}>⚠️ このエリア/時間帯は特殊ルールが適用されています。企業協賛カード等しか生贄にできません。</Text></View>
             )}
+            
             <FlatList
-              data={myHighRareCards} keyExtractor={item => item.id} numColumns={2} style={{maxHeight: 280, marginBottom: 20}}
+              data={myHighRareCards} keyExtractor={item => item.id} horizontal style={{marginBottom: 16, maxHeight: 110}}
               renderItem={({item}) => {
                 const isRestricted = activeRule && activeRule.require_fixed_card && !item.is_fixed;
                 return (
-                  <TouchableOpacity style={[styles.miniCard, selectedSacrifices.includes(item.id) && styles.selectedMiniCard, isRestricted && {opacity: 0.3}]} onPress={() => toggleSacrifice(item)} activeOpacity={isRestricted ? 1 : 0.7}>
+                  <TouchableOpacity style={[styles.miniCard, {width: 100, marginRight: 8}, selectedSacrifices.includes(item.id) && styles.selectedMiniCard, isRestricted && {opacity: 0.3}]} onPress={() => toggleSacrifice(item)} activeOpacity={isRestricted ? 1 : 0.7}>
                     <Image source={{uri: item.image_url}} style={styles.miniCardImg} />
                     <Text style={styles.miniCardName} numberOfLines={1}>{item.card_name}</Text>
                     {item.is_fixed && <Text style={{fontSize: 9, color: '#EF4444', fontWeight:'bold'}}>協賛カード</Text>}
@@ -888,14 +916,18 @@ export default function BattleScreen() {
                 );
               }}
             />
+            
             <View style={{flexDirection: 'row', gap: 10}}>
               <TouchableOpacity style={[styles.cancelBtn, {flex: 1}]} onPress={() => setTerritoryModalVisible(false)}><Text style={styles.cancelBtnText}>やめる</Text></TouchableOpacity>
-              <TouchableOpacity style={[styles.confirmBtn, {flex: 2}, selectedSacrifices.length !== 2 && {backgroundColor: '#94A3B8'}]} onPress={confirmTerritoryCreation} disabled={selectedSacrifices.length !== 2}><Text style={styles.confirmBtnText}>2枚を捧げて展開する</Text></TouchableOpacity>
+              <TouchableOpacity style={[styles.confirmBtn, {flex: 2}, selectedSacrifices.length !== 2 && {backgroundColor: '#94A3B8'}]} onPress={confirmTerritoryCreation} disabled={selectedSacrifices.length !== 2}>
+                <Text style={styles.confirmBtnText}>2枚捧げて展開する</Text>
+              </TouchableOpacity>
             </View>
           </View>
         </View>
       </Modal>
 
+      {/* 🌟 陣地強奪（上書き・バトル）用モーダル */}
       <Modal visible={isAttackModalVisible} animationType="slide" transparent>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -903,27 +935,37 @@ export default function BattleScreen() {
             <View style={styles.terrInfoBox}>
               <Text style={styles.addressRouteText} numberOfLines={2}>{selectedTerritory?.start_address} {'\n'}〜 {selectedTerritory?.end_address}</Text>
               <Text style={styles.terrOwner}>所有者: {selectedTerritory?.player_name}</Text>
-              <Text style={styles.terrDefense}>防衛力: {selectedTerritory?.defense_power}</Text>
+              <View style={{flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginTop: 4}}>
+                <Text style={styles.terrDefense}>防衛力: {selectedTerritory?.defense_power}</Text>
+              </View>
+              {/* 🌟 防衛カード名を表示 */}
+              <Text style={styles.terrCards}>防衛カード: {selectedTerritory?.card1_name} & {selectedTerritory?.card2_name}</Text>
             </View>
+            
             {selectedTerritory?.player_id === myId ? (
               <Text style={styles.modalDesc}>これはあなたの支配領域です。</Text>
             ) : (
               <>
-                <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: '#0F172A', marginBottom: 20}]} onPress={attackTerritoryByBattle}><Text style={styles.confirmBtnText}>出撃カードで結界を破壊する(バトル)</Text></TouchableOpacity>
-                <Text style={styles.label}>または財力で上書き強奪</Text>
+                <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: '#0F172A', marginBottom: 20}]} onPress={attackTerritoryByBattle}>
+                  <Text style={styles.confirmBtnText}>出撃カードで結界を破壊する(バトル)</Text>
+                </TouchableOpacity>
+                
+                <Text style={styles.label}>またはより強い生贄で陣地を強奪</Text>
                 <FlatList
-                  data={myHighRareCards} keyExtractor={item => item.id} horizontal style={{marginBottom: 20}}
+                  data={myHighRareCards} keyExtractor={item => item.id} horizontal style={{marginBottom: 20, maxHeight: 110}}
                   renderItem={({item}) => {
                     const isRestricted = activeRule && activeRule.require_fixed_card && !item.is_fixed;
                     return (
-                      <TouchableOpacity style={[styles.miniCard, {width: 90, marginRight: 8}, selectedSacrifices.includes(item.id) && styles.selectedMiniCard, isRestricted && {opacity: 0.3}]} onPress={() => toggleSacrifice(item)}>
+                      <TouchableOpacity style={[styles.miniCard, {width: 100, marginRight: 8}, selectedSacrifices.includes(item.id) && styles.selectedMiniCard, isRestricted && {opacity: 0.3}]} onPress={() => toggleSacrifice(item)}>
                         <Image source={{uri: item.image_url}} style={styles.miniCardImg} />
                         <Text style={styles.miniCardName} numberOfLines={1}>{item.card_name}</Text>
                       </TouchableOpacity>
                     );
                   }}
                 />
-                <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: '#EF4444'}, selectedSacrifices.length !== 2 && {backgroundColor: '#FCA5A5'}]} onPress={overwriteTerritory} disabled={selectedSacrifices.length !== 2}><Text style={styles.confirmBtnText}>2枚を捧げて強奪する</Text></TouchableOpacity>
+                <TouchableOpacity style={[styles.confirmBtn, {backgroundColor: '#EF4444'}, selectedSacrifices.length !== 2 && {backgroundColor: '#FCA5A5'}]} onPress={overwriteTerritory} disabled={selectedSacrifices.length !== 2}>
+                  <Text style={styles.confirmBtnText}>2枚捧げて強奪する</Text>
+                </TouchableOpacity>
               </>
             )}
             <TouchableOpacity style={[styles.cancelBtn, {marginTop: 20}]} onPress={() => setAttackModalVisible(false)}><Text style={styles.cancelBtnText}>閉じる</Text></TouchableOpacity>
@@ -950,6 +992,9 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#64748B', fontSize: 13, fontWeight: '700', marginBottom: 12 },
   mapPanel: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', height: 450, position: 'relative' },
   map: { width: '100%', height: '100%' },
+  
+  currentLocationMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(59, 130, 246, 0.25)', justifyContent: 'center', alignItems: 'center' },
+  currentLocationDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#3B82F6', borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
   
   bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: 5, borderRadius: 30, borderWidth: 3 },
   startMarker: { backgroundColor: '#3B82F6', padding: 8, borderRadius: 20, borderWidth: 2, borderColor: '#FFF' },
@@ -989,18 +1034,27 @@ const styles = StyleSheet.create({
   modalContent: { backgroundColor: '#FFFFFF', padding: 24, borderTopLeftRadius: 28, borderTopRightRadius: 28 },
   modalHeaderRow: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 16 },
   modalHeader: { color: '#0F172A', fontSize: 18, fontWeight: '900' },
-  modalDesc: { color: '#64748B', fontSize: 13, marginBottom: 16 },
+  modalDesc: { color: '#64748B', fontSize: 13, marginBottom: 16, lineHeight: 20 },
+  
+  addressRouteRow: { flexDirection: 'row', alignItems: 'center', paddingVertical: 8, backgroundColor: '#F8FAFC', paddingHorizontal: 12, borderRadius: 8 },
+  addressRouteLabel: { color: '#3B82F6', fontWeight: '900', fontSize: 13, width: 60 },
+  addressRouteValue: { color: '#0F172A', fontWeight: '700', fontSize: 14, flex: 1 },
+  addressRouteLine: { width: 2, height: 16, backgroundColor: '#E2E8F0', marginLeft: 30 },
   addressRouteText: { backgroundColor: '#F1F5F9', padding: 12, borderRadius: 12, color: '#3B82F6', fontWeight: '800', fontSize: 13, marginBottom: 12, textAlign: 'center', lineHeight: 20 },
   warningBox: { backgroundColor: '#FEF2F2', borderColor: '#FCA5A5', borderWidth: 1, padding: 12, borderRadius: 12, marginBottom: 16 },
   warningText: { color: '#B91C1C', fontSize: 12, fontWeight: '800', lineHeight: 18 },
+
   label: { color: '#475569', fontSize: 14, fontWeight: '900', marginTop: 10, marginBottom: 8 },
   terrInfoBox: { backgroundColor: '#F8FAFC', padding: 16, borderRadius: 16, borderWidth: 1, borderColor: '#E2E8F0', marginBottom: 20 },
   terrOwner: { fontSize: 14, fontWeight: '900', color: '#0F172A', marginBottom: 4 },
-  terrDefense: { fontSize: 16, fontWeight: '900', color: '#EF4444' },
+  terrDefense: { fontSize: 20, fontWeight: '900', color: '#EF4444' },
+  terrCards: { fontSize: 12, fontWeight: '700', color: '#64748B', marginTop: 6 },
+  
   miniCard: { flex: 1, margin: 4, padding: 8, backgroundColor: '#F8FAFC', borderRadius: 12, borderWidth: 2, borderColor: 'transparent', alignItems: 'center' },
   selectedMiniCard: { borderColor: '#3B82F6', backgroundColor: '#EFF6FF' },
-  miniCardImg: { width: '100%', height: 80, borderRadius: 8, marginBottom: 6, resizeMode: 'cover' },
+  miniCardImg: { width: '100%', height: 60, borderRadius: 8, marginBottom: 6, resizeMode: 'cover' },
   miniCardName: { fontSize: 11, fontWeight: '800', color: '#0F172A' },
+  
   confirmBtn: { backgroundColor: '#3B82F6', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
   confirmBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
   cancelBtn: { backgroundColor: '#F1F5F9', paddingVertical: 16, borderRadius: 16, alignItems: 'center' },
