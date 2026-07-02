@@ -213,15 +213,43 @@ export default function BattleScreen() {
 
       await evaluateSpecialRules(addressString, postal);
 
+      // ランダムボス設定を取得
+      const { data: configData } = await supabase.from('system_config').select('*').eq('id', 'random_boss_settings').maybeSingle();
+      const randomBossConfig = configData?.config_data || {};
+      const isRandomBossEnabled = randomBossConfig.enabled === true;
+
       const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true);
       let foundBoss = null;
       if (campaigns) {
         setCampaignList(campaigns);
-        const targetCampaigns = campaigns.filter((c: any) => c.target_lat !== null);
-        const nearbyCampaign = targetCampaigns.find((c: any) => getDistance(latitude, longitude, c.target_lat, c.target_lng) <= (c.radius_meters || 100));
-        if (nearbyCampaign) {
-          const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).maybeSingle();
-          if (boss) foundBoss = { ...boss, campaign_title: nearbyCampaign.title, sponsor_name: nearbyCampaign.sponsor_name, lat: nearbyCampaign.target_lat, lng: nearbyCampaign.target_lng, element: boss.element || '火' };
+        const now = new Date().getTime();
+        
+        // フィルター条件：has target_lat/lng、且つアクティブ
+        const targetCampaigns = campaigns.filter((c: any) => {
+          if (!c.target_lat || !c.target_lng) return false;
+          // end_atが設定されている場合は、現在時刻より未来であることを確認
+          if (c.end_at && new Date(c.end_at).getTime() < now) return false;
+          return true;
+        });
+        
+        if (targetCampaigns.length > 0) {
+          // ユーザーから最も近いキャンペーンを見つける
+          let nearestCampaign: any = null;
+          let minDistance = Infinity;
+          
+          targetCampaigns.forEach((c: any) => {
+            const distance = getDistance(latitude, longitude, c.target_lat, c.target_lng);
+            if (distance < minDistance) {
+              minDistance = distance;
+              nearestCampaign = c;
+            }
+          });
+          
+          // 最も近いキャンペーンが範囲内にあるかをチェック
+          if (nearestCampaign && minDistance <= (nearestCampaign.radius_meters || 5000)) {
+            const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearestCampaign.id).maybeSingle();
+            if (boss) foundBoss = { ...boss, campaign_title: nearestCampaign.title, sponsor_name: nearestCampaign.sponsor_name, lat: nearestCampaign.target_lat, lng: nearestCampaign.target_lng, element: boss.element || '火' };
+          }
         }
       }
       setDetectedBoss(foundBoss);
@@ -632,6 +660,17 @@ export default function BattleScreen() {
                 style={styles.map} 
                 showsUserLocation={false} 
                 customMapStyle={getMapStyle()}
+                region={currentLocation ? {
+                  latitude: currentLocation.lat,
+                  longitude: currentLocation.lng,
+                  latitudeDelta: 0.05,
+                  longitudeDelta: 0.05
+                } : {
+                  latitude: 35.6762,
+                  longitude: 139.6503,
+                  latitudeDelta: 20,
+                  longitudeDelta: 20
+                }}
               >
                 {/* 🌟 見やすい現在地マーカー */}
                 {currentLocation && (
@@ -650,7 +689,7 @@ export default function BattleScreen() {
                   </Marker>
                 )}
                 {startPoint && (
-                  <Marker coordinate={startPoint}>
+                  <Marker coordinate={{ latitude: startPoint.lat, longitude: startPoint.lng }}>
                     <View style={styles.startMarker}><Flag color="#FFF" size={16}/></View>
                   </Marker>
                 )}
@@ -996,7 +1035,7 @@ const styles = StyleSheet.create({
   currentLocationMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(59, 130, 246, 0.25)', justifyContent: 'center', alignItems: 'center' },
   currentLocationDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#3B82F6', borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
   
-  bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: 5, borderRadius: 30, borderWidth: 3 },
+  bossMarker: { backgroundColor: 'rgba(239, 68, 68, 0.95)', padding: 5, borderRadius: 30, borderWidth: 3, borderColor: '#DC2626' },
   startMarker: { backgroundColor: '#3B82F6', padding: 8, borderRadius: 20, borderWidth: 2, borderColor: '#FFF' },
   teamBadge: { paddingHorizontal: 8, paddingVertical: 4, borderRadius: 12, borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 2 },
   teamBadgeText: { color: '#FFFFFF', fontSize: 10, fontWeight: '900' },
