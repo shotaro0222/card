@@ -42,3 +42,10 @@
 {"_e":"metro:config","_t":1782956411332,"serverRoot":"../../..","projectRoot":"../../..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
 {"_e":"metro:server_log","_t":1782956411822,"level":"error","data":["An unknown error occurred while installing React Native DevTools. Details:\n\n/workspaces/card/node_modules/@react-native/debugger-shell/bin/react-native-devtools: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory\n"]}
 {"_e":"metro:instantiate","_t":1782956421140,"atlas":false,"workers":1,"host":"::","port":8081}
+{"_e":"root:init","_t":1782969693750,"format":"v0-jsonl","version":"57.0.3"}
+{"_e":"env:mode","_t":1782969693751,"nodeEnv":"development","babelEnv":"development","mode":"development"}
+{"_e":"env:load","_t":1782969693754,"mode":"development","files":["../../../.env"],"env":{"EXPO_PUBLIC_SUPABASE_ANON_KEY":"sb_publishable_VCETF-u0jImeQY87xtAmlQ_g_fqrjOP","EXPO_PUBLIC_SUPABASE_URL":"https://fswvcoxoonvdxfemtqlc.supabase.co"}}
+{"_e":"devserver:start","_t":1782969694539,"mode":"development","web":true,"baseUrl":"","asyncRoutes":false,"routerRoot":"../../../app","serverComponents":false,"serverActions":false,"serverRendering":false,"apiRoutes":false,"exporting":false}
+{"_e":"metro:config","_t":1782969695485,"serverRoot":"../../..","projectRoot":"../../..","exporting":false,"flags":{"autolinkingModuleResolution":false,"serverActions":false,"serverComponents":false,"reactCompiler":false,"optimizeGraph":false,"treeshaking":false,"logbox":false}}
+{"_e":"metro:server_log","_t":1782969698360,"level":"error","data":["An unknown error occurred while installing React Native DevTools. Details:\n\n/workspaces/card/node_modules/@react-native/debugger-shell/bin/react-native-devtools: error while loading shared libraries: libatk-1.0.so.0: cannot open shared object file: No such file or directory\n"]}
+{"_e":"metro:instantiate","_t":1782969727668,"atlas":false,"workers":1,"host":"::","port":8081}
