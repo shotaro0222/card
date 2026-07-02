@@ -5,30 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { ShieldAlert, Trophy, Activity, Swords, Map as MapIcon, Flag, Zap, X, MapPin, Clock, Flame, Shield, Heart, Zap as FastZap, Scan, Camera as CameraIcon } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-
-// Web環境でのクラッシュを防ぐ動的インポート
-let MapView: any;
-let Marker: any;
-let Polygon: any;
-let PROVIDER_GOOGLE: any;
-
-if (Platform.OS !== 'web') {
-  const Maps = require('react-native-maps');
-  MapView = Maps.default;
-  Marker = Maps.Marker;
-  Polygon = Maps.Polygon;
-  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
-} else {
-  MapView = ({ children }: any) => (
-    <View style={styles.webMapFallback}>
-      <MapIcon color="#64748B" size={32} style={{ marginBottom: 8 }} />
-      <Text style={{ color: '#64748B', fontWeight: 'bold' }}>Web版ではマップを表示できません</Text>
-      <View style={{ display: 'none' }}>{children}</View>
-    </View>
-  );
-  Marker = ({ children }: any) => <View>{children}</View>;
-  Polygon = () => <View />;
-}
+import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
 
 // 動的属性テーブル用の型定義
 type ElementRelationMap = Record<string, { strong: string[], weak: string[] }>;
@@ -145,14 +122,12 @@ export default function BattleScreen() {
     if (user) {
       setMyId(user.id);
       
-      // 💡 修正: maybeSingle() に変更（初期登録直後などデータ欠損時のエラー回避）
       const { data: profile } = await supabase.from('profiles').select('*').eq('id', user.id).maybeSingle();
       if (profile) {
         setMyProfile(profile);
         setPlayerStats({ totalWins: profile.total_wins, bossDefeats: profile.boss_defeats });
       }
 
-      // 💡 修正: maybeSingle() に変更（チーム未所属時の 406 Not Acceptable エラーを回避）
       const { data: memberData } = await supabase.from('team_members').select('*, teams(*)').eq('player_id', user.id).eq('status', 'approved').maybeSingle();
       if (memberData && memberData.teams) setMyTeam(memberData.teams);
 
@@ -197,7 +172,6 @@ export default function BattleScreen() {
         const nearbyCampaign = targetCampaigns.find((c: any) => getDistance(latitude, longitude, c.target_lat, c.target_lng) <= (c.radius_meters || 100));
         
         if (nearbyCampaign) {
-          // 💡 修正: ボスが未配置の場合に備え maybeSingle() を使用
           const { data: boss } = await supabase.from('bosses').select('*, fixed_cards(*)').eq('trigger_campaign_id', nearbyCampaign.id).maybeSingle();
           if (boss) foundBoss = { ...boss, campaign_title: nearbyCampaign.title, sponsor_name: nearbyCampaign.sponsor_name, lat: nearbyCampaign.target_lat, lng: nearbyCampaign.target_lng, element: boss.element || '火' };
         }
@@ -365,7 +339,6 @@ export default function BattleScreen() {
 
   const attackTerritoryByBattle = async () => {
     setAttackModalVisible(false); setIsBattling(true); setBattleLog([]);
-    // 💡 修正: maybeSingle()
     const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).maybeSingle();
     if (!myCard) { Alert.alert('出撃不可', '出撃可能なカードがありません。カード一覧からアクティブにしてください。'); setIsBattling(false); return; }
 
@@ -390,7 +363,6 @@ export default function BattleScreen() {
     setIsBattling(true); 
     setBattleLog([]);
     
-    // 💡 修正: maybeSingle() に変更し、自分のカードが見つからない場合はポップアップで警告
     const { data: myCard, error: myError } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).maybeSingle();
     if (myError || !myCard) { 
       Alert.alert('出撃エラー', 'アクティブな出撃カードがありません。\nマイページから出撃させたいカードを選択してください。'); 
@@ -409,14 +381,12 @@ export default function BattleScreen() {
       .lte('status_total', maxS)
       .limit(10);
       
-    // 💡 修正: 相手が見つからない場合のエラーハンドリングを追加
     if (oppError || !oppCards || oppCards.length === 0) { 
       Alert.alert('検索結果', '現在、同格のライバルが見つかりませんでした。\n時間をおいて再度お試しください。'); 
       setIsBattling(false); 
       return; 
     }
     
-    // 💡 修正: マッチング成功時のポップアップ表示
     Alert.alert('マッチング成功！', '同格のライバルを発見しました。\nバトルを開始しますか？', [
       {
         text: 'キャンセル',
@@ -445,7 +415,6 @@ export default function BattleScreen() {
   const startBossBattle = async () => {
     if (!detectedBoss) return;
     setIsBattling(true); setBattleLog([]);
-    // 💡 修正: maybeSingle()
     const { data: myCard } = await supabase.from('cards').select('*').eq('player_id', myId).eq('is_active', true).maybeSingle();
     if (!myCard) { Alert.alert('出撃不可', '出撃可能なアクティブカードがありません。'); setIsBattling(false); return; }
     
@@ -462,7 +431,6 @@ export default function BattleScreen() {
         
         const reward = detectedBoss.fixed_cards;
         if (reward) {
-          // 🌟 ボス討伐報酬を rewards テーブルに送るように変更
           await supabase.from('rewards').insert([{ 
             player_id: myId, 
             title: `🎁 ボス討伐報酬: ${reward.card_name}`,
@@ -544,7 +512,6 @@ export default function BattleScreen() {
       
       const reward = detectedBoss.fixed_cards;
       if (reward) {
-        // 🌟 デッキ討伐での報酬も rewards テーブルに送るように変更
         await supabase.from('rewards').insert([{ 
             player_id: myId, 
             title: `🎁 デッキ討伐報酬: ${reward.card_name}`,
@@ -632,7 +599,7 @@ export default function BattleScreen() {
             <View style={styles.mapPanel}>
               <MapView 
                 ref={mapRef}
-                provider={PROVIDER_GOOGLE} 
+                provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE} 
                 style={styles.map} 
                 showsUserLocation={true}
                 customMapStyle={getMapStyle()}
@@ -964,7 +931,6 @@ const styles = StyleSheet.create({
   section: { padding: 16 },
   sectionTitle: { color: '#64748B', fontSize: 13, fontWeight: '700', marginBottom: 12 },
   mapPanel: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', height: 450, position: 'relative' },
-  webMapFallback: { flex: 1, backgroundColor: '#F1F5F9', justifyContent: 'center', alignItems: 'center' },
   map: { width: '100%', height: '100%' },
   
   bossMarker: { backgroundColor: 'rgba(255, 255, 255, 0.9)', padding: 5, borderRadius: 30, borderWidth: 3 },
