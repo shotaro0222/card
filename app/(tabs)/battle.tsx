@@ -5,7 +5,51 @@ import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { ShieldAlert, Trophy, Activity, Swords, Map as MapIcon, Flag, Zap, X, MapPin, Clock, Flame, Shield, Heart, Zap as FastZap, Scan, Camera as CameraIcon } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
-import MapView, { Marker, Polygon, PROVIDER_GOOGLE } from 'react-native-maps';
+
+// =====================================================================
+// 🌟 Web環境でのビルドクラッシュを防ぎつつ、Web用マップを表示する実装
+// =====================================================================
+let MapView: any;
+let Marker: any;
+let Polygon: any;
+let PROVIDER_GOOGLE: any;
+
+if (Platform.OS !== 'web') {
+  // モバイル（実機）環境：ネイティブのreact-native-mapsを読み込む
+  const Maps = require('react-native-maps');
+  MapView = Maps.default;
+  Marker = Maps.Marker;
+  Polygon = Maps.Polygon;
+  PROVIDER_GOOGLE = Maps.PROVIDER_GOOGLE;
+} else {
+  // Web環境：Vercelエラーを回避し、iframe(OpenStreetMap)でマップを擬似表示する
+  MapView = React.forwardRef(({ children, region }: any, ref) => {
+    React.useImperativeHandle(ref, () => ({ animateToRegion: () => {} }));
+    // 座標がない場合は立川エリアをデフォルトに
+    const lat = region?.latitude || 35.698;
+    const lng = region?.longitude || 139.413;
+    return (
+      <View style={{ flex: 1, backgroundColor: '#0F172A', position: 'relative', overflow: 'hidden' }}>
+        {/* @ts-ignore - Web用標準iframe */}
+        <iframe 
+          src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01}%2C${lat-0.01}%2C${lng+0.01}%2C${lat+0.01}&layer=mapnik`}
+          style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', opacity: 0.6 }}
+        />
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', zIndex: 10, flexDirection: 'row', flexWrap: 'wrap' }}>
+          {children}
+        </View>
+      </View>
+    );
+  });
+  MapView.displayName = 'MapView';
+
+  Marker = ({ children, onPress }: any) => (
+    <TouchableOpacity onPress={onPress} style={{ margin: 10 }}>
+      {children}
+    </TouchableOpacity>
+  );
+  Polygon = () => null; // Webでは陣地のポリゴン描画はスキップ
+}
 
 // 動的属性テーブル用の型定義
 type ElementRelationMap = Record<string, { strong: string[], weak: string[] }>;
@@ -84,7 +128,7 @@ export default function BattleScreen() {
   const [isAsyncResultModalVisible, setAsyncResultModalVisible] = useState(false);
   const [asyncResultData, setAsyncResultData] = useState<any>(null);
 
-  // 🌟 AR・キャンペーン関連のステート追加
+  // AR・キャンペーン関連のステート
   const [campaignList, setCampaignList] = useState<any[]>([]);
   const [isCampaignModalVisible, setCampaignModalVisible] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
@@ -162,11 +206,10 @@ export default function BattleScreen() {
 
       await evaluateSpecialRules(addressString, postal);
 
-      // 🌟 キャンペーン一覧の取得とボスの検出
       const { data: campaigns } = await supabase.from('campaigns').select('*').eq('is_active', true);
       let foundBoss = null;
       if (campaigns) {
-        setCampaignList(campaigns); // モーダル表示用にリスト保持
+        setCampaignList(campaigns);
 
         const targetCampaigns = campaigns.filter((c: any) => c.target_lat !== null);
         const nearbyCampaign = targetCampaigns.find((c: any) => getDistance(latitude, longitude, c.target_lat, c.target_lng) <= (c.radius_meters || 100));
@@ -245,9 +288,6 @@ export default function BattleScreen() {
     setScannerVisible(true);
   };
 
-  // ==========================================
-  // 🗺️ 陣取り（テリトリー）アクション
-  // ==========================================
   const markStartPoint = () => {
     if (!currentLocation) return;
     setStartPoint({ lat: currentLocation.lat, lng: currentLocation.lng, address: currentAddress });
@@ -356,9 +396,6 @@ export default function BattleScreen() {
     });
   };
 
-  // ==========================================
-  // ⚔️ 既存バトルシステム
-  // ==========================================
   const startPvpBattle = async () => {
     setIsBattling(true); 
     setBattleLog([]);
@@ -388,14 +425,8 @@ export default function BattleScreen() {
     }
     
     Alert.alert('マッチング成功！', '同格のライバルを発見しました。\nバトルを開始しますか？', [
-      {
-        text: 'キャンセル',
-        style: 'cancel',
-        onPress: () => setIsBattling(false)
-      },
-      {
-        text: 'バトル開始！',
-        onPress: () => {
+      { text: 'キャンセル', style: 'cancel', onPress: () => setIsBattling(false) },
+      { text: 'バトル開始！', onPress: () => {
           const oppCard = oppCards[Math.floor(Math.random() * oppCards.length)];
           simulateBattle(myCard, oppCard, false, async (isWin) => {
             if (isWin) {
@@ -437,16 +468,10 @@ export default function BattleScreen() {
             description: `エリアボス「${detectedBoss.name}」を見事討伐した報酬の限定カードです！`,
             reward_type: 'card',
             reward_data: {
-              card_name: reward.card_name,
-              image_url: reward.image_url,
+              card_name: reward.card_name, image_url: reward.image_url,
               status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd,
-              status_hp: reward.stats.hp,
-              status_atk: reward.stats.atk,
-              status_def: reward.stats.def,
-              status_spd: reward.stats.spd,
-              rarity: reward.stats.rarity || 'P',
-              element: detectedBoss.element || '火',
-              is_fixed: true
+              status_hp: reward.stats.hp, status_atk: reward.stats.atk, status_def: reward.stats.def, status_spd: reward.stats.spd,
+              rarity: reward.stats.rarity || 'P', element: detectedBoss.element || '火', is_fixed: true
             },
             is_claimed: false
           }]);
@@ -513,21 +538,14 @@ export default function BattleScreen() {
       const reward = detectedBoss.fixed_cards;
       if (reward) {
         await supabase.from('rewards').insert([{ 
-            player_id: myId, 
-            title: `🎁 デッキ討伐報酬: ${reward.card_name}`,
+            player_id: myId, title: `🎁 デッキ討伐報酬: ${reward.card_name}`,
             description: `エリアボス「${detectedBoss.name}」をデッキの力で討伐した報酬の限定カードです！`,
             reward_type: 'card',
             reward_data: {
-              card_name: reward.card_name,
-              image_url: reward.image_url,
+              card_name: reward.card_name, image_url: reward.image_url,
               status_total: reward.stats.hp + reward.stats.atk + reward.stats.def + reward.stats.spd,
-              status_hp: reward.stats.hp,
-              status_atk: reward.stats.atk,
-              status_def: reward.stats.def,
-              status_spd: reward.stats.spd,
-              rarity: reward.stats.rarity || 'P',
-              element: detectedBoss.element || '火',
-              is_fixed: true
+              status_hp: reward.stats.hp, status_atk: reward.stats.atk, status_def: reward.stats.def, status_spd: reward.stats.spd,
+              rarity: reward.stats.rarity || 'P', element: detectedBoss.element || '火', is_fixed: true
             },
             is_claimed: false
         }]);
