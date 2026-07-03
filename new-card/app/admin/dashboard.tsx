@@ -56,6 +56,8 @@ export default function AdminDashboard() {
   const [pdRarity, setPdRarity] = useState('');
   const [pdAttr, setPdAttr] = useState('');
   const [pdImageUrl, setPdImageUrl] = useState('');
+  const [massiveBossPreviewImageUrl, setMassiveBossPreviewImageUrl] = useState('');
+  const [massiveDropPreviewImageUrl, setMassiveDropPreviewImageUrl] = useState('');
 
   // ==================== 1. 分析用データ ====================
   const [analyticsData, setAnalyticsData] = useState<any>({
@@ -920,11 +922,13 @@ export default function AdminDashboard() {
       setPbAtk(String(Math.floor(Math.random() * 150) + 50));
       setPbDef('50');
       setPbImageUrl(bUrl);
+      setMassiveBossPreviewImageUrl(bUrl);
 
       setPdName(`(サンプル) 【戦果】${randomName}の結晶核`);
       setPdRarity(randomRarity);
       setPdAttr(randomElement);
       setPdImageUrl(dUrl);
+      setMassiveDropPreviewImageUrl(dUrl);
 
       setPreviewBossContext('massive');
       setBossPreviewVisible(true);
@@ -964,20 +968,12 @@ export default function AdminDashboard() {
         finalDropCardUrl = await uploadBase64Image(finalDropCardUrl, 'boss_drops');
       }
 
-// 👇 修正前
-      // const campaignPayload: any = {
-      //   title: `ボス出現: ${bName}`, 
-      //   sponsor_name: bSponsorName || '運営',
-      //   target_lat: parseFloat(bLat) || 35.6983, 
-      //   target_lng: parseFloat(bLng) || 139.4130, 
-      //   radius_meters: parseInt(bRadius) || 1000,
-      //   is_active: true
-      // };
-
-      // 👇 修正後 (target_lat, target_lng, radius_meters を削除)
       const campaignPayload: any = {
         title: `ボス出現: ${bName}`, 
         sponsor_name: bSponsorName || '運営',
+        target_lat: parseFloat(bLat) || 35.6983,
+        target_lng: parseFloat(bLng) || 139.4130,
+        radius_meters: parseInt(bRadius) || 1000,
         is_active: true
       };
       if (bStartAt) campaignPayload.start_at = new Date(bStartAt).toISOString();
@@ -1055,6 +1051,17 @@ export default function AdminDashboard() {
       
       const promises = [];
 
+      let sharedBossUrl = `${NO_IMAGE_URL}&text=Boss`;
+      let sharedDropUrl = `${NO_IMAGE_URL}&text=Drop`;
+      if (isMassiveSpawn) {
+        const sampleName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
+        const sampleElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
+        const sampleRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
+        const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${sampleName}, hyper detailed, masterwork elemental of ${sampleElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
+        const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${sampleRarity} trading card high rarity frame game asset`;
+        sharedBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
+        sharedDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+      }
       for (let i = 0; i < count; i++) {
         promises.push((async () => {
           const randomName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
@@ -1063,8 +1070,8 @@ export default function AdminDashboard() {
           
           const { finalLat, finalLng } = getRandomCoords();
 
-          let finalBossUrl = `${NO_IMAGE_URL}&text=Boss`;
-          let finalDropUrl = `${NO_IMAGE_URL}&text=Drop`;
+          let finalBossUrl = sharedBossUrl;
+          let finalDropUrl = sharedDropUrl;
 
           if (!isMassiveSpawn) {
             const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
@@ -1073,20 +1080,12 @@ export default function AdminDashboard() {
             finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
           }
 
-// 👇 修正前
-          // const campaignPayload: any = {
-          //   title: `【突発出現】${randomName}`, 
-          //   sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
-          //   target_lat: finalLat, 
-          //   target_lng: finalLng, 
-          //   radius_meters: 1500, 
-          //   is_active: true
-          // };
-
-          // 👇 修正後 (target_lat, target_lng, radius_meters を削除)
-          const campaignPayload: any = {
+const campaignPayload: any = {
             title: `【突発出現】${randomName}`, 
             sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
+            target_lat: finalLat,
+            target_lng: finalLng,
+            radius_meters: 1500,
             is_active: true
           };
           if (isMassiveSpawn && massiveStartAt) campaignPayload.start_at = new Date(massiveStartAt).toISOString();
@@ -1990,11 +1989,14 @@ export default function AdminDashboard() {
                       <View style={{flex: 1}}>
                         <Text style={styles.listItemTitle}>{b.name}</Text>
                         <Text style={styles.listItemSub}>属性: {b.element} / HP: {b.hp}</Text>
-                        {camp && (
-                          <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>
-                            終了予定: {camp.end_at ? new Date(camp.end_at).toLocaleString() : '期限なし'}
-                          </Text>
-                        )}
+                        {camp ? (
+                          <>
+                            <Text style={styles.listItemSub}>出現元: {camp.title || 'ランダム出現'}</Text>
+                            <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>
+                              終了予定: {camp.end_at ? new Date(camp.end_at).toLocaleString() : '期限なし'}
+                            </Text>
+                          </>
+                        ) : null}
                       </View>
                       <TouchableOpacity style={{padding: 10}} onPress={() => handleEndBoss(b.id, b.trigger_campaign_id)}>
                         <Trash2 color="#EF4444" size={24} />
