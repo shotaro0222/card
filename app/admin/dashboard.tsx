@@ -379,11 +379,8 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 修正: bosses テーブルには created_at が存在しない可能性があるため、
-  // order('created_at', ...) を削除し、JavaScript側でリバース（あるいは id 順）にする。
   const fetchBosses = async () => {
     try {
-      // ⚠️ created_at ソートを削除
       const { data: bossesData, error } = await supabase
         .from('bosses')
         .select('*')
@@ -395,7 +392,6 @@ export default function AdminDashboard() {
       }
 
       if (bossesData) {
-        // idの降順にソート（簡易的な最新順）
         bossesData.sort((a, b) => b.id.localeCompare(a.id));
 
         const campIds = bossesData.map((b: any) => b.trigger_campaign_id).filter(Boolean);
@@ -619,15 +615,32 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 AI生成時のCORSエラーをサイレントに処理し、クラッシュを防ぐ
+  // 🌟【修正点】
+  // invoke が内部で CORS エラーを引き起こすケースを回避するため、
+  // fetch API を使用して明示的にリクエストを行うよう書き換えています。
   const safeGenerateAiImage = async (prompt: string, fallbackText: string): Promise<string> => {
     try {
-      const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt } });
-      if (error) throw error;
+      // 現在の認証セッションを取得
+      const { data: { session } } = await supabase.auth.getSession();
+      const token = session?.access_token || '';
+
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://fswvcoxoonvdxfemtqlc.supabase.co'}/functions/v1/generate-card-image`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${token}`
+        },
+        body: JSON.stringify({ prompt })
+      });
+
+      if (!response.ok) {
+        throw new Error(`Edge Function error! status: ${response.status}`);
+      }
+
+      const data = await response.json();
       if (data?.imageUrl) return data.imageUrl;
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}`;
     } catch (e) {
-      // CORSエラーなどが起きても処理を継続させる
       console.log('AI生成エラー(CORS等のためスキップ):', e);
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}+Error`;
     }
@@ -931,7 +944,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 campaigns への INSERT エラーを防ぐため、オブジェクトから空文字プロパティを安全に除外
   const handleCreateBoss = async (preBossUrl?: string, preDropUrl?: string) => {
     setLoading(true);
     try {
@@ -952,7 +964,6 @@ export default function AdminDashboard() {
         finalDropCardUrl = await uploadBase64Image(finalDropCardUrl, 'boss_drops');
       }
 
-      // ⚠️ 空文字を送信して 400 Bad Request になるのを防ぐ
       const campaignPayload: any = {
         title: `ボス出現: ${bName}`, 
         sponsor_name: bSponsorName || '運営',
@@ -1023,7 +1034,6 @@ export default function AdminDashboard() {
     return { finalLat: lat, finalLng: lng };
   };
 
-  // 🌟 campaigns への INSERT エラーを防ぐため、オブジェクトから空文字プロパティを安全に除外
   const triggerInstantRandomBoss = async () => {
     setLoading(true);
     try {
@@ -1051,7 +1061,6 @@ export default function AdminDashboard() {
             finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
           }
 
-          // ⚠️ 空文字を送信して 400 Bad Request になるのを防ぐ
           const campaignPayload: any = {
             title: `【突発出現】${randomName}`, 
             sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
