@@ -23,6 +23,7 @@ function decodeBase64ToBytes(base64Str: string): Uint8Array {
 
 async function generateImageBytesWithFallback(apiKey: string, prompt: string): Promise<Uint8Array> {
   const errors: Array<Record<string, unknown>> = [];
+  let lastModelCandidates: string[] = [];
 
   // Try 1: Imagen endpoint (some projects/keys return 404 here)
   {
@@ -61,44 +62,93 @@ async function generateImageBytesWithFallback(apiKey: string, prompt: string): P
 
   // Try 2: Gemini image-capable model via generateContent
   {
-    const endpoint = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.0-flash-preview-image-generation:generateContent";
-    const url = `${endpoint}?key=${apiKey}`;
-    const response = await fetch(url, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        contents: [{ parts: [{ text: prompt }] }],
-        generationConfig: {
-          responseModalities: ["TEXT", "IMAGE"],
-        },
-      }),
-    });
-
-    if (response.ok) {
-      const json = await response.json();
-      const parts = json?.candidates?.[0]?.content?.parts ?? [];
-      const inline = parts.find((p: any) => typeof p?.inlineData?.data === "string");
-      if (inline?.inlineData?.data) {
-        return decodeBase64ToBytes(inline.inlineData.data);
+    let discoveredModels: string[] = [];
+    try {
+      const listUrl = `https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`;
+      const listResp = await fetch(listUrl);
+      if (listResp.ok) {
+        const listJson = await listResp.json();
+        const models = Array.isArray(listJson?.models) ? listJson.models : [];
+        discoveredModels = models
+          .filter((m: any) => {
+            const name = String(m?.name || "").toLowerCase();
+            const methods = Array.isArray(m?.supportedGenerationMethods)
+              ? m.supportedGenerationMethods.map((x: any) => String(x).toLowerCase())
+              : [];
+            return (
+              name.includes("image") &&
+              methods.some((method: string) => method.includes("generatecontent"))
+            );
+          })
+          .map((m: any) => String(m.name || ""));
+      } else {
+        errors.push({
+          stage: "list-models-api",
+          status: listResp.status,
+          detail: await listResp.text(),
+        });
       }
+    } catch (e) {
       errors.push({
-        stage: "gemini-image-parse",
-        endpoint,
-        message: "No inlineData image in response",
-        response: json,
+        stage: "list-models-exception",
+        detail: e instanceof Error ? e.message : String(e),
       });
-    } else {
-      errors.push({
-        stage: "gemini-image-api",
-        endpoint,
-        status: response.status,
-        detail: await response.text(),
+    }
+
+    const staticCandidates = [
+      "models/gemini-2.5-flash-image-preview",
+      "models/gemini-2.0-flash-preview-image-generation",
+      "models/gemini-2.0-flash-exp-image-generation",
+    ];
+
+    const modelCandidates = Array.from(
+      new Set([...discoveredModels, ...staticCandidates]),
+    ).filter(Boolean);
+    lastModelCandidates = modelCandidates;
+
+    for (const modelName of modelCandidates) {
+      const endpoint = `https://generativelanguage.googleapis.com/v1beta/${modelName}:generateContent`;
+      const url = `${endpoint}?key=${apiKey}`;
+      const response = await fetch(url, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          contents: [{ parts: [{ text: prompt }] }],
+          generationConfig: {
+            responseModalities: ["TEXT", "IMAGE"],
+          },
+        }),
       });
+
+      if (response.ok) {
+        const json = await response.json();
+        const parts = json?.candidates?.[0]?.content?.parts ?? [];
+        const inline = parts.find((p: any) => typeof p?.inlineData?.data === "string");
+        if (inline?.inlineData?.data) {
+          return decodeBase64ToBytes(inline.inlineData.data);
+        }
+        errors.push({
+          stage: "gemini-image-parse",
+          endpoint,
+          modelName,
+          message: "No inlineData image in response",
+          response: json,
+        });
+      } else {
+        errors.push({
+          stage: "gemini-image-api",
+          endpoint,
+          modelName,
+          status: response.status,
+          detail: await response.text(),
+        });
+      }
     }
   }
 
   throw new Error(JSON.stringify({
     message: "All image generation endpoints failed",
+    modelCandidatesTried: lastModelCandidates,
     attempts: errors,
   }));
 }
