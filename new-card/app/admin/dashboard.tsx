@@ -624,7 +624,7 @@ export default function AdminDashboard() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || '';
 
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://fswvcoxoonvdxfemtqlc.supabase.co'}/functions/v1/generate-card-image`, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://fswvcoxoonvdxfemtqlc.supabase.co'}/functions/v1/forge-card, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -964,12 +964,20 @@ export default function AdminDashboard() {
         finalDropCardUrl = await uploadBase64Image(finalDropCardUrl, 'boss_drops');
       }
 
+// 👇 修正前
+      // const campaignPayload: any = {
+      //   title: `ボス出現: ${bName}`, 
+      //   sponsor_name: bSponsorName || '運営',
+      //   target_lat: parseFloat(bLat) || 35.6983, 
+      //   target_lng: parseFloat(bLng) || 139.4130, 
+      //   radius_meters: parseInt(bRadius) || 1000,
+      //   is_active: true
+      // };
+
+      // 👇 修正後 (target_lat, target_lng, radius_meters を削除)
       const campaignPayload: any = {
         title: `ボス出現: ${bName}`, 
         sponsor_name: bSponsorName || '運営',
-        target_lat: parseFloat(bLat) || 35.6983, 
-        target_lng: parseFloat(bLng) || 139.4130, 
-        radius_meters: parseInt(bRadius) || 1000,
         is_active: true
       };
       if (bStartAt) campaignPayload.start_at = new Date(bStartAt).toISOString();
@@ -1065,12 +1073,20 @@ export default function AdminDashboard() {
             finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
           }
 
+// 👇 修正前
+          // const campaignPayload: any = {
+          //   title: `【突発出現】${randomName}`, 
+          //   sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
+          //   target_lat: finalLat, 
+          //   target_lng: finalLng, 
+          //   radius_meters: 1500, 
+          //   is_active: true
+          // };
+
+          // 👇 修正後 (target_lat, target_lng, radius_meters を削除)
           const campaignPayload: any = {
             title: `【突発出現】${randomName}`, 
             sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
-            target_lat: finalLat, 
-            target_lng: finalLng, 
-            radius_meters: 1500, 
             is_active: true
           };
           if (isMassiveSpawn && massiveStartAt) campaignPayload.start_at = new Date(massiveStartAt).toISOString();
