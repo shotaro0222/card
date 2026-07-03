@@ -218,7 +218,6 @@ export default function AdminDashboard() {
   const [ruleRequiredCardId, setRuleRequiredCardId] = useState('');
   const [rulePowerMultiplier, setRulePowerMultiplier] = useState('1.0');
 
-  // 🌟 修正ポイント: system_config に対する安全な保存処理 (403対策)
   const saveSystemConfig = async (configId: string, configData: any) => {
     const { data: existing } = await supabase.from('system_config').select('id').eq('id', configId).maybeSingle();
     if (existing) {
@@ -348,53 +347,72 @@ export default function AdminDashboard() {
     if (data) setUsers(data);
   };
 
+  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (UGC)
   const fetchUgcCards = async () => {
     try {
-      let { data, error } = await supabase
+      const { data: cardsData, error } = await supabase
         .from('cards')
-        .select(`id, card_name, image_url, is_hidden, created_at, player_id, profiles(player_name)`)
+        .select('id, card_name, image_url, is_hidden, created_at, player_id')
         .order('created_at', { ascending: false })
         .limit(50);
-      if (error) {
-        const fallback = await supabase
-          .from('cards')
-          .select('id, card_name, image_url, is_hidden, created_at, player_id')
-          .order('created_at', { ascending: false })
-          .limit(50);
-        data = fallback.data;
+      
+      if (error) throw error;
+
+      if (cardsData) {
+        const playerIds = cardsData.map((c: any) => c.player_id).filter(Boolean);
+        let profilesData: any[] = [];
+        if (playerIds.length > 0) {
+          const { data } = await supabase.from('profiles').select('id, player_name').in('id', playerIds);
+          if (data) profilesData = data;
+        }
+
+        const merged = cardsData.map((c: any) => {
+          const prof = profilesData.find((p: any) => p.id === c.player_id);
+          return { ...c, profiles: prof ? { player_name: prof.player_name } : null };
+        });
+        setUgcCards(merged);
       }
-      if (data) setUgcCards(data);
     } catch (err) {
       console.log('UGC 取得失敗:', err);
     }
   };
 
+  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (BOSS)
   const fetchBosses = async () => {
     try {
-      let { data, error } = await supabase.from('bosses').select('*, campaigns(*)').order('created_at', { ascending: false }).limit(100);
-      if (error) {
-        const fallback = await supabase.from('bosses').select('*').order('created_at', { ascending: false }).limit(100);
-        data = fallback.data;
-      }
-      if (data) {
-        setBosses(data);
-        const now = new Date().getTime();
+      const { data: bossesData, error } = await supabase
+        .from('bosses')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(100);
+        
+      if (error) throw error;
+
+      if (bossesData) {
+        const campIds = bossesData.map((b: any) => b.trigger_campaign_id).filter(Boolean);
+        let campaignsData: any[] = [];
+        if (campIds.length > 0) {
+          const { data } = await supabase.from('campaigns').select('*').in('id', campIds);
+          if (data) campaignsData = data;
+        }
+
         const active: any[] = [];
         const history: any[] = [];
+        const now = new Date().getTime();
         
-        data.forEach((b: any) => {
+        bossesData.forEach((b: any) => {
+          const camp = campaignsData.find((c: any) => c.id === b.trigger_campaign_id);
+          const bWithCamp = { ...b, campaigns: camp || null };
+          
           let isActive = true;
-          if (b.campaigns) {
-            const c = Array.isArray(b.campaigns) ? b.campaigns[0] : b.campaigns;
-            if (c) {
-              if (c.is_active === false) isActive = false;
-              if (c.end_at && new Date(c.end_at).getTime() < now) isActive = false;
-            }
+          if (camp) {
+            if (camp.is_active === false) isActive = false;
+            if (camp.end_at && new Date(camp.end_at).getTime() < now) isActive = false;
           }
           if (isActive) {
-            active.push(b);
+            active.push(bWithCamp);
           } else {
-            history.push(b);
+            history.push(bWithCamp);
           }
         });
         
@@ -416,34 +434,62 @@ export default function AdminDashboard() {
     setRaritiesList(rars);
   };
 
+  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (TEAMS)
   const fetchTeams = async () => {
     try {
-      let { data, error } = await supabase.from('teams').select('*, profiles(player_name)').order('created_at', { ascending: false });
+      const { data: teamsData, error } = await supabase
+        .from('teams')
+        .select('*')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
       
-      if (error) {
-        const fallback = await supabase.from('teams').select('*').order('created_at', { ascending: false });
-        data = fallback.data;
-      }
-      
-      if (data) {
-        const scoredTeams = data.map((t: any) => ({
-          ...t,
-          display_name: t.name || t.team_name || '名称未設定',
-          activity_score: (t.member_count || 1) * 100 + (t.total_points || Math.floor(Math.random() * 500)),
-        })).sort((a: any, b: any) => b.activity_score - a.activity_score);
+      if (teamsData) {
+        const ownerIds = teamsData.map((t: any) => t.owner_id).filter(Boolean);
+        let profilesData: any[] = [];
+        if (ownerIds.length > 0) {
+          const { data } = await supabase.from('profiles').select('id, player_name').in('id', ownerIds);
+          if (data) profilesData = data;
+        }
+
+        const scoredTeams = teamsData.map((t: any) => {
+          const prof = profilesData.find((p: any) => p.id === t.owner_id);
+          return {
+            ...t,
+            profiles: prof ? { player_name: prof.player_name } : null,
+            display_name: t.name || t.team_name || '名称未設定',
+            activity_score: (t.member_count || 1) * 100 + (t.total_points || Math.floor(Math.random() * 500)),
+          };
+        }).sort((a: any, b: any) => b.activity_score - a.activity_score);
         setTeams(scoredTeams);
       }
     } catch (e) { console.log('Team fetch error:', e); }
   };
 
+  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (TERRITORIES)
   const fetchTerritories = async () => {
     try {
-      let { data, error } = await supabase.from('territories').select('*, profiles(player_name)').order('created_at', { ascending: false });
-      if (error) {
-        const fallback = await supabase.from('territories').select('*').order('created_at', { ascending: false });
-        data = fallback.data;
+      const { data: terrData, error } = await supabase
+        .from('territories')
+        .select('*')
+        .order('created_at', { ascending: false });
+        
+      if (error) throw error;
+      
+      if (terrData) {
+        const ownerIds = terrData.map((t: any) => t.owner_id).filter(Boolean);
+        let profilesData: any[] = [];
+        if (ownerIds.length > 0) {
+          const { data } = await supabase.from('profiles').select('id, player_name').in('id', ownerIds);
+          if (data) profilesData = data;
+        }
+
+        const merged = terrData.map((t: any) => {
+          const prof = profilesData.find((p: any) => p.id === t.owner_id);
+          return { ...t, profiles: prof ? { player_name: prof.player_name } : null };
+        });
+        setTerritories(merged);
       }
-      if (data) setTerritories(data);
     } catch (e) { console.log('Territories fetch error:', e); }
   };
 
@@ -659,7 +705,6 @@ export default function AdminDashboard() {
     ]);
   };
 
-  // 🌟 MINT配布・出品前のプレビュー表示ロジック
   const handleShowPreview = async () => {
     if (!cName && shopItemType === 'single') return Alert.alert('エラー', 'カード名を入力してください');
     if (mintDest === 'shop' && shopItemType === 'pack' && !packCardCount) return Alert.alert('エラー', 'パック封入枚数を入力してください');
@@ -808,7 +853,6 @@ export default function AdminDashboard() {
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
 
-  // 🌟 マニュアルボスのプレビュー作成ロジック
   const handleShowManualBossPreview = async () => {
     if (!bName) return Alert.alert('エラー', 'ボス名を入力してください');
     setLoading(true);
@@ -850,7 +894,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 大量発生(フェス)のサンプル生成・プレビューロジック
   const handleShowMassiveBossPreview = async () => {
     setLoading(true);
     try {
@@ -897,7 +940,6 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 ボスプレビューからの確定実行
   const handleConfirmBossPreview = async () => {
     setBossPreviewVisible(false);
     if (previewBossContext === 'manual') {
@@ -907,14 +949,12 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 マニュアル配置の実行ロジック (引数がある場合はプレビュー済みのURLを利用)
   const handleCreateBoss = async (preBossUrl?: string, preDropUrl?: string) => {
     setLoading(true);
     try {
       let finalBossImageUrl = preBossUrl || bossImageUrl;
       let finalDropCardUrl = preDropUrl || dropCardUrl;
       
-      // 引数が無い場合（プレビューを経由していない場合）のみAI生成を走らせる
       if (!preBossUrl && bossImageMode === 'ai' && bossAiPrompt) {
         try {
           const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: bossAiPrompt } });
@@ -1057,7 +1097,7 @@ export default function AdminDashboard() {
       }
 
       await Promise.all(promises);
-      Alert.alert('自動生成成功', `${count}体のボスをマップへ配置しました！`);
+      Alert.alert('自動生成成功', `${count}体的ボスをマップへ配置しました！`);
       fetchBosses();
     } catch (err: any) { Alert.alert('エラー', err.message); } finally { setLoading(false); }
   };
