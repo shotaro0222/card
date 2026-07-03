@@ -118,6 +118,13 @@ export default function AdminDashboard() {
   const [dropCardRarity, setDropCardRarity] = useState('UR');
   const [dropCardAttr, setDropCardAttr] = useState('闇');
 
+  const [randomBossImageMode, setRandomBossImageMode] = useState<'upload' | 'ai'>('ai');
+  const [randomBossUploadUrl, setRandomBossUploadUrl] = useState('');
+  const [randomBossAiPrompt, setRandomBossAiPrompt] = useState('');
+  const [randomDropImageMode, setRandomDropImageMode] = useState<'upload' | 'ai'>('ai');
+  const [randomDropUploadUrl, setRandomDropUploadUrl] = useState('');
+  const [randomDropAiPrompt, setRandomDropAiPrompt] = useState('');
+
   // ==================== 5-新規. ランダムボス設定 & 大量発生 ====================
   const [randomBossEnabled, setRandomBossEnabled] = useState(false);
   const [randomBossInterval, setRandomBossInterval] = useState('1h');
@@ -896,11 +903,24 @@ export default function AdminDashboard() {
       const randomElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
       const randomRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
 
+      let bUrl = `${NO_IMAGE_URL}&text=Boss`;
+      let dUrl = `${NO_IMAGE_URL}&text=Drop`;
       const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
       const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
 
-      let bUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
-      let dUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+      if (randomBossImageMode === 'ai') {
+        const prompt = randomBossAiPrompt || generatedBossPrompt;
+        bUrl = await safeGenerateAiImage(prompt, 'Massive+Boss');
+      } else if (randomBossUploadUrl) {
+        bUrl = randomBossUploadUrl;
+      }
+
+      if (randomDropImageMode === 'ai') {
+        const prompt = randomDropAiPrompt || generatedDropPrompt;
+        dUrl = await safeGenerateAiImage(prompt, 'Massive+Drop');
+      } else if (randomDropUploadUrl) {
+        dUrl = randomDropUploadUrl;
+      }
 
       setPbName(`(サンプル) ${randomName}`);
       setPbElement(randomElement);
@@ -1040,13 +1060,22 @@ const campaignPayload: any = {
       let sharedBossUrl = `${NO_IMAGE_URL}&text=Boss`;
       let sharedDropUrl = `${NO_IMAGE_URL}&text=Drop`;
       if (isMassiveSpawn) {
-        const sampleName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
-        const sampleElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
-        const sampleRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
-        const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${sampleName}, hyper detailed, masterwork elemental of ${sampleElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
-        const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${sampleRarity} trading card high rarity frame game asset`;
-        sharedBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
-        sharedDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+        if (randomBossImageMode === 'ai') {
+          const sampleName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
+          const sampleElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
+          const generatedBossPrompt = randomBossAiPrompt || `A fantasy trading card game illustration of a giant monster creature, name is ${sampleName}, hyper detailed, masterwork elemental of ${sampleElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
+          sharedBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
+        } else if (randomBossUploadUrl) {
+          sharedBossUrl = randomBossUploadUrl;
+        }
+
+        if (randomDropImageMode === 'ai') {
+          const sampleRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
+          const generatedDropPrompt = randomDropAiPrompt || `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${sampleRarity} trading card high rarity frame game asset`;
+          sharedDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+        } else if (randomDropUploadUrl) {
+          sharedDropUrl = randomDropUploadUrl;
+        }
       }
       for (let i = 0; i < count; i++) {
         promises.push((async () => {
@@ -1060,10 +1089,19 @@ const campaignPayload: any = {
           let finalDropUrl = sharedDropUrl;
 
           if (!isMassiveSpawn) {
-            const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
-            const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
-            finalBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
-            finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+            if (randomBossImageMode === 'ai') {
+              const generatedBossPrompt = randomBossAiPrompt || `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
+              finalBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
+            } else if (randomBossUploadUrl) {
+              finalBossUrl = randomBossUploadUrl;
+            }
+
+            if (randomDropImageMode === 'ai') {
+              const generatedDropPrompt = randomDropAiPrompt || `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
+              finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+            } else if (randomDropUploadUrl) {
+              finalDropUrl = randomDropUploadUrl;
+            }
           }
 
 const campaignPayload: any = {
@@ -2080,6 +2118,43 @@ const campaignPayload: any = {
                     </View>
                   </View>
                 )}
+
+                <View style={{marginTop: 16, padding: 14, borderRadius: 16, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1'}}>
+                  <Text style={[styles.cardTitle, {fontSize: 16, marginBottom: 10}]}>画像デザインの選択</Text>
+                  <Text style={styles.label}>ボス画像</Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity style={[styles.radioBtn, randomBossImageMode === 'upload' && styles.activeRadio]} onPress={() => setRandomBossImageMode('upload')}>
+                      <Text style={[styles.radioText, randomBossImageMode === 'upload' && styles.activeRadioText]}>手動アップロード</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.radioBtn, randomBossImageMode === 'ai' && styles.activeRadio]} onPress={() => setRandomBossImageMode('ai')}>
+                      <Text style={[styles.radioText, randomBossImageMode === 'ai' && styles.activeRadioText]}>AI生成</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {randomBossImageMode === 'upload' ? (
+                    <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setRandomBossUploadUrl)}>
+                      {randomBossUploadUrl ? <Image source={{uri: randomBossUploadUrl}} style={styles.previewImg} /> : <ImageIcon color="#94A3B8" size={32} />}
+                    </TouchableOpacity>
+                  ) : (
+                    <TextInput style={[styles.input, {height: 80}]} value={randomBossAiPrompt} onChangeText={setRandomBossAiPrompt} placeholder="AIプロンプトを入力 (例: 巨大な魔獣)" multiline />
+                  )}
+
+                  <Text style={[styles.label, {marginTop: 16}]}>ドロップカード画像</Text>
+                  <View style={styles.radioGroup}>
+                    <TouchableOpacity style={[styles.radioBtn, randomDropImageMode === 'upload' && styles.activeRadio]} onPress={() => setRandomDropImageMode('upload')}>
+                      <Text style={[styles.radioText, randomDropImageMode === 'upload' && styles.activeRadioText]}>手動アップロード</Text>
+                    </TouchableOpacity>
+                    <TouchableOpacity style={[styles.radioBtn, randomDropImageMode === 'ai' && styles.activeRadio]} onPress={() => setRandomDropImageMode('ai')}>
+                      <Text style={[styles.radioText, randomDropImageMode === 'ai' && styles.activeRadioText]}>AI生成</Text>
+                    </TouchableOpacity>
+                  </View>
+                  {randomDropImageMode === 'upload' ? (
+                    <TouchableOpacity style={styles.imagePicker} onPress={() => pickImage(setRandomDropUploadUrl)}>
+                      {randomDropUploadUrl ? <Image source={{uri: randomDropUploadUrl}} style={styles.previewImg} /> : <ImageIcon color="#94A3B8" size={32} />}
+                    </TouchableOpacity>
+                  ) : (
+                    <TextInput style={[styles.input, {height: 80}]} value={randomDropAiPrompt} onChangeText={setRandomDropAiPrompt} placeholder="AIプロンプトを入力 (例: 光るクリスタル装飾)" multiline />
+                  )}
+                </View>
 
                 <TouchableOpacity style={[styles.primaryBtn, {backgroundColor: isMassiveSpawn ? '#DC2626' : '#8B5CF6', marginTop: 16}]} onPress={handleShowMassiveBossPreview} disabled={loading}>
                   {loading ? <ActivityIndicator color="#FFF" /> : <Text style={styles.primaryBtnText}>{isMassiveSpawn ? `生成プレビュー確認後、${massiveSpawnCount}体をマップへ大量投下` : '生成プレビュー確認後、1体をマップへ降臨'}</Text>}
