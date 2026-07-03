@@ -622,32 +622,18 @@ export default function AdminDashboard() {
   // fetch API を使用して明示的にリクエストを行うよう書き換えています。
   const safeGenerateAiImage = async (prompt: string, fallbackText: string): Promise<string> => {
     try {
-      // 現在の認証セッションを取得
-      const { data: { session } } = await supabase.auth.getSession();
-      const token = session?.access_token || '';
-
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://fswvcoxoonvdxfemtqlc.supabase.co'}/functions/v1/forge-card`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': `Bearer ${token}`
-        },
-        body: JSON.stringify({ prompt })
-      });
-
-      if (!response.ok) {
-        throw new Error(`Edge Function error! status: ${response.status}`);
+      const response = await supabase.functions.invoke('forge-card', { body: { prompt } });
+      if (response.error) {
+        throw response.error;
       }
-
-      const data = await response.json();
+      const data = response.data as any;
       if (data?.imageUrl) return data.imageUrl;
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}`;
-    } catch (e) {
+    } catch (e: any) {
       console.log('AI生成エラー(CORS等のためスキップ):', e);
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}+Error`;
     }
   };
-
   const handleGenerateArAssetAi = async (assetType: 'base' | 'win' | 'boss') => {
     const prompt = assetType === 'win' ? arWinAssetAiPrompt : assetType === 'boss' ? arBossAiPrompt : arAssetAiPrompt;
     if (!prompt) return Alert.alert('エラー', 'プロンプトを入力してください');
