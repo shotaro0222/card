@@ -624,7 +624,7 @@ export default function AdminDashboard() {
       const { data: { session } } = await supabase.auth.getSession();
       const token = session?.access_token || '';
 
-      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://fswvcoxoonvdxfemtqlc.supabase.co'}/functions/v1/forge-card, {
+      const response = await fetch(`${process.env.EXPO_PUBLIC_SUPABASE_URL || 'https://fswvcoxoonvdxfemtqlc.supabase.co'}/functions/v1/forge-card`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1238,7 +1238,7 @@ export default function AdminDashboard() {
       }
 
       Alert.alert('成功', `属性「${newElement}」の相性データを保存・更新しました！`);
-      setNewElement(''); setStrongAgainstInput(''); setWeakAgainstInput('');
+      newElement(''); setStrongAgainstInput(''); setWeakAgainstInput('');
     } catch (error: any) {
       Alert.alert('保存エラー', error.message);
     } finally {

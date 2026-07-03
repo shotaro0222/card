@@ -1238,7 +1238,7 @@ export default function AdminDashboard() {
       }
 
       Alert.alert('成功', `属性「${newElement}」の相性データを保存・更新しました！`);
-      setNewElement(''); setStrongAgainstInput(''); setWeakAgainstInput('');
+      newElement(''); setStrongAgainstInput(''); setWeakAgainstInput('');
     } catch (error: any) {
       Alert.alert('保存エラー', error.message);
     } finally {
