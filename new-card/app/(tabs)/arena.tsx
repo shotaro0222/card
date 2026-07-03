@@ -3,7 +3,6 @@ import { View, Text, StyleSheet, TouchableOpacity, FlatList, SafeAreaView, Activ
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 
-// 💡【爆速処理：属性相性定義テーブル】
 const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = {
   '火': { strong: ['木', 'サイバー', 'プラスチック'], weak: ['水', '黄金', '虚無'] },
   '水': { strong: ['火', '黄金', '資本'], weak: ['雷', 'プラスチック', '大気汚染'] },
@@ -15,16 +14,15 @@ const ELEMENT_RELATIONS: Record<string, { strong: string[], weak: string[] }> = 
   '虚無': { strong: ['火', '雷', '資本'], weak: ['光', '量子', '時間'] },
 };
 
-// 💡【爆速処理：相性倍率を計算する関数】
 function getDamageMultiplier(attackerEl: string, defenderEl: string): { multiplier: number, label: string } {
   const relation = ELEMENT_RELATIONS[attackerEl];
-  if (!relation) return { multiplier: 1.0, label: '' }; 
+  if (!relation) return { multiplier: 1.0, label: '' };
   
   if (relation.strong.includes(defenderEl)) {
-    return { multiplier: 1.5, label: '💥【有利属性】' }; 
+    return { multiplier: 1.5, label: '💥【有利属性】' };
   }
   if (relation.weak.includes(defenderEl)) {
-    return { multiplier: 0.5, label: '🛡️【不利属性】' }; 
+    return { multiplier: 0.5, label: '🛡️【不利属性】' };
   }
   return { multiplier: 1.0, label: '' };
 }
@@ -52,14 +50,12 @@ const summarizeDeck = (cards: any[], playerName: string) => {
 
 export default function ArenaScreen() {
   const [loading, setLoading] = useState(true);
-  const [activeTab, setActiveTab] = useState('opponents'); // opponents, defense_logs
+  const [activeTab, setActiveTab] = useState('opponents');
   const [userId, setUserId] = useState<string | null>(null);
   const [autoSearching, setAutoSearching] = useState(false);
 
   const [opponents, setOpponents] = useState<any[]>([]);
   const [defenseLogs, setDefenseLogs] = useState<any[]>([]);
-  
-  // バトル結果表示用モーダル
   const [battleResultVisible, setBattleResultVisible] = useState(false);
   const [currentBattleLog, setCurrentBattleLog] = useState<string[]>([]);
   const [battleResultTitle, setBattleResultTitle] = useState('');
@@ -147,7 +143,6 @@ export default function ArenaScreen() {
       while (myHp > 0 && opHp > 0 && turn <= 10) {
         logs.push(`\n--- 第${turn}ターン ---`);
         
-        // あなたの攻撃
         const myBaseDmg = Math.floor(myAtk * (0.8 + Math.random() * 0.4));
         const myFinalDmg = Math.floor(myBaseDmg * myAttackRes.multiplier);
         opHp = Math.max(0, opHp - myFinalDmg);
@@ -163,7 +158,6 @@ export default function ArenaScreen() {
           break;
         }
 
-        // 相手の反撃
         const opBaseDmg = Math.floor(opAtk * (0.8 + Math.random() * 0.4));
         const opFinalDmg = Math.floor(opBaseDmg * opAttackRes.multiplier);
         myHp = Math.max(0, myHp - opFinalDmg);
@@ -313,7 +307,6 @@ export default function ArenaScreen() {
         </View>
       )}
 
-      {/* バトル結果・ログ表示モーダル */}
       <Modal visible={battleResultVisible} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
