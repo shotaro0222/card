@@ -984,9 +984,13 @@ export default function AdminDashboard() {
       }]);
       if (fixError) throw new Error(`ドロップカード登録エラー: ${fixError.message}`);
 
+      // 🌟 【修正箇所】bossesテーブルにlat, lng, radius_metersを含め、エラーをthrowさせる
       const { error: bossError } = await supabase.from('bosses').insert([{
         name: bName, hp: parseInt(bHp) || 1500, atk: parseInt(bAtk) || 100, def: parseInt(bDef) || 50,
-        element: bElement, image_url: finalBossImageUrl, trigger_campaign_id: campData.id
+        element: bElement, image_url: finalBossImageUrl, trigger_campaign_id: campData.id,
+        lat: parseFloat(bLat) || 35.6983,
+        lng: parseFloat(bLng) || 139.4130,
+        radius_meters: parseInt(bRadius) || 1000
       }]);
       if (bossError) throw new Error(`ボス登録エラー: ${bossError.message}`);
 
@@ -1075,15 +1079,22 @@ export default function AdminDashboard() {
           const { data: campData, error: campError } = await supabase.from('campaigns').insert([campaignPayload]).select().single();
           if (campError) throw new Error(`キャンペーン作成失敗: ${campError.message || JSON.stringify(campError)}`);
 
-          await supabase.from('fixed_cards').insert([{
+          // 🌟 【修正箇所】エラーチェックを追加
+          const { error: dropError } = await supabase.from('fixed_cards').insert([{
             card_name: `【戦果】${randomName}の結晶核`, trigger_type: 'boss_drop', image_url: finalDropUrl, sponsor_id: campData.id,
             stats: { element: randomElement, rarity: randomRarity, hp: 100, atk: 60, def: 40, spd: 80 }
           }]);
+          if (dropError) throw new Error(`ドロップカード生成失敗: ${dropError.message}`);
 
-          await supabase.from('bosses').insert([{
+          // 🌟 【修正箇所】bossesテーブルにlat, lng, radius_metersを含め、エラーをthrowさせる
+          const { error: bossError } = await supabase.from('bosses').insert([{
             name: randomName, hp: Math.floor(Math.random() * 2000) + 1000, atk: Math.floor(Math.random() * 150) + 50, def: 50,
-            element: randomElement, image_url: finalBossUrl, trigger_campaign_id: campData.id
+            element: randomElement, image_url: finalBossUrl, trigger_campaign_id: campData.id,
+            lat: finalLat,
+            lng: finalLng,
+            radius_meters: 1500
           }]);
+          if (bossError) throw new Error(`ボス配置失敗: ${bossError.message}`);
         })());
       }
 
@@ -1374,7 +1385,8 @@ export default function AdminDashboard() {
     if (!ruleName || !ruleKeyword) return Alert.alert('エラー', 'ルール名と対象キーワードを入力してください');
     setLoading(true);
     try {
-      await supabase.from('territory_rules').insert([{
+      // 🌟 【修正箇所】エラーチェックを追加
+      const { error: ruleError } = await supabase.from('territory_rules').insert([{
         rule_name: ruleName,
         target_keyword: ruleKeyword,
         require_fixed_card: ruleRequireFixed,
@@ -1386,6 +1398,8 @@ export default function AdminDashboard() {
         description: ruleEventDesc || null,
         is_active: true
       }]);
+      if (ruleError) throw new Error(`ルール登録エラー: ${ruleError.message}`);
+
       Alert.alert('成功', 'イベント/特殊ルールを追加しました');
       setRuleName(''); setRuleKeyword('');
       setRuleEventStart(''); setRuleEventEnd('');
