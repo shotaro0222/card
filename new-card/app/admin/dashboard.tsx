@@ -619,10 +619,10 @@ export default function AdminDashboard() {
 
   // 🌟【修正点】
   // invoke が内部で CORS エラーを引き起こすケースを回避するため、
-  // fetch API を使用して明示的にリクエストを行うよう書き換えています。
+  // Supabase Edge Function を直接 invoke します。
   const safeGenerateAiImage = async (prompt: string, fallbackText: string): Promise<string> => {
     try {
-      const response = await supabase.functions.invoke('forge-card', { body: { prompt } });
+      const response = await supabase.functions.invoke('super-task', { body: { prompt } });
       if (response.error) {
         throw response.error;
       }
