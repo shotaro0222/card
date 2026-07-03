@@ -674,7 +674,7 @@ export default function AdminDashboard() {
       }
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}`;
     } catch (e: any) {
-      console.log('AI生成エラー(CORS等のためスキップ):', e);
+      console.log('AI生成エラー(super-task応答):', e);
       if (strict) {
         throw new Error(e?.message || 'AI画像生成に失敗しました');
       }
