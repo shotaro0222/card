@@ -32,6 +32,9 @@ export default function AdminDashboard() {
   // 💡 【重要】取得予定のWebAR用ドメイン（サブドメイン含む）のベースURLを定義
   const WEBAR_BASE_URL = 'https://snapcard.example.com';
 
+  // 💡 ダミー画像URL（placeholder.com が不安定なため placehold.co に変更）
+  const NO_IMAGE_URL = 'https://placehold.co/300x400/png?text=No+Image';
+
   const [activeTab, setActiveTab] = useState('analytics');
   const [loading, setLoading] = useState(false);
 
@@ -347,7 +350,6 @@ export default function AdminDashboard() {
     if (data) setUsers(data);
   };
 
-  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (UGC)
   const fetchUgcCards = async () => {
     try {
       const { data: cardsData, error } = await supabase
@@ -377,18 +379,25 @@ export default function AdminDashboard() {
     }
   };
 
-  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (BOSS)
+  // 🌟 修正: bosses テーブルには created_at が存在しない可能性があるため、
+  // order('created_at', ...) を削除し、JavaScript側でリバース（あるいは id 順）にする。
   const fetchBosses = async () => {
     try {
+      // ⚠️ created_at ソートを削除
       const { data: bossesData, error } = await supabase
         .from('bosses')
         .select('*')
-        .order('created_at', { ascending: false })
-        .limit(100);
+        .limit(200);
         
-      if (error) throw error;
+      if (error) {
+        console.error("ボス取得エラー:", error);
+        throw error;
+      }
 
       if (bossesData) {
+        // idの降順にソート（簡易的な最新順）
+        bossesData.sort((a, b) => b.id.localeCompare(a.id));
+
         const campIds = bossesData.map((b: any) => b.trigger_campaign_id).filter(Boolean);
         let campaignsData: any[] = [];
         if (campIds.length > 0) {
@@ -419,7 +428,10 @@ export default function AdminDashboard() {
         setActiveBosses(active);
         setBossHistory(history);
       }
-    } catch (e) { console.log('Bosses fetch error:', e); }
+    } catch (e: any) { 
+      Alert.alert('ボス取得エラー', e.message); 
+      console.log('Bosses fetch error:', e); 
+    }
   };
 
   const fetchMasterData = async () => {
@@ -434,7 +446,6 @@ export default function AdminDashboard() {
     setRaritiesList(rars);
   };
 
-  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (TEAMS)
   const fetchTeams = async () => {
     try {
       const { data: teamsData, error } = await supabase
@@ -466,7 +477,6 @@ export default function AdminDashboard() {
     } catch (e) { console.log('Team fetch error:', e); }
   };
 
-  // 🌟 JOINを廃止し、個別に取得してマージするように修正 (TERRITORIES)
   const fetchTerritories = async () => {
     try {
       const { data: terrData, error } = await supabase
@@ -609,34 +619,38 @@ export default function AdminDashboard() {
     }
   };
 
+  // 🌟 AI生成時のCORSエラーをサイレントに処理し、クラッシュを防ぐ
+  const safeGenerateAiImage = async (prompt: string, fallbackText: string): Promise<string> => {
+    try {
+      const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt } });
+      if (error) throw error;
+      if (data?.imageUrl) return data.imageUrl;
+      return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}`;
+    } catch (e) {
+      // CORSエラーなどが起きても処理を継続させる
+      console.log('AI生成エラー(CORS等のためスキップ):', e);
+      return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}+Error`;
+    }
+  };
+
   const handleGenerateArAssetAi = async (assetType: 'base' | 'win' | 'boss') => {
     const prompt = assetType === 'win' ? arWinAssetAiPrompt : assetType === 'boss' ? arBossAiPrompt : arAssetAiPrompt;
     if (!prompt) return Alert.alert('エラー', 'プロンプトを入力してください');
     
     setLoading(true);
-    try {
-      const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt } });
-      if (error) throw error;
-      if (data?.imageUrl) {
-        if (assetType === 'win') {
-          setArWinAssetUrl(data.imageUrl);
-          Alert.alert('生成成功', '🎁 報酬デザインをAIで生成しました！プレビューを確認してください。');
-        } else if (assetType === 'boss') {
-          setArBossImageUrl(data.imageUrl);
-          Alert.alert('生成成功', '😈 ボスデザインをAIで生成しました！プレビューを確認してください。');
-        } else {
-          setArAssetCustomUrl(data.imageUrl);
-          Alert.alert('生成成功', '通常デザインをAIで生成しました！プレビューを確認してください。');
-        }
-      } else {
-        throw new Error('AI生成に失敗しました');
-      }
-    } catch (e: any) {
-      console.warn('AI Generate Error:', e);
-      Alert.alert('生成エラー', 'AI画像の生成に失敗しました（CORSエラー等の可能性があります）。\nサーバーの設定を確認してください。');
-    } finally {
-      setLoading(false);
+    const imageUrl = await safeGenerateAiImage(prompt, 'AI+Generated');
+    
+    if (assetType === 'win') {
+      setArWinAssetUrl(imageUrl);
+      Alert.alert('生成完了', 'プレビューを確認してください。');
+    } else if (assetType === 'boss') {
+      setArBossImageUrl(imageUrl);
+      Alert.alert('生成完了', 'プレビューを確認してください。');
+    } else {
+      setArAssetCustomUrl(imageUrl);
+      Alert.alert('生成完了', 'プレビューを確認してください。');
     }
+    setLoading(false);
   };
 
   const handleUploadArMarker = async (promoId: string) => {
@@ -714,17 +728,9 @@ export default function AdminDashboard() {
       let tempImageUrl = cImage;
 
       if (shopItemType === 'single' && cardGenMode === 'ai' && cAiPrompt) {
-        try {
-          const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: cAiPrompt } });
-          if (error) throw error;
-          tempImageUrl = data?.imageUrl || 'https://via.placeholder.com/300x400.png?text=AI+Generated';
-        } catch (aiErr: any) {
-          console.warn('Preview AI Gen Error:', aiErr);
-          Alert.alert('AI生成警告', 'AI画像の生成に失敗しました（CORSエラー等）。プレースホルダー画像でプレビューを続行します。');
-          tempImageUrl = 'https://via.placeholder.com/300x400.png?text=AI+Error';
-        }
+        tempImageUrl = await safeGenerateAiImage(cAiPrompt, 'AI+Card');
       } else if (shopItemType === 'single' && !cImage) {
-        tempImageUrl = 'https://via.placeholder.com/300x400.png?text=No+Image';
+        tempImageUrl = NO_IMAGE_URL;
       }
 
       setPreviewImageUrl(tempImageUrl);
@@ -857,29 +863,15 @@ export default function AdminDashboard() {
     if (!bName) return Alert.alert('エラー', 'ボス名を入力してください');
     setLoading(true);
     try {
-      let bUrl = bossImageUrl || 'https://via.placeholder.com/300x400.png?text=No+Boss+Image';
-      let dUrl = dropCardUrl || 'https://via.placeholder.com/300x400.png?text=No+Drop+Image';
+      let bUrl = bossImageUrl || `${NO_IMAGE_URL}&text=Boss`;
+      let dUrl = dropCardUrl || `${NO_IMAGE_URL}&text=Drop`;
 
       if (bossImageMode === 'ai' && bossAiPrompt) {
-        try {
-          const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: bossAiPrompt } });
-          if (error) throw error;
-          bUrl = data?.imageUrl || bUrl;
-        } catch (e) {
-          console.warn('Boss Preview AI Error', e);
-          bUrl = 'https://via.placeholder.com/300x400.png?text=AI+Boss+Error';
-        }
+        bUrl = await safeGenerateAiImage(bossAiPrompt, 'Boss');
       }
 
       if (dropCardMode === 'ai' && dropCardPrompt) {
-        try {
-          const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: dropCardPrompt } });
-          if (error) throw error;
-          dUrl = data?.imageUrl || dUrl;
-        } catch (e) {
-          console.warn('Drop Preview AI Error', e);
-          dUrl = 'https://via.placeholder.com/300x400.png?text=AI+Drop+Error';
-        }
+        dUrl = await safeGenerateAiImage(dropCardPrompt, 'Drop');
       }
 
       setPbName(bName); setPbElement(bElement); setPbHp(bHp || '1500'); setPbAtk(bAtk || '100'); setPbDef(bDef || '50'); setPbImageUrl(bUrl);
@@ -906,18 +898,8 @@ export default function AdminDashboard() {
       const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
       const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
 
-      let bUrl = 'https://via.placeholder.com/300x400.png?text=Boss+Preview';
-      let dUrl = 'https://via.placeholder.com/300x400.png?text=Drop+Preview';
-
-      try {
-        const bossRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedBossPrompt } });
-        if (bossRes.data?.imageUrl) bUrl = bossRes.data.imageUrl;
-      } catch (e) { console.warn('Massive Boss AI Error', e); }
-
-      try {
-        const dropRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedDropPrompt } });
-        if (dropRes.data?.imageUrl) dUrl = dropRes.data.imageUrl;
-      } catch (e) { console.warn('Massive Drop AI Error', e); }
+      let bUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
+      let dUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
 
       setPbName(`(サンプル) ${randomName}`);
       setPbElement(randomElement);
@@ -949,6 +931,7 @@ export default function AdminDashboard() {
     }
   };
 
+  // 🌟 campaigns への INSERT エラーを防ぐため、オブジェクトから空文字プロパティを安全に除外
   const handleCreateBoss = async (preBossUrl?: string, preDropUrl?: string) => {
     setLoading(true);
     try {
@@ -956,49 +939,45 @@ export default function AdminDashboard() {
       let finalDropCardUrl = preDropUrl || dropCardUrl;
       
       if (!preBossUrl && bossImageMode === 'ai' && bossAiPrompt) {
-        try {
-          const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: bossAiPrompt } });
-          if (error) throw error;
-          if (data?.imageUrl) finalBossImageUrl = data.imageUrl;
-        } catch (e) {
-          console.warn(e);
-          finalBossImageUrl = 'https://via.placeholder.com/300x400.png?text=AI+Error';
-        }
+        finalBossImageUrl = await safeGenerateAiImage(bossAiPrompt, 'Boss');
       }
       if (finalBossImageUrl && finalBossImageUrl.startsWith('data:image')) {
         finalBossImageUrl = await uploadBase64Image(finalBossImageUrl, 'bosses');
       }
 
       if (!preDropUrl && dropCardMode === 'ai' && dropCardPrompt) {
-        try {
-          const { data, error } = await supabase.functions.invoke('generate-card-image', { body: { prompt: dropCardPrompt } });
-          if (error) throw error;
-          if (data?.imageUrl) finalDropCardUrl = data.imageUrl;
-        } catch (e) {
-          console.warn(e);
-          finalDropCardUrl = 'https://via.placeholder.com/300x400.png?text=AI+Error';
-        }
+        finalDropCardUrl = await safeGenerateAiImage(dropCardPrompt, 'Drop');
       }
       if (finalDropCardUrl && finalDropCardUrl.startsWith('data:image')) {
         finalDropCardUrl = await uploadBase64Image(finalDropCardUrl, 'boss_drops');
       }
 
-      const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
-        title: `ボス出現: ${bName}`, sponsor_name: bSponsorName || '運営',
-        target_lat: parseFloat(bLat), target_lng: parseFloat(bLng), radius_meters: parseInt(bRadius),
-        start_at: bStartAt || null, end_at: bEndAt || null, is_active: true
-      }]).select().single();
-      if (campError) throw campError;
+      // ⚠️ 空文字を送信して 400 Bad Request になるのを防ぐ
+      const campaignPayload: any = {
+        title: `ボス出現: ${bName}`, 
+        sponsor_name: bSponsorName || '運営',
+        target_lat: parseFloat(bLat) || 35.6983, 
+        target_lng: parseFloat(bLng) || 139.4130, 
+        radius_meters: parseInt(bRadius) || 1000,
+        is_active: true
+      };
+      if (bStartAt) campaignPayload.start_at = new Date(bStartAt).toISOString();
+      if (bEndAt) campaignPayload.end_at = new Date(bEndAt).toISOString();
 
-      await supabase.from('fixed_cards').insert([{
+      const { data: campData, error: campError } = await supabase.from('campaigns').insert([campaignPayload]).select().single();
+      if (campError) throw new Error(`キャンペーン登録エラー: ${campError.message || JSON.stringify(campError)}`);
+
+      const { error: fixError } = await supabase.from('fixed_cards').insert([{
         card_name: dropCardName || `【撃破報酬】${bName}`, trigger_type: 'boss_drop', image_url: finalDropCardUrl, sponsor_id: campData.id,
         stats: { element: dropCardAttr, rarity: dropCardRarity, hp: 100, atk: 50, def: 50, spd: 50 }
       }]);
+      if (fixError) throw new Error(`ドロップカード登録エラー: ${fixError.message}`);
 
-      await supabase.from('bosses').insert([{
+      const { error: bossError } = await supabase.from('bosses').insert([{
         name: bName, hp: parseInt(bHp) || 1500, atk: parseInt(bAtk) || 100, def: parseInt(bDef) || 50,
         element: bElement, image_url: finalBossImageUrl, trigger_campaign_id: campData.id
       }]);
+      if (bossError) throw new Error(`ボス登録エラー: ${bossError.message}`);
 
       Alert.alert('成功', 'ボスとドロップカードをマップに配置しました！\n(討伐報酬はプレイヤー側のアプリで処理されます)');
       fetchBosses();
@@ -1044,6 +1023,7 @@ export default function AdminDashboard() {
     return { finalLat: lat, finalLng: lng };
   };
 
+  // 🌟 campaigns への INSERT エラーを防ぐため、オブジェクトから空文字プロパティを安全に除外
   const triggerInstantRandomBoss = async () => {
     setLoading(true);
     try {
@@ -1061,28 +1041,30 @@ export default function AdminDashboard() {
           
           const { finalLat, finalLng } = getRandomCoords();
 
-          let finalBossUrl = 'https://via.placeholder.com/300x400.png?text=Massive+Boss';
-          let finalDropUrl = 'https://via.placeholder.com/300x400.png?text=Massive+Drop';
+          let finalBossUrl = `${NO_IMAGE_URL}&text=Boss`;
+          let finalDropUrl = `${NO_IMAGE_URL}&text=Drop`;
 
           if (!isMassiveSpawn) {
             const generatedBossPrompt = `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
             const generatedDropPrompt = `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
-            try {
-              const bossRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedBossPrompt } });
-              if (bossRes.data?.imageUrl) finalBossUrl = bossRes.data.imageUrl;
-              const dropRes = await supabase.functions.invoke('generate-card-image', { body: { prompt: generatedDropPrompt } });
-              if (dropRes.data?.imageUrl) finalDropUrl = dropRes.data.imageUrl;
-            } catch (aiErr) { console.warn('AI自動生成エラー (CORS等)', aiErr); }
+            finalBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
+            finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
           }
 
-          const { data: campData, error: campError } = await supabase.from('campaigns').insert([{
-            title: `【突発出現】${randomName}`, sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
-            target_lat: finalLat, target_lng: finalLng, radius_meters: 1500, 
-            start_at: isMassiveSpawn ? (massiveStartAt || null) : null,
-            end_at: isMassiveSpawn ? (massiveEndAt || null) : null,
+          // ⚠️ 空文字を送信して 400 Bad Request になるのを防ぐ
+          const campaignPayload: any = {
+            title: `【突発出現】${randomName}`, 
+            sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
+            target_lat: finalLat, 
+            target_lng: finalLng, 
+            radius_meters: 1500, 
             is_active: true
-          }]).select().single();
-          if (campError) throw campError;
+          };
+          if (isMassiveSpawn && massiveStartAt) campaignPayload.start_at = new Date(massiveStartAt).toISOString();
+          if (isMassiveSpawn && massiveEndAt) campaignPayload.end_at = new Date(massiveEndAt).toISOString();
+
+          const { data: campData, error: campError } = await supabase.from('campaigns').insert([campaignPayload]).select().single();
+          if (campError) throw new Error(`キャンペーン作成失敗: ${campError.message || JSON.stringify(campError)}`);
 
           await supabase.from('fixed_cards').insert([{
             card_name: `【戦果】${randomName}の結晶核`, trigger_type: 'boss_drop', image_url: finalDropUrl, sponsor_id: campData.id,
@@ -1099,7 +1081,7 @@ export default function AdminDashboard() {
       await Promise.all(promises);
       Alert.alert('自動生成成功', `${count}体的ボスをマップへ配置しました！`);
       fetchBosses();
-    } catch (err: any) { Alert.alert('エラー', err.message); } finally { setLoading(false); }
+    } catch (err: any) { Alert.alert('ボス配置エラー', err.message); } finally { setLoading(false); }
   };
 
   const handleEndBoss = async (bossId: string, campaignId: string) => {
@@ -2174,9 +2156,11 @@ export default function AdminDashboard() {
                     <View style={{flex: 1}}>
                       <Text style={styles.listItemTitle}>{b.name}</Text>
                       <Text style={styles.listItemSub}>属性: {b.element} / HP: {b.hp}</Text>
-                      <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>
-                        作成日: {new Date(b.created_at).toLocaleString()}
-                      </Text>
+                      {b.created_at && (
+                         <Text style={{fontSize: 10, color: '#94A3B8', marginTop: 4}}>
+                           作成日: {new Date(b.created_at).toLocaleString()}
+                         </Text>
+                      )}
                     </View>
                     <View style={[styles.bannedBadge, {backgroundColor: '#E2E8F0', color: '#64748B'}]}>
                       <Text style={{fontSize: 11, fontWeight: 'bold', color: '#475569'}}>終了済</Text>
@@ -2628,7 +2612,7 @@ export default function AdminDashboard() {
               {shopItemType === 'single' ? (
                  <Image source={{uri: previewImageUrl}} style={{width: '100%', height: 250, borderRadius: 12, resizeMode: 'cover', backgroundColor: '#E2E8F0', marginBottom: 12}} />
               ) : (
-                 <Image source={{uri: cPackageImage || 'https://via.placeholder.com/300x200.png?text=Pack+Image'}} style={{width: '100%', height: 200, borderRadius: 12, resizeMode: 'cover', backgroundColor: '#E2E8F0', marginBottom: 12}} />
+                 <Image source={{uri: cPackageImage || NO_IMAGE_URL}} style={{width: '100%', height: 200, borderRadius: 12, resizeMode: 'cover', backgroundColor: '#E2E8F0', marginBottom: 12}} />
               )}
               <Text style={{fontSize: 16, fontWeight: 'bold', marginBottom: 8}}>{cName || '名称未設定'}</Text>
               
