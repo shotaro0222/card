@@ -418,6 +418,7 @@ export default function AdminDashboard() {
       const { data: bossesData, error } = await supabase
         .from('bosses')
         .select('*')
+        .order('created_at', { ascending: false })
         .limit(200);
         
       if (error) {
@@ -426,7 +427,6 @@ export default function AdminDashboard() {
       }
 
       if (bossesData) {
-        bossesData.sort((a, b) => b.id.localeCompare(a.id));
 
         const campIds = bossesData.map((b: any) => b.trigger_campaign_id).filter(Boolean);
         let campaignsData: any[] = [];
@@ -457,6 +457,9 @@ export default function AdminDashboard() {
         
         setActiveBosses(active);
         setBossHistory(history);
+      } else {
+        setActiveBosses([]);
+        setBossHistory([]);
       }
     } catch (e: any) { 
       Alert.alert('ボス取得エラー', e.message); 
@@ -652,17 +655,29 @@ export default function AdminDashboard() {
   // 🌟【修正点】
   // invoke が内部で CORS エラーを引き起こすケースを回避するため、
   // Supabase Edge Function を直接 invoke します。
-  const safeGenerateAiImage = async (prompt: string, fallbackText: string): Promise<string> => {
+  const safeGenerateAiImage = async (prompt: string, fallbackText: string, strict: boolean = false): Promise<string> => {
     try {
       const response = await supabase.functions.invoke('super-task', { body: { prompt } });
       if (response.error) {
         throw response.error;
       }
       const data = response.data as any;
-      if (data?.imageUrl) return data.imageUrl;
+      const imageUrl = data?.imageUrl as string | undefined;
+      if (imageUrl) {
+        if (strict && decodeURIComponent(imageUrl).includes('AI+Error')) {
+          throw new Error('AI画像生成に失敗しました。super-task が AI+Error を返しました。');
+        }
+        return imageUrl;
+      }
+      if (strict) {
+        throw new Error('AI画像生成に失敗しました。imageUrl が返っていません。');
+      }
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}`;
     } catch (e: any) {
       console.log('AI生成エラー(CORS等のためスキップ):', e);
+      if (strict) {
+        throw new Error(e?.message || 'AI画像生成に失敗しました');
+      }
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}+Error`;
     }
   };
@@ -900,11 +915,11 @@ export default function AdminDashboard() {
       let dUrl = dropCardUrl || `${NO_IMAGE_URL}&text=Drop`;
 
       if (bossImageMode === 'ai' && bossAiPrompt) {
-        bUrl = await safeGenerateAiImage(bossAiPrompt, 'Boss');
+        bUrl = await safeGenerateAiImage(bossAiPrompt, 'Boss', true);
       }
 
       if (dropCardMode === 'ai' && dropCardPrompt) {
-        dUrl = await safeGenerateAiImage(dropCardPrompt, 'Drop');
+        dUrl = await safeGenerateAiImage(dropCardPrompt, 'Drop', true);
       }
 
       setPbName(bName); setPbElement(bElement); setPbHp(bHp || '1500'); setPbAtk(bAtk || '100'); setPbDef(bDef || '50'); setPbImageUrl(bUrl);
@@ -939,14 +954,14 @@ export default function AdminDashboard() {
 
       if (randomBossImageMode === 'ai') {
         const prompt = randomBossAiPrompt || generatedBossPrompt;
-        bUrl = await safeGenerateAiImage(prompt, 'Massive+Boss');
+        bUrl = await safeGenerateAiImage(prompt, 'Massive+Boss', true);
       } else if (randomBossUploadUrl) {
         bUrl = randomBossUploadUrl;
       }
 
       if (randomDropImageMode === 'ai') {
         const prompt = randomDropAiPrompt || generatedDropPrompt;
-        dUrl = await safeGenerateAiImage(prompt, 'Massive+Drop');
+        dUrl = await safeGenerateAiImage(prompt, 'Massive+Drop', true);
       } else if (randomDropUploadUrl) {
         dUrl = randomDropUploadUrl;
       }
@@ -1006,14 +1021,14 @@ export default function AdminDashboard() {
       let finalDropCardUrl = preDropUrl || dropCardUrl;
       
       if (!preBossUrl && bossImageMode === 'ai' && bossAiPrompt) {
-        finalBossImageUrl = await safeGenerateAiImage(bossAiPrompt, 'Boss');
+        finalBossImageUrl = await safeGenerateAiImage(bossAiPrompt, 'Boss', true);
       }
       if (finalBossImageUrl && finalBossImageUrl.startsWith('data:image')) {
         finalBossImageUrl = await uploadBase64Image(finalBossImageUrl, 'bosses');
       }
 
       if (!preDropUrl && dropCardMode === 'ai' && dropCardPrompt) {
-        finalDropCardUrl = await safeGenerateAiImage(dropCardPrompt, 'Drop');
+        finalDropCardUrl = await safeGenerateAiImage(dropCardPrompt, 'Drop', true);
       }
       if (finalDropCardUrl && finalDropCardUrl.startsWith('data:image')) {
         finalDropCardUrl = await uploadBase64Image(finalDropCardUrl, 'boss_drops');
@@ -1120,7 +1135,7 @@ const campaignPayload: any = {
           const sampleName = hasPreviewData ? massivePreviewBossData!.name : (randomBossName.trim() || (prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)]));
           const sampleElement = hasPreviewData ? massivePreviewBossData!.element : (elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇');
           const generatedBossPrompt = randomBossAiPrompt || `A fantasy trading card game illustration of a giant monster creature, name is ${sampleName}, hyper detailed, masterwork elemental of ${sampleElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
-          sharedBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
+          sharedBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss', true);
         } else if (randomBossUploadUrl) {
           sharedBossUrl = randomBossUploadUrl;
         }
@@ -1128,7 +1143,7 @@ const campaignPayload: any = {
         if (randomDropImageMode === 'ai') {
           const sampleRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
           const generatedDropPrompt = randomDropAiPrompt || `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${sampleRarity} trading card high rarity frame game asset`;
-          sharedDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+          sharedDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop', true);
         } else if (randomDropUploadUrl) {
           sharedDropUrl = randomDropUploadUrl;
         }
@@ -1167,14 +1182,14 @@ const campaignPayload: any = {
           if (!isMassiveSpawn) {
             if (randomBossImageMode === 'ai') {
               const generatedBossPrompt = randomBossAiPrompt || `A fantasy trading card game illustration of a giant monster creature, name is ${bossName}, hyper detailed, masterwork elemental of ${bossElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
-              finalBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
+              finalBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss', true);
             } else if (randomBossUploadUrl) {
               finalBossUrl = randomBossUploadUrl;
             }
 
             if (randomDropImageMode === 'ai') {
               const generatedDropPrompt = randomDropAiPrompt || `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${dropRarity} trading card high rarity frame game asset`;
-              finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
+              finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop', true);
             } else if (randomDropUploadUrl) {
               finalDropUrl = randomDropUploadUrl;
             }
