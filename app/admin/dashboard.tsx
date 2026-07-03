@@ -124,6 +124,22 @@ export default function AdminDashboard() {
   const [randomDropImageMode, setRandomDropImageMode] = useState<'upload' | 'ai'>('ai');
   const [randomDropUploadUrl, setRandomDropUploadUrl] = useState('');
   const [randomDropAiPrompt, setRandomDropAiPrompt] = useState('');
+  const [randomBossName, setRandomBossName] = useState('');
+  const [randomDropName, setRandomDropName] = useState('');
+  const [massivePreviewBossData, setMassivePreviewBossData] = useState<{
+    name: string;
+    element: string;
+    hp: string;
+    atk: string;
+    def: string;
+    imageUrl: string;
+  } | null>(null);
+  const [massivePreviewDropData, setMassivePreviewDropData] = useState<{
+    name: string;
+    rarity: string;
+    attr: string;
+    imageUrl: string;
+  } | null>(null);
 
   // ==================== 5-新規. ランダムボス設定 & 大量発生 ====================
   const [randomBossEnabled, setRandomBossEnabled] = useState(false);
@@ -305,12 +321,21 @@ export default function AdminDashboard() {
     try {
       const { data } = await supabase.from('system_config').select('*').eq('id', 'random_boss_settings').maybeSingle();
       if (data && data.config_data) {
-        setRandomBossEnabled(data.config_data.enabled ?? false);
-        setRandomBossInterval(data.config_data.interval ?? '1h');
-        setSpawnType(data.config_data.spawn_type ?? 'radius');
-        setTargetMunicipality(data.config_data.municipality ?? '東京都');
-        if (data.config_data.base_lat) setBaseLat(data.config_data.base_lat.toString());
-        if (data.config_data.base_lng) setBaseLng(data.config_data.base_lng.toString());
+        const c = data.config_data;
+        setRandomBossEnabled(c.enabled ?? false);
+        setRandomBossInterval(c.interval ?? '1h');
+        setSpawnType(c.spawn_type ?? 'radius');
+        setTargetMunicipality(c.municipality ?? '東京都');
+        if (c.base_lat) setBaseLat(c.base_lat.toString());
+        if (c.base_lng) setBaseLng(c.base_lng.toString());
+        setRandomBossImageMode(c.boss_image_mode ?? 'ai');
+        setRandomDropImageMode(c.drop_image_mode ?? 'ai');
+        setRandomBossAiPrompt(c.boss_ai_prompt ?? '');
+        setRandomDropAiPrompt(c.drop_ai_prompt ?? '');
+        setRandomBossUploadUrl(c.boss_upload_url ?? '');
+        setRandomDropUploadUrl(c.drop_upload_url ?? '');
+        setRandomBossName(c.boss_name ?? '');
+        setRandomDropName(c.drop_name ?? '');
       }
     } catch (e) { console.log(e); }
   };
@@ -899,9 +924,13 @@ export default function AdminDashboard() {
     try {
       const prefix = ['次元の', '彷徨える', '極大の', 'アビス・', 'ヴォイド・', '災厄の', '覚醒せし'];
       const suffix = ['ゴーレム', 'ベヒモス', 'フェニックス', 'リヴァイアsan', 'ナイトメア', '機神龍', 'タイタン'];
-      const randomName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
+      const randomName = randomBossName.trim() || (prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)]);
       const randomElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
       const randomRarity = ['SR', 'SSR', 'UR'][Math.floor(Math.random() * 3)];
+      const previewBossHp = String(Math.floor(Math.random() * 2000) + 1000);
+      const previewBossAtk = String(Math.floor(Math.random() * 150) + 50);
+      const previewBossDef = '50';
+      const previewDropName = randomDropName.trim() || `【戦果】${randomName}の結晶核`;
 
       let bUrl = `${NO_IMAGE_URL}&text=Boss`;
       let dUrl = `${NO_IMAGE_URL}&text=Drop`;
@@ -922,15 +951,31 @@ export default function AdminDashboard() {
         dUrl = randomDropUploadUrl;
       }
 
-      setPbName(`(サンプル) ${randomName}`);
+      setPbName(randomName);
       setPbElement(randomElement);
-      setPbHp(String(Math.floor(Math.random() * 2000) + 1000));
-      setPbAtk(String(Math.floor(Math.random() * 150) + 50));
-      setPbDef('50');
+      setPbHp(previewBossHp);
+      setPbAtk(previewBossAtk);
+      setPbDef(previewBossDef);
       setPbImageUrl(bUrl);
       setMassiveBossPreviewImageUrl(bUrl);
 
-      setPdName(`(サンプル) 【戦果】${randomName}の結晶核`);
+      setMassivePreviewBossData({
+        name: randomName,
+        element: randomElement,
+        hp: previewBossHp,
+        atk: previewBossAtk,
+        def: previewBossDef,
+        imageUrl: bUrl,
+      });
+
+      setMassivePreviewDropData({
+        name: previewDropName,
+        rarity: randomRarity,
+        attr: randomElement,
+        imageUrl: dUrl,
+      });
+
+      setPdName(previewDropName);
       setPdRarity(randomRarity);
       setPdAttr(randomElement);
       setPdImageUrl(dUrl);
@@ -977,6 +1022,7 @@ export default function AdminDashboard() {
 const campaignPayload: any = {
         title: `ボス出現: ${bName}`, 
         sponsor_name: bSponsorName || '運営',
+  description: `${bName} のボス出現イベント`,
         target_lat: parseFloat(bLat) || 35.6983,
         target_lng: parseFloat(bLng) || 139.4130,
         radius_meters: parseInt(bRadius) || 1000,
@@ -1015,7 +1061,16 @@ const campaignPayload: any = {
       const config_data = {
         enabled: randomBossEnabled, interval: randomBossInterval,
         spawn_type: spawnType, municipality: targetMunicipality,
-        base_lat: parseFloat(baseLat) || 35.6983, base_lng: parseFloat(baseLng) || 139.4130
+        base_lat: parseFloat(baseLat) || 35.6983,
+        base_lng: parseFloat(baseLng) || 139.4130,
+        boss_image_mode: randomBossImageMode,
+        drop_image_mode: randomDropImageMode,
+        boss_ai_prompt: randomBossAiPrompt,
+        drop_ai_prompt: randomDropAiPrompt,
+        boss_upload_url: randomBossUploadUrl,
+        drop_upload_url: randomDropUploadUrl,
+        boss_name: randomBossName,
+        drop_name: randomDropName,
       };
       
       await saveSystemConfig('random_boss_settings', config_data);
@@ -1059,10 +1114,11 @@ const campaignPayload: any = {
 
       let sharedBossUrl = `${NO_IMAGE_URL}&text=Boss`;
       let sharedDropUrl = `${NO_IMAGE_URL}&text=Drop`;
+      const hasPreviewData = !!massivePreviewBossData && !!massivePreviewDropData;
       if (isMassiveSpawn) {
         if (randomBossImageMode === 'ai') {
-          const sampleName = prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)];
-          const sampleElement = elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇';
+          const sampleName = hasPreviewData ? massivePreviewBossData!.name : (randomBossName.trim() || (prefix[Math.floor(Math.random() * prefix.length)] + suffix[Math.floor(Math.random() * suffix.length)]));
+          const sampleElement = hasPreviewData ? massivePreviewBossData!.element : (elementsList.length > 0 ? elementsList[Math.floor(Math.random() * elementsList.length)] : '闇');
           const generatedBossPrompt = randomBossAiPrompt || `A fantasy trading card game illustration of a giant monster creature, name is ${sampleName}, hyper detailed, masterwork elemental of ${sampleElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
           sharedBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
         } else if (randomBossUploadUrl) {
@@ -1088,16 +1144,36 @@ const campaignPayload: any = {
           let finalBossUrl = sharedBossUrl;
           let finalDropUrl = sharedDropUrl;
 
+          let bossName = randomBossName.trim() || randomName;
+          let bossElement = randomElement;
+          let bossHp = Math.floor(Math.random() * 2000) + 1000;
+          let bossAtk = Math.floor(Math.random() * 150) + 50;
+          let bossDef = 50;
+          let dropName = randomDropName.trim() || `【戦果】${bossName}の結晶核`;
+          let dropRarity = randomRarity;
+          let dropAttr = bossElement;
+
+          if (hasPreviewData) {
+            bossName = massivePreviewBossData!.name;
+            bossElement = massivePreviewBossData!.element;
+            bossHp = parseInt(massivePreviewBossData!.hp) || bossHp;
+            bossAtk = parseInt(massivePreviewBossData!.atk) || bossAtk;
+            bossDef = parseInt(massivePreviewBossData!.def) || bossDef;
+            dropName = massivePreviewDropData!.name;
+            dropRarity = massivePreviewDropData!.rarity;
+            dropAttr = massivePreviewDropData!.attr;
+          }
+
           if (!isMassiveSpawn) {
             if (randomBossImageMode === 'ai') {
-              const generatedBossPrompt = randomBossAiPrompt || `A fantasy trading card game illustration of a giant monster creature, name is ${randomName}, hyper detailed, masterwork elemental of ${randomElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
+              const generatedBossPrompt = randomBossAiPrompt || `A fantasy trading card game illustration of a giant monster creature, name is ${bossName}, hyper detailed, masterwork elemental of ${bossElement}, cyberpunk tech mixed with dark magic grid style, card art template asset`;
               finalBossUrl = await safeGenerateAiImage(generatedBossPrompt, 'Massive+Boss');
             } else if (randomBossUploadUrl) {
               finalBossUrl = randomBossUploadUrl;
             }
 
             if (randomDropImageMode === 'ai') {
-              const generatedDropPrompt = randomDropAiPrompt || `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${randomRarity} trading card high rarity frame game asset`;
+              const generatedDropPrompt = randomDropAiPrompt || `A shiny cosmic artifact crystal weapon glowing inside a container, rewards token, ${dropRarity} trading card high rarity frame game asset`;
               finalDropUrl = await safeGenerateAiImage(generatedDropPrompt, 'Massive+Drop');
             } else if (randomDropUploadUrl) {
               finalDropUrl = randomDropUploadUrl;
@@ -1105,8 +1181,9 @@ const campaignPayload: any = {
           }
 
 const campaignPayload: any = {
-            title: `【突発出現】${randomName}`, 
+            title: `【突発出現】${bossName}`,
             sponsor_name: isMassiveSpawn ? 'フェス運営' : 'システム自動生成',
+            description: `${bossName} が自動出現したランダムボスです。`,
             target_lat: finalLat,
             target_lng: finalLng,
             radius_meters: 1500,
@@ -1120,15 +1197,15 @@ const campaignPayload: any = {
 
           // 🌟 【修正箇所】エラーチェックを追加
           const { error: dropError } = await supabase.from('fixed_cards').insert([{
-            card_name: `【戦果】${randomName}の結晶核`, trigger_type: 'boss_drop', image_url: finalDropUrl, sponsor_id: campData.id,
-            stats: { element: randomElement, rarity: randomRarity, hp: 100, atk: 60, def: 40, spd: 80 }
+            card_name: dropName, trigger_type: 'boss_drop', image_url: finalDropUrl, sponsor_id: campData.id,
+            stats: { element: dropAttr, rarity: dropRarity, hp: 100, atk: 60, def: 40, spd: 80 }
           }]);
           if (dropError) throw new Error(`ドロップカード生成失敗: ${dropError.message}`);
 
           // 🌟 【修正箇所】bossesテーブルにlat, lng, radius_metersを含め、エラーをthrowさせる
           const { error: bossError } = await supabase.from('bosses').insert([{
-            name: randomName, hp: Math.floor(Math.random() * 2000) + 1000, atk: Math.floor(Math.random() * 150) + 50, def: 50,
-            element: randomElement, image_url: finalBossUrl, trigger_campaign_id: campData.id,
+            name: bossName, hp: bossHp, atk: bossAtk, def: bossDef,
+            element: bossElement, image_url: finalBossUrl, trigger_campaign_id: campData.id,
             lat: finalLat,
             lng: finalLng,
             radius_meters: 1500
@@ -1139,6 +1216,8 @@ const campaignPayload: any = {
 
       await Promise.all(promises);
       Alert.alert('自動生成成功', `${count}体的ボスをマップへ配置しました！`);
+      setMassivePreviewBossData(null);
+      setMassivePreviewDropData(null);
       fetchBosses();
     } catch (err: any) { Alert.alert('ボス配置エラー', err.message); } finally { setLoading(false); }
   };
@@ -2121,6 +2200,10 @@ const campaignPayload: any = {
 
                 <View style={{marginTop: 16, padding: 14, borderRadius: 16, backgroundColor: '#F8FAFC', borderWidth: 1, borderColor: '#CBD5E1'}}>
                   <Text style={[styles.cardTitle, {fontSize: 16, marginBottom: 10}]}>画像デザインの選択</Text>
+                  <Text style={styles.label}>ボス名 (任意: 未入力時はランダム)</Text>
+                  <TextInput style={styles.input} value={randomBossName} onChangeText={setRandomBossName} placeholder="例: 奈落のフェンリル" />
+                  <Text style={styles.label}>ドロップカード名 (任意: 未入力時は自動)</Text>
+                  <TextInput style={styles.input} value={randomDropName} onChangeText={setRandomDropName} placeholder="例: 【戦果】奈落の牙" />
                   <Text style={styles.label}>ボス画像</Text>
                   <View style={styles.radioGroup}>
                     <TouchableOpacity style={[styles.radioBtn, randomBossImageMode === 'upload' && styles.activeRadio]} onPress={() => setRandomBossImageMode('upload')}>
