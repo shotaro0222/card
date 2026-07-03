@@ -218,6 +218,18 @@ export default function AdminDashboard() {
   const [ruleRequiredCardId, setRuleRequiredCardId] = useState('');
   const [rulePowerMultiplier, setRulePowerMultiplier] = useState('1.0');
 
+  // 🌟 修正ポイント: system_config に対する安全な保存処理 (403対策)
+  const saveSystemConfig = async (configId: string, configData: any) => {
+    const { data: existing } = await supabase.from('system_config').select('id').eq('id', configId).maybeSingle();
+    if (existing) {
+      const { error } = await supabase.from('system_config').update({ config_data: configData }).eq('id', configId);
+      if (error) throw error;
+    } else {
+      const { error } = await supabase.from('system_config').insert([{ id: configId, config_data: configData }]);
+      if (error) throw error;
+    }
+  };
+
   useFocusEffect(
     useCallback(() => {
       fetchAnalytics();
@@ -961,8 +973,9 @@ export default function AdminDashboard() {
         spawn_type: spawnType, municipality: targetMunicipality,
         base_lat: parseFloat(baseLat) || 35.6983, base_lng: parseFloat(baseLng) || 139.4130
       };
-      const { error } = await supabase.from('system_config').upsert({ id: 'random_boss_settings', config_data });
-      if (error) throw error;
+      
+      await saveSystemConfig('random_boss_settings', config_data);
+      
       Alert.alert('成功', 'ランダムボスの出現パラメータを更新しました。');
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
   };
@@ -1126,13 +1139,13 @@ export default function AdminDashboard() {
       if (type === 'element') {
         if (!newElement) return;
         const updated = [...elementsList, newElement];
-        await supabase.from('system_config').upsert({ id: 'elements', config_data: { list: updated } });
+        await saveSystemConfig('elements', { list: updated });
         setElementsList(updated); setNewElement('');
         Alert.alert('追加完了', `「${newElement}」を属性に追加しました！`);
       } else {
         if (!newRarity) return;
         const updated = [...raritiesList, newRarity];
-        await supabase.from('system_config').upsert({ id: 'rarities', config_data: { list: updated } });
+        await saveSystemConfig('rarities', { list: updated });
         setRaritiesList(updated); setNewRarity('');
         Alert.alert('追加完了', `「${newRarity}」をレアリティに追加しました！`);
       }
@@ -1162,7 +1175,7 @@ export default function AdminDashboard() {
 
       if (!elementsList.includes(newElement.trim())) {
         const updated = [...elementsList, newElement.trim()];
-        await supabase.from('system_config').upsert({ id: 'elements', config_data: { list: updated } });
+        await saveSystemConfig('elements', { list: updated });
         setElementsList(updated);
       }
 
@@ -1229,8 +1242,7 @@ export default function AdminDashboard() {
           rewardType: arRewardType,
           bossSettings
         };
-        const { error } = await supabase.from('system_config').upsert({ id: 'webar_dynamic_settings', config_data });
-        if (error) throw error;
+        await saveSystemConfig('webar_dynamic_settings', config_data);
         Alert.alert('同期成功', 'グローバル一括WebARパラメータ(報酬タイプ・ステータス含む)を更新しました。');
       }
     } catch (e: any) { Alert.alert('エラー', e.message); } finally { setLoading(false); }
