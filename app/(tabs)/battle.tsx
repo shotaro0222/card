@@ -5,6 +5,7 @@ import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
 import { ShieldAlert, Trophy, Activity, Swords, Map as MapIcon, Flag, Zap, X, MapPin, Clock, Flame, Shield, Heart, Zap as FastZap, Scan, Camera as CameraIcon } from 'lucide-react-native';
 import { CameraView, useCameraPermissions } from 'expo-camera';
+import { ArenaPanel } from './arena';
 
 // =====================================================================
 // 🌟 Web環境でのビルドクラッシュを防ぎつつ、Web用マップを表示する実装
@@ -236,6 +237,7 @@ export default function BattleScreen() {
   const [isCampaignModalVisible, setCampaignModalVisible] = useState(false);
   const [selectedCampaign, setSelectedCampaign] = useState<any>(null);
   const [isScannerVisible, setScannerVisible] = useState(false);
+  const [isArenaModalVisible, setArenaModalVisible] = useState(false);
   const [cameraPermission, requestCameraPermission] = useCameraPermissions();
 
   useEffect(() => {
@@ -1101,9 +1103,9 @@ export default function BattleScreen() {
         <View style={styles.section}>
           <Text style={styles.sectionTitle}>⚔️ 全国オンライン対戦</Text>
           <View style={styles.pvpPanel}>
-            <Text style={styles.pvpInfoText}>マッチング後は相手デッキの内訳を伏せ、ユーザー名・総戦力・属性値のみを扱う遠隔戦です。開始時点で戦闘は最後まで進行し、防衛レポートにも記録されます。</Text>
-            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: '#0F172A' }, isBattling && styles.disabledButton]} onPress={startPvpBattle} disabled={isBattling}>
-              <Text style={styles.btnText}>{isBattling ? '戦闘計算中...' : '対戦相手を自動検索'}</Text>
+            <Text style={styles.pvpInfoText}>全国オンライン対戦はこの冒険タブ内のロビーに統合しました。対戦相手の自動検索と防衛ログ確認をまとめて扱えます。</Text>
+            <TouchableOpacity style={[styles.primaryButton, { backgroundColor: '#0F172A' }]} onPress={() => setArenaModalVisible(true)}>
+              <Text style={styles.btnText}>対戦ロビーを開く</Text>
             </TouchableOpacity>
           </View>
         </View>
@@ -1264,6 +1266,20 @@ export default function BattleScreen() {
             </View>
             <Text style={styles.resultMessage}>{asyncResultData?.isWin ? '圧倒的なデッキ戦力により、ボスを討伐しました！\n討伐報酬は「報酬」ボックスに送られました。' : 'デッキの戦力が及びませんでした...'}</Text>
             <TouchableOpacity style={[styles.confirmBtn, { width: '100%', marginTop: 20, backgroundColor: asyncResultData?.isWin ? '#10B981' : '#64748B' }]} onPress={() => setAsyncResultModalVisible(false)}><Text style={styles.confirmBtnText}>閉じる</Text></TouchableOpacity>
+          </View>
+        </View>
+      </Modal>
+
+      <Modal visible={isArenaModalVisible} animationType="slide" transparent>
+        <View style={styles.modalOverlay}>
+          <View style={[styles.modalContent, { height: '88%', padding: 0, overflow: 'hidden' }] }>
+            <View style={styles.modalHeaderRow}>
+              <Text style={[styles.modalHeader, { paddingLeft: 24, paddingTop: 24 }]}>全国オンライン対戦ロビー</Text>
+              <TouchableOpacity onPress={() => setArenaModalVisible(false)} style={{ paddingRight: 24, paddingTop: 24 }}>
+                <X color="#64748B" size={24}/>
+              </TouchableOpacity>
+            </View>
+            <ArenaPanel embedded={true} />
           </View>
         </View>
       </Modal>

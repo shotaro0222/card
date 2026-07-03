@@ -1,5 +1,5 @@
 import { Tabs } from 'expo-router';
-import { Camera, Layers, MapPin, Bell, ShoppingBag, MessageCircle, Swords } from 'lucide-react-native';
+import { Camera, Layers, MapPin, Bell, ShoppingBag, MessageCircle } from 'lucide-react-native';
 
 export default function TabLayout() {
   return (
@@ -29,7 +29,7 @@ export default function TabLayout() {
       <Tabs.Screen name="index" options={{ title: 'カード', tabBarIcon: ({ color }) => <Camera color={color} size={24} /> }} />
       <Tabs.Screen name="deck" options={{ title: '図鑑', tabBarIcon: ({ color }) => <Layers color={color} size={24} /> }} />
       <Tabs.Screen name="battle" options={{ title: '冒険', tabBarIcon: ({ color }) => <MapPin color={color} size={24} /> }} />
-      <Tabs.Screen name="arena" options={{ title: '闘技場', tabBarIcon: ({ color }) => <Swords color={color} size={24} /> }} />
+      <Tabs.Screen name="arena" options={{ href: null }} />
       <Tabs.Screen name="events" options={{ title: 'お知らせ', tabBarIcon: ({ color }) => <Bell color={color} size={24} /> }} />
       <Tabs.Screen name="shop" options={{ title: 'ストア', tabBarIcon: ({ color }) => <ShoppingBag color={color} size={24} /> }} />
       <Tabs.Screen name="chat" options={{ title: '交換', tabBarIcon: ({ color }) => <MessageCircle color={color} size={24} /> }} />

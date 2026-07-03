@@ -50,7 +50,7 @@ const summarizeDeck = (cards: any[], playerName: string) => {
   };
 };
 
-export default function ArenaScreen() {
+export function ArenaPanel({ embedded = false }: { embedded?: boolean }) {
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState('opponents'); // opponents, defense_logs
   const [userId, setUserId] = useState<string | null>(null);
@@ -237,14 +237,16 @@ export default function ArenaScreen() {
     setBattleResultVisible(true);
   };
 
-  return (
-    <SafeAreaView style={styles.container}>
-      <View style={styles.header}>
-        <Text style={styles.headerTitle}>GLOBAL ARENA</Text>
-        <Text style={styles.headerSub}>他プレイヤーとの遠隔非同期バトル</Text>
-      </View>
+  const content = (
+    <>
+      {!embedded && (
+        <View style={styles.header}>
+          <Text style={styles.headerTitle}>GLOBAL ARENA</Text>
+          <Text style={styles.headerSub}>他プレイヤーとの遠隔非同期バトル</Text>
+        </View>
+      )}
 
-      <View style={styles.tabContainer}>
+      <View style={[styles.tabContainer, embedded && styles.embeddedTabContainer]}>
         <TouchableOpacity style={[styles.tab, activeTab === 'opponents' && styles.activeTab]} onPress={() => setActiveTab('opponents')}>
           <Text style={[styles.tabText, activeTab === 'opponents' && styles.activeTabText]}>ターゲット検索</Text>
         </TouchableOpacity>
@@ -313,7 +315,6 @@ export default function ArenaScreen() {
         </View>
       )}
 
-      {/* バトル結果・ログ表示モーダル */}
       <Modal visible={battleResultVisible} animationType="fade" transparent={true}>
         <View style={styles.modalOverlay}>
           <View style={styles.modalContent}>
@@ -335,17 +336,33 @@ export default function ArenaScreen() {
           </View>
         </View>
       </Modal>
+    </>
+  );
+
+  if (embedded) {
+    return <View style={styles.embeddedContainer}>{content}</View>;
+  }
+
+  return (
+    <SafeAreaView style={styles.container}>
+      {content}
     </SafeAreaView>
   );
 }
 
+export default function ArenaScreen() {
+  return <ArenaPanel />;
+}
+
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#0F172A' },
+  embeddedContainer: { backgroundColor: '#0F172A', borderRadius: 20, overflow: 'hidden', minHeight: 520, borderWidth: 1, borderColor: '#334155' },
   header: { padding: 16, alignItems: 'center', backgroundColor: '#1E293B', borderBottomWidth: 1, borderBottomColor: '#334155' },
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#F8FAFC', letterSpacing: 1 },
   headerSub: { fontSize: 11, color: '#94A3B8', marginTop: 2, fontWeight: '700' },
   
   tabContainer: { flexDirection: 'row', backgroundColor: '#1E293B', borderBottomWidth: 1, borderBottomColor: '#334155' },
+  embeddedTabContainer: { borderTopWidth: 0 },
   tab: { flex: 1, paddingVertical: 14, alignItems: 'center' },
   activeTab: { borderBottomWidth: 3, borderBottomColor: '#E11D48' },
   tabText: { color: '#64748B', fontWeight: '700', fontSize: 12 },
