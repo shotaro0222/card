@@ -655,6 +655,41 @@ export default function AdminDashboard() {
   // 🌟【修正点】
   // invoke が内部で CORS エラーを引き起こすケースを回避するため、
   // Supabase Edge Function を直接 invoke します。
+  const parseSuperTaskErrorMessage = async (err: any): Promise<string> => {
+    const fallbackMessage = err?.message || 'AI画像生成に失敗しました';
+    const context = err?.context;
+
+    if (!context || typeof context !== 'object' || typeof context.json !== 'function') {
+      return fallbackMessage;
+    }
+
+    try {
+      const payload = await context.json();
+      const stage = payload?.stage ? `stage=${payload.stage}` : '';
+      let message = payload?.error || payload?.message || fallbackMessage;
+
+      if (typeof payload?.detail === 'string') {
+        try {
+          const detailObj = JSON.parse(payload.detail);
+          const attempts = Array.isArray(detailObj?.attempts) ? detailObj.attempts : [];
+          const hasCreditError = attempts.some((a: any) => {
+            const text = String(a?.detail || '');
+            return a?.status === 429 || text.includes('prepayment credits are depleted') || text.includes('RESOURCE_EXHAUSTED');
+          });
+          if (hasCreditError) {
+            message = 'Gemini API のクレジット不足のため画像生成できません。AI Studio で課金残高を補充してください。';
+          }
+        } catch {
+          // Ignore nested detail parse errors and keep base message.
+        }
+      }
+
+      return [message, stage].filter(Boolean).join(' / ');
+    } catch {
+      return fallbackMessage;
+    }
+  };
+
   const safeGenerateAiImage = async (prompt: string, fallbackText: string, strict: boolean = false): Promise<string> => {
     try {
       const response = await supabase.functions.invoke('super-task', { body: { prompt } });
@@ -674,9 +709,10 @@ export default function AdminDashboard() {
       }
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}`;
     } catch (e: any) {
-      console.log('AI生成エラー(super-task応答):', e);
+      const parsedMessage = await parseSuperTaskErrorMessage(e);
+      console.log('AI生成エラー(super-task応答):', parsedMessage, e);
       if (strict) {
-        throw new Error(e?.message || 'AI画像生成に失敗しました');
+        throw new Error(parsedMessage);
       }
       return `${NO_IMAGE_URL}&text=${encodeURIComponent(fallbackText)}+Error`;
     }
