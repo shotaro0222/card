@@ -1,18 +1,53 @@
 {
-  "plugins": [
-    "expo-router"
-  ],
-  "extra": {
-    "router": {},
-    "eas": {
-      "projectId": "14714472-fc3b-4d1d-a504-9fe2d8d82485"
-    }
-  },
   "expo": {
+    "name": "card",
+    "slug": "card",
+    "version": "1.0.0",
+    "description": "位置情報、AR、デッキ編成、対戦、交換をまとめたカードバトルアプリです。",
+    "orientation": "portrait",
+    "icon": "./app/assets/images/logo.png",
+    "scheme": "card",
+    "userInterfaceStyle": "automatic",
+    "ios": {
+      "bundleIdentifier": "com.shotake222.card",
+      "infoPlist": {
+        "NSCameraUsageDescription": "ARカード撮影や画像の取り込みにカメラを使用します。",
+        "NSPhotoLibraryUsageDescription": "カード画像やファイルを選択するために写真ライブラリへアクセスします。",
+        "NSPhotoLibraryAddUsageDescription": "生成した画像やカードを保存するために写真ライブラリへ追加します。",
+        "NSLocationWhenInUseUsageDescription": "周辺のイベントやボス出現を表示するために位置情報を使用します。"
+      }
+    },
     "android": {
-      "package": "com.shotake222.card"
+      "package": "com.shotake222.card",
+      "adaptiveIcon": {
+        "backgroundColor": "#FFFFFF",
+        "foregroundImage": "./app/assets/images/logo.png"
+      },
+      "predictiveBackGestureEnabled": false
+    },
+    "web": {
+      "output": "static"
+    },
+    "plugins": [
+      "expo-router",
+      "expo-sharing",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#FFFFFF",
+          "image": "./app/assets/images/logo.png",
+          "imageWidth": 200
+        }
+      ],
+      "expo-status-bar",
+      "expo-font"
+    ],
+    "experiments": {
+      "typedRoutes": true,
+      "reactCompiler": true
     },
     "extra": {
+      "router": {},
       "eas": {
         "projectId": "14714472-fc3b-4d1d-a504-9fe2d8d82485"
       }

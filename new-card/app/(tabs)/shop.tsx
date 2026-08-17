@@ -205,6 +205,12 @@ export default function ShopScreen() {
   return (
     <ScrollView style={styles.container} contentContainerStyle={{ paddingBottom: 50 }}>
       <Text style={styles.header}>SHOP</Text>
+      <View style={styles.storeIntro}>
+        <Text style={styles.storeKicker}>SUPPLY TERMINAL / 24H</Text>
+        <Text style={styles.storeTitle}>次の一枚を、補給する。</Text>
+        <Text style={styles.storeSub}>デッキの可能性を広げる限定アイテムと錬成リソース。</Text>
+        <View style={styles.storeStatus}><Text style={styles.storeStatusLabel}>所持チケット</Text><Text style={styles.storeStatusValue}>{tickets}</Text><Text style={styles.storeStatusLabel}>プレミアム</Text><Text style={[styles.storeStatusValue, { color: isPremium ? '#34D399' : '#94A3B8' }]}>{isPremium ? 'ACTIVE' : 'LOCKED'}</Text></View>
+      </View>
 
       {isAdmin && (
         <View style={styles.adminBanner}>
@@ -264,6 +270,13 @@ export default function ShopScreen() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: '#020617', padding: 20 },
   header: { fontSize: 24, fontWeight: '900', color: '#f59e0b', marginBottom: 20, marginTop: 40, letterSpacing: 2 },
+  storeIntro: { backgroundColor: '#111C31', borderWidth: 1, borderColor: '#334155', borderRadius: 18, padding: 18, marginBottom: 20 },
+  storeKicker: { color: '#C084FC', fontSize: 9, fontWeight: '900', letterSpacing: 1.5 },
+  storeTitle: { color: '#F8FAFC', fontSize: 22, fontWeight: '900', marginTop: 7 },
+  storeSub: { color: '#94A3B8', fontSize: 12, fontWeight: '700', lineHeight: 18, marginTop: 5 },
+  storeStatus: { flexDirection: 'row', alignItems: 'center', marginTop: 15, paddingTop: 12, borderTopWidth: 1, borderTopColor: '#263449' },
+  storeStatusLabel: { color: '#64748B', fontSize: 10, fontWeight: '800', marginRight: 7 },
+  storeStatusValue: { color: '#FBBF24', fontSize: 14, fontWeight: '900', marginRight: 18 },
   adminBanner: { backgroundColor: '#FEF08A', padding: 12, borderRadius: 8, marginBottom: 20, alignItems: 'center', borderWidth: 1, borderColor: '#EAB308' },
   adminBannerText: { color: '#854D0E', fontWeight: 'bold', fontSize: 14 },
   productCard: { backgroundColor: '#0f172a', padding: 20, borderRadius: 15, borderWidth: 1, borderColor: '#334155', marginBottom: 20 },

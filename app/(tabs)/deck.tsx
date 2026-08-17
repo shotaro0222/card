@@ -177,6 +177,14 @@ export default function DeckScreen() {
         <Text style={styles.headerSub}>バトルデッキ編成</Text>
       </View>
 
+      <View style={styles.deckSignalRail}>
+        <View style={styles.deckSignal}><Text style={styles.deckSignalValue}>{deckCards.length}/{MAX_DECK_SIZE}</Text><Text style={styles.deckSignalLabel}>出撃部隊</Text></View>
+        <View style={styles.deckSignalDivider} />
+        <View style={styles.deckSignal}><Text style={styles.deckSignalValue}>{cards.length}</Text><Text style={styles.deckSignalLabel}>保有カード</Text></View>
+        <View style={styles.deckSignalDivider} />
+        <View style={styles.deckSignal}><Text style={styles.deckSignalValue}>{deckCards.reduce((sum, card) => sum + (card.status_total || 0), 0)}</Text><Text style={styles.deckSignalLabel}>部隊戦力</Text></View>
+      </View>
+
       <View style={styles.deckSlotsWrapper}>
         <View style={styles.deckSlotsHeader}>
           <Text style={styles.deckSlotsTitle}>現在の部隊</Text>
@@ -251,6 +259,11 @@ const styles = StyleSheet.create({
   header: { padding: 16, alignItems: 'center', backgroundColor: '#FFFFFF', borderBottomWidth: 1, borderBottomColor: '#F1F5F9' },
   headerTitle: { fontSize: 18, fontWeight: '900', color: '#0F172A', letterSpacing: 1 },
   headerSub: { fontSize: 12, color: '#64748B', marginTop: 4, fontWeight: '700' },
+  deckSignalRail: { flexDirection: 'row', alignItems: 'center', margin: 12, paddingVertical: 13, borderRadius: 16, backgroundColor: '#0F172A', borderWidth: 1, borderColor: '#1E40AF' },
+  deckSignal: { flex: 1, alignItems: 'center' },
+  deckSignalValue: { color: '#FBBF24', fontSize: 17, fontWeight: '900' },
+  deckSignalLabel: { color: '#94A3B8', fontSize: 10, fontWeight: '800', marginTop: 3 },
+  deckSignalDivider: { width: 1, height: 28, backgroundColor: '#334155' },
   
   deckSlotsWrapper: { backgroundColor: '#FFFFFF', padding: 16, borderBottomWidth: 1, borderBottomColor: '#E2E8F0', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.05, shadowRadius: 5, elevation: 3, zIndex: 10 },
   deckSlotsHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center', marginBottom: 12 },

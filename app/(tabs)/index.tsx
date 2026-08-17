@@ -399,6 +399,21 @@ export default function ForgeScreen() {
       <View style={styles.bgDecorCircle2} />
 
       <ScrollView contentContainerStyle={styles.content} style={styles.scrollContainer} keyboardShouldPersistTaps="handled">
+        <View style={styles.heroHeader}>
+          <View style={styles.heroKickerRow}>
+            <View style={styles.liveIndicator} />
+            <Text style={styles.heroKicker}>FIELD FORGE / ONLINE</Text>
+          </View>
+          <Text style={styles.heroTitle}>現実を、カードへ。</Text>
+          <Text style={styles.heroSubtitle}>身の回りの一瞬を、戦略資産として記録する。</Text>
+        </View>
+        <View style={styles.signalRail}>
+          <View style={styles.signalItem}><Text style={styles.signalValue}>{activeCampaigns.length}</Text><Text style={styles.signalLabel}>LIVE EVENT</Text></View>
+          <View style={styles.signalDivider} />
+          <View style={styles.signalItem}><Text style={styles.signalValue}>{rewards.length}</Text><Text style={styles.signalLabel}>REWARDS</Text></View>
+          <View style={styles.signalDivider} />
+          <View style={styles.signalItem}><Text style={styles.signalValue}>{isAdmin || isInfinite ? '∞' : Math.max(0, MAX_FORGE_LIMIT - forgeCount)}</Text><Text style={styles.signalLabel}>FORGES LEFT</Text></View>
+        </View>
         <View style={[styles.baseBadge, isAdmin ? styles.adminBadge : isInfinite ? styles.devBadge : styles.limitBadge]}>
           <Text style={[styles.baseBadgeText, isAdmin ? styles.adminText : isInfinite ? styles.devText : styles.limitText]} numberOfLines={1}>
             {renderBadgeText()}
@@ -567,6 +582,17 @@ const styles = StyleSheet.create({
 
   content: { justifyContent: 'flex-start', alignItems: 'center', paddingTop: 40, paddingBottom: 60, zIndex: 10 },
   scrollContainer: { flex: 1 },
+  heroHeader: { width: '90%', maxWidth: 450, marginBottom: 18 },
+  heroKickerRow: { flexDirection: 'row', alignItems: 'center', marginBottom: 10 },
+  liveIndicator: { width: 7, height: 7, borderRadius: 4, backgroundColor: '#34D399', marginRight: 8 },
+  heroKicker: { color: '#60A5FA', fontSize: 10, fontWeight: '900', letterSpacing: 1.8 },
+  heroTitle: { color: '#F8FAFC', fontSize: 30, fontWeight: '900', letterSpacing: 0.5 },
+  heroSubtitle: { color: '#94A3B8', fontSize: 12, fontWeight: '700', marginTop: 6 },
+  signalRail: { width: '90%', maxWidth: 450, flexDirection: 'row', alignItems: 'center', justifyContent: 'space-around', backgroundColor: 'rgba(30, 41, 59, 0.75)', borderWidth: 1, borderColor: '#334155', borderRadius: 16, paddingVertical: 13, marginBottom: 18 },
+  signalItem: { flex: 1, alignItems: 'center' },
+  signalValue: { color: '#FBBF24', fontSize: 20, fontWeight: '900' },
+  signalLabel: { color: '#64748B', fontSize: 8, fontWeight: '900', letterSpacing: 0.8, marginTop: 3 },
+  signalDivider: { width: 1, height: 27, backgroundColor: '#334155' },
 
   loadingArea: { alignItems: 'center', backgroundColor: 'rgba(30, 41, 59, 0.8)', padding: 40, borderRadius: 30, borderWidth: 1, borderColor: '#334155' },
   loadingCircle: { backgroundColor: '#3B82F6', padding: 20, borderRadius: 50, marginBottom: 20, shadowColor: '#3B82F6', shadowOffset: { width: 0, height: 0 }, shadowOpacity: 0.8, shadowRadius: 15 },

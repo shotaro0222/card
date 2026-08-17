@@ -1,4 +1,4 @@
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, FlatList, SafeAreaView, ActivityIndicator, Alert, Modal, ScrollView } from 'react-native';
 import { supabase } from '../../lib/supabase';
 import { useFocusEffect } from 'expo-router';
@@ -59,6 +59,34 @@ export function ArenaPanel({ embedded = false }: { embedded?: boolean }) {
   const [battleResultVisible, setBattleResultVisible] = useState(false);
   const [currentBattleLog, setCurrentBattleLog] = useState<string[]>([]);
   const [battleResultTitle, setBattleResultTitle] = useState('');
+  const [liveBattle, setLiveBattle] = useState<any>(null);
+
+  useEffect(() => {
+    if (!userId) return;
+
+    const channel = supabase
+      .channel(`arena-defense-${userId}`)
+      .on('postgres_changes', {
+        event: 'INSERT',
+        schema: 'public',
+        table: 'arena_battles',
+        filter: `defender_id=eq.${userId}`,
+      }, (payload: { new: Record<string, any> }) => {
+        const battle = payload.new as any;
+        const liveLog = {
+          ...battle,
+          is_read: false,
+          challenger: { player_name: '遠隔プレイヤー' },
+        };
+        setDefenseLogs(prev => [liveLog, ...prev.filter(item => item.id !== battle.id)]);
+        setLiveBattle(liveLog);
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [userId]);
 
   useFocusEffect(
     useCallback(() => {
@@ -240,6 +268,20 @@ export function ArenaPanel({ embedded = false }: { embedded?: boolean }) {
         </View>
       )}
 
+      {liveBattle && (
+        <TouchableOpacity style={styles.liveBattleBanner} onPress={() => {
+          setActiveTab('defense_logs');
+          setLiveBattle(null);
+        }}>
+          <View style={styles.liveDot} />
+          <View style={styles.liveBattleCopy}>
+            <Text style={styles.liveBattleTitle}>LIVE  防衛ラインに変化</Text>
+            <Text style={styles.liveBattleSub}>遠隔バトルの結果を受信しました。タップして実況ログを確認</Text>
+          </View>
+          <Text style={styles.liveBattleArrow}>›</Text>
+        </TouchableOpacity>
+      )}
+
       <View style={[styles.tabContainer, embedded && styles.embeddedTabContainer]}>
         <TouchableOpacity style={[styles.tab, activeTab === 'opponents' && styles.activeTab]} onPress={() => setActiveTab('opponents')}>
           <Text style={[styles.tabText, activeTab === 'opponents' && styles.activeTabText]}>ターゲット検索</Text>
@@ -365,6 +407,12 @@ const styles = StyleSheet.create({
   autoPanelTitle: { color: '#CBD5E1', fontSize: 12, lineHeight: 18, fontWeight: '700', marginBottom: 12 },
   autoSearchBtn: { backgroundColor: '#E11D48', borderRadius: 10, paddingVertical: 12, alignItems: 'center' },
   autoSearchBtnText: { color: '#FFF', fontWeight: '900', fontSize: 13 },
+  liveBattleBanner: { flexDirection: 'row', alignItems: 'center', backgroundColor: '#3B0A1E', paddingHorizontal: 16, paddingVertical: 12, borderBottomWidth: 1, borderBottomColor: '#9F1239' },
+  liveDot: { width: 9, height: 9, borderRadius: 5, backgroundColor: '#FB7185', marginRight: 10 },
+  liveBattleCopy: { flex: 1 },
+  liveBattleTitle: { color: '#FFF1F2', fontSize: 12, fontWeight: '900', letterSpacing: 0.5 },
+  liveBattleSub: { color: '#FDA4AF', fontSize: 10, fontWeight: '700', marginTop: 3 },
+  liveBattleArrow: { color: '#FDA4AF', fontSize: 26, fontWeight: '300', marginLeft: 8 },
   
   opponentCard: { flexDirection: 'row', backgroundColor: '#1E293B', padding: 12, borderRadius: 12, marginBottom: 12, borderWidth: 1, borderColor: '#334155', alignItems: 'center' },
   opInfo: { flex: 1, marginLeft: 12 },
