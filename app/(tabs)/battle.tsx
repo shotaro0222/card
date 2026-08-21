@@ -15,6 +15,7 @@ let Marker: any;
 let Circle: any;
 let Polygon: any;
 let PROVIDER_GOOGLE: any;
+let webProjectCoordinate: ((coordinate: { latitude: number; longitude: number }) => { left: number; top: number }) | null = null;
 
 if (Platform.OS !== 'web') {
   const Maps = require('react-native-maps');
@@ -28,6 +29,12 @@ if (Platform.OS !== 'web') {
     React.useImperativeHandle(ref, () => ({ animateToRegion: () => {} }));
     const lat = region?.latitude || 35.698;
     const lng = region?.longitude || 139.413;
+    const latitudeDelta = region?.latitudeDelta || 0.05;
+    const longitudeDelta = region?.longitudeDelta || 0.05;
+    webProjectCoordinate = ({ latitude, longitude }) => ({
+      left: ((longitude - (lng - longitudeDelta / 2)) / longitudeDelta) * 100,
+      top: (((lat + latitudeDelta / 2) - latitude) / latitudeDelta) * 100,
+    });
     return (
       <View style={{ flex: 1, backgroundColor: '#0F172A', position: 'relative', overflow: 'hidden' }}>
         {/* @ts-ignore - Web用標準iframe */}
@@ -35,7 +42,7 @@ if (Platform.OS !== 'web') {
           src={`https://www.openstreetmap.org/export/embed.html?bbox=${lng-0.01}%2C${lat-0.01}%2C${lng+0.01}%2C${lat+0.01}&layer=mapnik`}
           style={{ width: '100%', height: '100%', border: 'none', position: 'absolute', opacity: 0.6 }}
         />
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', zIndex: 10, flexDirection: 'row', flexWrap: 'wrap' }}>
+        <View style={{ ...StyleSheet.absoluteFillObject, zIndex: 10 }} pointerEvents="box-none">
           {children}
         </View>
       </View>
@@ -43,13 +50,44 @@ if (Platform.OS !== 'web') {
   });
   MapView.displayName = 'MapView';
 
-  Marker = ({ children, onPress }: any) => (
-    <TouchableOpacity onPress={onPress} style={{ margin: 10 }}>
-      {children}
-    </TouchableOpacity>
-  );
+  Marker = ({ children, coordinate, onPress }: any) => {
+    const point = webProjectCoordinate?.(coordinate) || { left: 50, top: 50 };
+    return (
+      <TouchableOpacity
+        onPress={onPress}
+        style={{ position: 'absolute', left: `${point.left}%`, top: `${point.top}%`, transform: [{ translateX: -20 }, { translateY: -20 }], zIndex: 20 } as any}
+      >
+        {children}
+      </TouchableOpacity>
+    );
+  };
   Circle = () => null;
-  Polygon = () => null;
+  Polygon = ({ coordinates, fillColor, strokeColor, strokeWidth, onPress }: any) => {
+    const points = (coordinates || []).map((coordinate: { latitude: number; longitude: number }) => webProjectCoordinate?.(coordinate) || { left: 50, top: 50 });
+    if (points.length < 3) return null;
+    const left = Math.max(0, Math.min(...points.map((point: { left: number }) => point.left)));
+    const top = Math.max(0, Math.min(...points.map((point: { top: number }) => point.top)));
+    const right = Math.min(100, Math.max(...points.map((point: { left: number }) => point.left)));
+    const bottom = Math.min(100, Math.max(...points.map((point: { top: number }) => point.top)));
+    return (
+      <TouchableOpacity
+        accessibilityRole="button"
+        accessibilityLabel="陣地を選択"
+        onPress={onPress}
+        style={{
+          position: 'absolute',
+          left: `${left}%`,
+          top: `${top}%`,
+          width: `${Math.max(1, right - left)}%`,
+          height: `${Math.max(1, bottom - top)}%`,
+          backgroundColor: fillColor || 'rgba(59, 130, 246, 0.2)',
+          borderColor: strokeColor || '#3B82F6',
+          borderWidth: strokeWidth || 2,
+          zIndex: 8,
+        } as any}
+      />
+    );
+  };
 }
 
 type ElementRelationMap = Record<string, { strong: string[], weak: string[] }>;
@@ -102,6 +140,9 @@ const TERRITORY_MAP_STYLE = [
   { "featureType": "road", "elementType": "geometry", "stylers": [{ "color": "#1b263b" }] },
   { "featureType": "water", "elementType": "geometry", "stylers": [{ "color": "#000000" }] }
 ];
+
+const MIN_TERRITORY_DISTANCE_METERS = 5;
+const MAX_TERRITORY_DISTANCE_METERS = 3000;
 
 const makeHsla = (color: string | null, alpha: number) => {
   if (!color) return null;
@@ -319,7 +360,11 @@ export default function BattleScreen() {
   const initialLocationFetch = async () => {
     try {
       const locationPerm = await Location.requestForegroundPermissionsAsync();
-      if (!locationPerm.granted) return;
+      if (!locationPerm.granted) {
+        setCurrentAddress('位置情報が許可されていません');
+        setCurrentPostalCode('');
+        return;
+      }
       const location = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
       const { latitude, longitude } = location.coords;
       setCurrentLocation({ lat: latitude, lng: longitude });
@@ -335,6 +380,9 @@ export default function BattleScreen() {
           setCurrentAddress(addressString || '詳細不明なエリア');
           setCurrentPostalCode(postal);
         }
+      } else {
+        setCurrentAddress('ブラウザの現在地');
+        setCurrentPostalCode('WEB GPS');
       }
 
       await evaluateSpecialRules(addressString, postal);
@@ -494,8 +542,12 @@ export default function BattleScreen() {
   const openTerritoryModal = async () => {
     if (!startPoint || !currentLocation) return;
     const dist = getDistance(startPoint.lat, startPoint.lng, currentLocation.lat, currentLocation.lng);
-    if (dist < 5) {
-      Alert.alert('距離が近すぎます', '開始位置から最低5メートルは離れてください。');
+    if (dist < MIN_TERRITORY_DISTANCE_METERS) {
+      Alert.alert('距離が近すぎます', `開始位置から最低${MIN_TERRITORY_DISTANCE_METERS}メートルは離れてください。`);
+      return;
+    }
+    if (dist > MAX_TERRITORY_DISTANCE_METERS) {
+      Alert.alert('範囲が広すぎます', `陣地の距離は最大${MAX_TERRITORY_DISTANCE_METERS / 1000}kmです。起点に近い場所へ戻ってください。`);
       return;
     }
     
@@ -527,6 +579,10 @@ export default function BattleScreen() {
     if (selectedSacrifices.length !== 2) return;
     const card1 = myHighRareCards.find(c => c.id === selectedSacrifices[0]);
     const card2 = myHighRareCards.find(c => c.id === selectedSacrifices[1]);
+    if (!card1 || !card2 || !startPoint || !currentLocation) {
+      Alert.alert('展開できません', '現在地または選択カードの情報を確認できません。もう一度お試しください。');
+      return;
+    }
     const totalDefense = card1.status_total + card2.status_total;
 
     Alert.alert(
@@ -537,17 +593,23 @@ export default function BattleScreen() {
         { text: "展開する", style: "destructive", onPress: async () => {
             setLoadingMap(true);
             try {
-              await supabase.from('territories').insert([{
+              const { data: territoryData, error: territoryError } = await supabase.from('territories').insert([{
                 player_id: myId, player_name: myProfile?.player_name || '匿名エージェント',
                 team_id: myTeam?.id || null, team_name: myTeam?.name || '', team_color: myTeam?.team_color || '',
                 start_lat: startPoint?.lat, start_lng: startPoint?.lng, end_lat: currentLocation?.lat, end_lng: currentLocation?.lng,
                 start_address: startPoint?.address, end_address: currentAddress, defense_power: totalDefense, 
                 card1_name: card1.card_name, card2_name: card2.card_name
-              }]);
-              await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
+              }]).select('id').single();
+              if (territoryError) throw territoryError;
+
+              const { error: cardError } = await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices).eq('player_id', myId);
+              if (cardError) {
+                await supabase.from('territories').delete().eq('id', territoryData?.id);
+                throw cardError;
+              }
               Alert.alert('展開完了', '強大な陣地をマップ上に展開しました！');
               setTerritoryModalVisible(false); cancelStartPoint(); initBattleData();
-            } catch (err) { Alert.alert('エラー', '通信に失敗しました。'); }
+            } catch (err: any) { Alert.alert('展開失敗', err?.message || '通信に失敗しました。カードは消費されていません。'); }
             setLoadingMap(false);
         }}
       ]
@@ -562,6 +624,10 @@ export default function BattleScreen() {
     if (selectedSacrifices.length !== 2) return;
     const c1 = myHighRareCards.find(c => c.id === selectedSacrifices[0]);
     const c2 = myHighRareCards.find(c => c.id === selectedSacrifices[1]);
+    if (!c1 || !c2 || !selectedTerritory) {
+      Alert.alert('強奪できません', '選択カードまたは陣地情報を確認できません。もう一度お試しください。');
+      return;
+    }
     const myAttackPower = c1.status_total + c2.status_total;
 
     if (myAttackPower <= selectedTerritory.defense_power) {
@@ -573,14 +639,16 @@ export default function BattleScreen() {
         { text: "強奪する", style: "destructive", onPress: async () => {
             setLoadingMap(true);
             try {
-              await supabase.from('territories').update({
+              const { error: territoryError } = await supabase.from('territories').update({
                 player_id: myId, player_name: myProfile?.player_name || '匿名', team_id: myTeam?.id || null, team_name: myTeam?.name || '', team_color: myTeam?.team_color || '',
                 defense_power: myAttackPower, card1_name: c1.card_name, card2_name: c2.card_name
               }).eq('id', selectedTerritory.id);
-              await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices);
+              if (territoryError) throw territoryError;
+              const { error: cardError } = await supabase.from('cards').update({ is_active: false }).in('id', selectedSacrifices).eq('player_id', myId);
+              if (cardError) throw cardError;
               Alert.alert('制圧完了', '敵の陣地を奪い取りました！');
               setAttackModalVisible(false); initBattleData();
-            } catch(e) {}
+            } catch (e: any) { Alert.alert('強奪失敗', e?.message || '通信に失敗しました。カードは消費されていません。'); }
             setLoadingMap(false);
         }}
     ]);
@@ -881,6 +949,11 @@ export default function BattleScreen() {
     return { color, icon, label, isSuper: total > 2000 };
   };
 
+  const territoryDistance = startPoint && currentLocation
+    ? Math.round(getDistance(startPoint.lat, startPoint.lng, currentLocation.lat, currentLocation.lng))
+    : 0;
+  const canStartTerritory = Boolean(currentLocation);
+
   return (
     <SafeAreaView style={styles.container}>
       <View style={styles.addressHeader}>
@@ -916,6 +989,11 @@ export default function BattleScreen() {
               onTouchEnd={() => setIsScrollEnabled(true)}
               onTouchCancel={() => setIsScrollEnabled(true)}
             >
+              <View style={styles.mapLegend} pointerEvents="none">
+                <View style={styles.mapLegendRow}><View style={[styles.legendDot, { backgroundColor: '#3B82F6' }]} /><Text style={styles.mapLegendText}>あなたの現在地</Text></View>
+                <View style={styles.mapLegendRow}><View style={[styles.legendDot, { backgroundColor: '#10B981' }]} /><Text style={styles.mapLegendText}>自陣</Text></View>
+                <View style={styles.mapLegendRow}><View style={[styles.legendDot, { backgroundColor: '#EF4444' }]} /><Text style={styles.mapLegendText}>敵陣</Text></View>
+              </View>
               <MapView 
                 ref={mapRef}
                 provider={Platform.OS === 'web' ? undefined : PROVIDER_GOOGLE} 
@@ -1080,19 +1158,25 @@ export default function BattleScreen() {
 
               <View style={styles.territoryControls}>
                 {!startPoint ? (
-                  <TouchableOpacity style={styles.terrBtn} onPress={markStartPoint}>
+                  <TouchableOpacity style={[styles.terrBtn, !canStartTerritory && styles.terrBtnDisabled]} onPress={markStartPoint} disabled={!canStartTerritory}>
                     <Flag color="#FFF" size={18} style={{marginRight: 6}}/>
-                    <Text style={styles.terrBtnText}>現在地を「起点」にする</Text>
+                    <Text style={styles.terrBtnText}>{canStartTerritory ? '現在地を「起点」にする' : '位置情報を取得中...'}</Text>
                   </TouchableOpacity>
                 ) : (
-                  <View style={{flexDirection: 'row', gap: 10}}>
+                  <View>
+                    <View style={styles.distanceReadout}>
+                      <Text style={styles.distanceReadoutTitle}>起点からの移動距離</Text>
+                      <Text style={styles.distanceReadoutValue}>{territoryDistance}m <Text style={styles.distanceReadoutLimit}>/ 最大 {MAX_TERRITORY_DISTANCE_METERS}m</Text></Text>
+                    </View>
+                    <View style={{flexDirection: 'row', gap: 10}}>
                     <TouchableOpacity style={[styles.terrBtn, {backgroundColor: '#10B981', flex: 1}]} onPress={openTerritoryModal}>
                       <Zap color="#FFF" size={18} style={{marginRight: 6}}/>
-                      <Text style={styles.terrBtnText}>陣地を展開(終点確定)</Text>
+                      <Text style={styles.terrBtnText}>終点を確定して展開</Text>
                     </TouchableOpacity>
                     <TouchableOpacity style={[styles.terrBtn, {backgroundColor: '#64748B', paddingHorizontal: 15}]} onPress={cancelStartPoint}>
                       <X color="#FFF" size={18}/>
                     </TouchableOpacity>
+                    </View>
                   </View>
                 )}
               </View>
@@ -1395,6 +1479,10 @@ const styles = StyleSheet.create({
   sectionTitle: { color: '#64748B', fontSize: 13, fontWeight: '700', marginBottom: 12 },
   mapPanel: { backgroundColor: '#FFFFFF', borderRadius: 24, borderWidth: 1, borderColor: '#E2E8F0', overflow: 'hidden', height: 450, position: 'relative' },
   map: { width: '100%', height: '100%' },
+  mapLegend: { position: 'absolute', top: 12, left: 12, zIndex: 12, backgroundColor: 'rgba(255, 255, 255, 0.94)', borderRadius: 12, paddingHorizontal: 10, paddingVertical: 8, borderWidth: 1, borderColor: '#E2E8F0' },
+  mapLegendRow: { flexDirection: 'row', alignItems: 'center', marginVertical: 2 },
+  legendDot: { width: 8, height: 8, borderRadius: 4, marginRight: 6 },
+  mapLegendText: { color: '#334155', fontSize: 10, fontWeight: '800' },
   
   currentLocationMarker: { width: 26, height: 26, borderRadius: 13, backgroundColor: 'rgba(59, 130, 246, 0.25)', justifyContent: 'center', alignItems: 'center' },
   currentLocationDot: { width: 12, height: 12, borderRadius: 6, backgroundColor: '#3B82F6', borderWidth: 2, borderColor: '#FFFFFF', shadowColor: '#000', shadowOffset: { width: 0, height: 2 }, shadowOpacity: 0.3, shadowRadius: 3 },
@@ -1429,7 +1517,12 @@ const styles = StyleSheet.create({
 
   territoryControls: { position: 'absolute', bottom: 15, left: 15, right: 15 },
   terrBtn: { flexDirection: 'row', backgroundColor: '#3B82F6', paddingVertical: 14, borderRadius: 16, justifyContent: 'center', alignItems: 'center' },
+  terrBtnDisabled: { backgroundColor: '#94A3B8' },
   terrBtnText: { color: '#FFF', fontWeight: '900', fontSize: 15 },
+  distanceReadout: { backgroundColor: 'rgba(15, 23, 42, 0.92)', borderRadius: 12, paddingHorizontal: 12, paddingVertical: 8, marginBottom: 8 },
+  distanceReadoutTitle: { color: '#CBD5E1', fontSize: 10, fontWeight: '800' },
+  distanceReadoutValue: { color: '#FFFFFF', fontSize: 18, fontWeight: '900', marginTop: 2 },
+  distanceReadoutLimit: { color: '#CBD5E1', fontSize: 11, fontWeight: '700' },
   pvpPanel: { backgroundColor: '#FFFFFF', padding: 20, borderRadius: 20, borderWidth: 1, borderColor: '#E2E8F0' },
   pvpInfoText: { color: '#64748B', fontSize: 12, lineHeight: 19, marginBottom: 14, fontWeight: '700' },
   primaryButton: { flexDirection: 'row', width: '100%', height: 50, borderRadius: 16, alignItems: 'center', justifyContent: 'center' },

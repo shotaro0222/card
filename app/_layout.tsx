@@ -3,7 +3,7 @@ import { Stack, useRouter } from 'expo-router';
 import * as Linking from 'expo-linking';
 import { Alert, Modal, View, Text, Image, Button, StyleSheet } from 'react-native';
 import { supabase } from '../lib/supabase';
-import { useARRewardHandler } from './hooks/useARRewardHandler';
+import { useARRewardHandler } from '../hooks/useARRewardHandler';
 
 export default function RootLayout() {
   const router = useRouter();
@@ -126,7 +126,7 @@ export default function RootLayout() {
         <Stack.Screen name="index" />
         <Stack.Screen name="login" />
         <Stack.Screen name="(tabs)" />
-        <Stack.Screen name="admin/dashboard" />
+        <Stack.Screen name="admin" />
       </Stack>
 
       {/* 🎁 獲得モーダル */}
